@@ -86,6 +86,10 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
 
   var scrollController = ScrollController();
 
+  /// 滚动进度（0~1，前 220px）。用 ValueNotifier 而不是 setState，
+  /// 让封面视差逐像素跟随滚动，又不会整页重建。
+  final ValueNotifier<double> _scrollProgress = ValueNotifier(0);
+
   bool isDownloaded = false;
 
   bool showFAB = false;
@@ -172,6 +176,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   @override
   void dispose() {
     scrollController.removeListener(onScroll);
+    _scrollProgress.dispose();
     super.dispose();
   }
 
@@ -187,6 +192,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     var offset =
         scrollController.position.pixels -
         scrollController.position.minScrollExtent;
+    _scrollProgress.value = (offset / 220).clamp(0.0, 1.0);
     var showFAB = offset > 0;
     if (showFAB != this.showFAB) {
       setState(() {
@@ -419,29 +425,47 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
             onLongPress: () => _saveCover(context),
             child: Hero(
               tag: "cover${widget.heroID}",
-              child: Container(
-                decoration: BoxDecoration(
-                  color: context.colorScheme.primaryContainer,
-                  borderRadius: BorderRadius.circular(8),
-                  boxShadow: [
-                    BoxShadow(
-                      color: context.colorScheme.outlineVariant,
-                      blurRadius: 1,
-                      offset: const Offset(0, 1),
+              // 视差：封面比页面滚得慢一点、同时轻微缩小，
+              // 滚动时像贴在背景上，而不是和文字一起硬邦邦地移走。
+              child: AnimatedBuilder(
+                animation: _scrollProgress,
+                builder: (context, child) {
+                  final t = _scrollProgress.value;
+                  return Transform.translate(
+                    offset: Offset(0, 18 * t),
+                    child: Transform.scale(
+                      alignment: Alignment.topCenter,
+                      scale: 1 - 0.05 * t,
+                      child: child,
                     ),
-                  ],
-                ),
-                height: 144,
-                width: 144 * 0.72,
-                clipBehavior: Clip.antiAlias,
-                child: AnimatedImage(
-                  image: CachedImageProvider(
-                    widget.cover ?? comic.cover,
-                    sourceKey: comic.sourceKey,
-                    cid: comic.id,
+                  );
+                },
+                child: Container(
+                  decoration: BoxDecoration(
+                    color: context.colorScheme.primaryContainer,
+                    borderRadius: BorderRadius.circular(8),
+                    boxShadow: [
+                      BoxShadow(
+                        color: context.colorScheme.outlineVariant,
+                        blurRadius: 1,
+                        offset: const Offset(0, 1),
+                      ),
+                    ],
                   ),
-                  width: double.infinity,
-                  height: double.infinity,
+                  height: 144,
+                  width: 144 * 0.72,
+                  clipBehavior: Clip.antiAlias,
+                  child: AnimatedImage(
+                    image: CachedImageProvider(
+                      widget.cover ?? comic.cover,
+                      sourceKey: comic.sourceKey,
+                      cid: comic.id,
+                    ),
+                    // 与列表封面同一解码尺寸，Hero 飞行时直接命中缓存
+                    cacheWidth: kCoverDecodeWidth,
+                    width: double.infinity,
+                    height: double.infinity,
+                  ),
                 ),
               ),
             ),
@@ -954,13 +978,80 @@ class _ActionButton extends StatelessWidget {
                   child: CircularProgressIndicator(strokeWidth: 1.8),
                 )
               else
-                (isActive ?? false) ? (activeIcon ?? icon) : icon,
+                _BouncyActiveIcon(
+                  active: isActive ?? false,
+                  child: (isActive ?? false) ? (activeIcon ?? icon) : icon,
+                ),
               const SizedBox(width: 8),
               Text(text),
             ],
           ).paddingHorizontal(16),
         ),
       ),
+    );
+  }
+}
+
+/// 收藏 / 点赞图标的状态反馈：从「未激活」变成「激活」时弹一下。
+///
+/// 图标本身是硬切（描边 → 实心），加上这一下缩放和轻触感，
+/// 收藏这种高频操作才有「点到了」的回执。
+class _BouncyActiveIcon extends StatefulWidget {
+  const _BouncyActiveIcon({required this.active, required this.child});
+
+  final bool active;
+
+  final Widget child;
+
+  @override
+  State<_BouncyActiveIcon> createState() => _BouncyActiveIconState();
+}
+
+class _BouncyActiveIconState extends State<_BouncyActiveIcon>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 280),
+  );
+
+  late final Animation<double> _scale = TweenSequence<double>([
+    TweenSequenceItem(
+      tween: Tween(begin: 1.0, end: 1.3)
+          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      weight: 35,
+    ),
+    TweenSequenceItem(
+      tween: Tween(begin: 1.3, end: 0.94)
+          .chain(CurveTween(curve: Curves.easeInOut)),
+      weight: 35,
+    ),
+    TweenSequenceItem(
+      tween: Tween(begin: 0.94, end: 1.0)
+          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      weight: 30,
+    ),
+  ]).animate(_controller);
+
+  @override
+  void didUpdateWidget(_BouncyActiveIcon oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!oldWidget.active && widget.active) {
+      HapticFeedback.lightImpact();
+      _controller.forward(from: 0);
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ScaleTransition(
+      scale: _scale,
+      child: widget.child,
     );
   }
 }

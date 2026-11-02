@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/achievements.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/widget_utils.dart';
@@ -117,6 +118,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                 : Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
+                      _buildGoal(colors),
                       _buildWeek(colors),
                       _buildHeader(colors),
                       _buildTiles(colors),
@@ -140,6 +142,152 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       return "$h 小时 $m 分钟";
     }
     return "$m 分钟";
+  }
+
+  int get _monthReadMinutes {
+    final now = DateTime.now();
+    final summary =
+        _year == now.year ? _summary : ReadingStats.summary(now.year);
+    final index = now.month - 1;
+    if (index < 0 || index >= summary.byMonth.length) return 0;
+    return summary.byMonth[index] ~/ 60;
+  }
+
+  int get _goalMinutes {
+    final raw = appdata.settings['monthlyGoal'];
+    if (raw is num) return raw.toInt();
+    return int.tryParse('$raw') ?? 0;
+  }
+
+  Future<void> _editGoal() async {
+    const presets = [60, 180, 300, 600];
+    final current = _goalMinutes;
+    final result = await showDialog<int>(
+      context: context,
+      builder: (dialogContext) => SimpleDialog(
+        title: Text('Monthly Goal'.tl),
+        children: [
+          for (final minutes in presets)
+            ListTile(
+              title: Text('@a min'.tlParams({'a': '$minutes'})),
+              trailing: minutes == current ? const Icon(Icons.check) : null,
+              onTap: () => dialogContext.pop(minutes),
+            ),
+          ListTile(
+            title: Text('Turn off'.tl),
+            trailing: current == 0 ? const Icon(Icons.check) : null,
+            onTap: () => dialogContext.pop(0),
+          ),
+        ],
+      ),
+    );
+    if (result == null) return;
+    appdata.settings['monthlyGoal'] = result;
+    appdata.saveData();
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 本月阅读目标：圆环进度 + 已读/目标分钟数，点一下换目标。
+  Widget _buildGoal(ColorScheme colors) {
+    final goal = _goalMinutes;
+    final read = _monthReadMinutes;
+    final ratio = goal <= 0 ? 0.0 : (read / goal).clamp(0.0, 1.0);
+    final reached = goal > 0 && read >= goal;
+    final accent = reached ? Colors.green : colors.primary;
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(20),
+        color: colors.surfaceContainerLow,
+        border: Border.all(
+          color: colors.outlineVariant.withValues(alpha: 0.45),
+          width: 0.6,
+        ),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: InkWell(
+        onTap: _editGoal,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          child: Row(
+            children: [
+              SizedBox(
+                width: 64,
+                height: 64,
+                child: Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    SizedBox.expand(
+                      child: TweenAnimationBuilder<double>(
+                        tween: Tween(begin: 0, end: ratio),
+                        duration: const Duration(milliseconds: 700),
+                        curve: Curves.easeOutCubic,
+                        builder: (context, value, _) =>
+                            CircularProgressIndicator(
+                          value: goal <= 0 ? 0 : value,
+                          strokeWidth: 6,
+                          strokeCap: StrokeCap.round,
+                          backgroundColor:
+                              colors.outlineVariant.withValues(alpha: 0.3),
+                          valueColor: AlwaysStoppedAnimation(accent),
+                        ),
+                      ),
+                    ),
+                    if (goal <= 0)
+                      Icon(
+                        Icons.flag_outlined,
+                        size: 20,
+                        color: colors.onSurfaceVariant,
+                      )
+                    else if (reached)
+                      Icon(Icons.check_rounded, size: 26, color: accent)
+                    else
+                      Text(
+                        '${(ratio * 100).round()}%',
+                        style: ts.s14.copyWith(
+                          fontWeight: FontWeight.w600,
+                          color: accent,
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              const SizedBox(width: 16),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Monthly Goal'.tl,
+                      style: ts.s14.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const SizedBox(height: 6),
+                    Text(
+                      goal <= 0
+                          ? 'Set a goal'.tl
+                          : reached
+                              ? 'Goal reached · @a min'
+                                  .tlParams({'a': '$read'})
+                              : '@a / @b min'
+                                  .tlParams({'a': '$read', 'b': '$goal'}),
+                      style: ts.s12.withColor(colors.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+              ),
+              Icon(
+                Icons.chevron_right,
+                size: 20,
+                color: colors.onSurfaceVariant,
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
   }
 
   Widget _buildWeek(ColorScheme colors) {

@@ -1,5 +1,161 @@
 part of 'components.dart';
 
+/// 保留所有子页面状态的「带方向感」切换容器。
+///
+/// 与 [IndexedStack] 一样保留全部子页面的 State，但切换时不是硬切：
+/// 新页面从对应方向淡入，旧页面向反方向淡出，于是「往右切」和「往左切」
+/// 有明确的空间关系。
+///
+/// 方向不需要额外记录：静止时令 i < index 的子页停在左侧、i > index 的
+/// 停在右侧，切换时它们自然沿各自的方向滑入滑出。
+class DirectionalIndexedStack extends StatelessWidget {
+  const DirectionalIndexedStack({
+    super.key,
+    required this.index,
+    required this.children,
+    this.duration = const Duration(milliseconds: 240),
+    this.slide = 0.05,
+  });
+
+  final int index;
+
+  final List<Widget> children;
+
+  final Duration duration;
+
+  /// 静止时的横向偏移（占自身宽度的比例），仅在过渡中可见
+  final double slide;
+
+  @override
+  Widget build(BuildContext context) {
+    return Stack(
+      children: [
+        for (var i = 0; i < children.length; i++)
+          Positioned.fill(
+            child: IgnorePointer(
+              ignoring: i != index,
+              child: AnimatedSlide(
+                duration: duration,
+                curve: Curves.easeOutCubic,
+                offset: Offset(
+                  i == index ? 0 : (i < index ? -slide : slide),
+                  0,
+                ),
+                child: AnimatedOpacity(
+                  duration: duration,
+                  curve: Curves.easeOut,
+                  opacity: i == index ? 1 : 0,
+                  child: children[i],
+                ),
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+}
+
+
+///
+/// 只在该页首次拿到数据后的 [window] 时间内播放。这样刷新/首次进入有
+/// 层次感，而滚动回来重建的格子（尤其是长列表深处）不会再放一遍，
+/// 避免"划回去又闪一下"。
+class StaggerIn extends StatefulWidget {
+  const StaggerIn({
+    super.key,
+    required this.index,
+    required this.child,
+    this.enabled = true,
+    this.step = const Duration(milliseconds: 24),
+    this.duration = const Duration(milliseconds: 260),
+    this.offset = 10,
+    this.maxIndex = 8,
+  });
+
+  final int index;
+
+  final Widget child;
+
+  final bool enabled;
+
+  /// 相邻两项的启动间隔
+  final Duration step;
+
+  /// 单项动画时长（不含延迟）
+  final Duration duration;
+
+  /// 起始的向下位移（像素）
+  final double offset;
+
+  /// 超过这个序号就不做动画
+  final int maxIndex;
+
+  @override
+  State<StaggerIn> createState() => _StaggerInState();
+}
+
+class _StaggerInState extends State<StaggerIn>
+    with SingleTickerProviderStateMixin {
+  late final bool _animate =
+      widget.enabled && widget.index < widget.maxIndex;
+
+  late final Duration _delay = widget.step * widget.index;
+
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: _delay + widget.duration,
+  );
+
+  late final Animation<double> _curve = CurvedAnimation(
+    parent: _controller,
+    curve: Interval(
+      _delay.inMicroseconds / _controller.duration!.inMicroseconds,
+      1,
+      curve: Curves.easeOutCubic,
+    ),
+  );
+
+  @override
+  void initState() {
+    super.initState();
+    if (_animate) {
+      _controller.forward();
+    } else {
+      _controller.value = 1;
+    }
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!_animate) {
+      return widget.child;
+    }
+    return AnimatedBuilder(
+      animation: _curve,
+      child: widget.child,
+      builder: (context, child) {
+        final t = _curve.value;
+        if (t >= 1) {
+          return child!;
+        }
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, widget.offset * (1 - t)),
+            child: child,
+          ),
+        );
+      },
+    );
+  }
+}
+
 class BlurEffect extends StatelessWidget {
   final Widget child;
 

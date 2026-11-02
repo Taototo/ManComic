@@ -785,9 +785,22 @@ class _NaviMainView extends StatefulWidget {
 class _NaviMainViewState extends State<_NaviMainView> {
   NaviPaneState get state => widget.state;
 
+  /// 上一次显示的 Tab 序号与切换方向，用于让切页有方向的位移感。
+  late int _lastIndex = state.currentPage;
+
+  int _direction = 1;
+
+  void _syncDirection() {
+    final index = state.currentPage;
+    if (index == _lastIndex) return;
+    _direction = index > _lastIndex ? 1 : -1;
+    _lastIndex = index;
+  }
+
   @override
   void initState() {
     state.mainViewUpdateHandler = () {
+      _syncDirection();
       setState(() {});
     };
     super.initState();
@@ -816,12 +829,23 @@ class _NaviMainViewState extends State<_NaviMainView> {
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
               transitionBuilder: (child, animation) {
+                // 退场的 entry 的 controller 是倒放的，据此和新页面区分方向：
+                // 新页面从切换方向滑入，旧页面向反方向滑出。
+                final outgoing =
+                    animation.status == AnimationStatus.reverse;
+                final dx = (outgoing ? -_direction : _direction) * 0.05;
                 return FadeTransition(
                   opacity: animation,
-                  child: ScaleTransition(
-                    scale: Tween<double>(begin: 0.985, end: 1.0)
-                        .animate(animation),
-                    child: child,
+                  child: SlideTransition(
+                    position: Tween<Offset>(
+                      begin: Offset(dx, 0),
+                      end: Offset.zero,
+                    ).animate(animation),
+                    child: ScaleTransition(
+                      scale: Tween<double>(begin: 0.985, end: 1.0)
+                          .animate(animation),
+                      child: child,
+                    ),
                   ),
                 );
               },

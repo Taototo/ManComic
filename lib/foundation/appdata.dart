@@ -247,6 +247,7 @@ class Settings with ChangeNotifier {
     'readerWarmFilter': 0, // 0-100 护眼暖色强度
     'readerWarmFilterAuto': true, // 仅在夜间时段生效
     'privacyFavorites': false, // 收藏页隐私保护（模糊遮罩）
+    'monthlyGoal': 0, // 本月阅读目标（分钟），0 表示未设置
   };
 
   operator [](String key) {

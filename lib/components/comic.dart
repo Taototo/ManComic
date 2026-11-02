@@ -222,6 +222,8 @@ class ComicTile extends StatelessWidget {
     }
     return AnimatedImage(
       image: image,
+      // 按显示尺寸解码，别再按封面原图（常见 1500×2000）整张解进内存
+      cacheWidth: kCoverDecodeWidth,
       fit: BoxFit.cover,
       width: double.infinity,
       height: double.infinity,
@@ -891,6 +893,10 @@ class _SliverGridComicsState extends State<SliverGridComics> {
   List<Comic> comics = [];
   List<int> heroIDs = [];
 
+  /// 本次数据加载的时刻，用于限定首屏入场动画的播放窗口。
+  /// 滚动回来重建的格子早已超过窗口，不会再放一遍动画。
+  DateTime _epoch = DateTime.now();
+
   static int _nextHeroID = 0;
 
   void generateHeroID() {
@@ -910,6 +916,7 @@ class _SliverGridComicsState extends State<SliverGridComics> {
         }
       }
       generateHeroID();
+      _epoch = DateTime.now();
     }
     super.didUpdateWidget(oldWidget);
   }
@@ -948,6 +955,7 @@ class _SliverGridComicsState extends State<SliverGridComics> {
     return _SliverGridComics(
       comics: comics,
       heroIDs: heroIDs,
+      epoch: _epoch,
       selection: widget.selections,
       onLastItemBuild: widget.onLastItemBuild,
       badgeBuilder: widget.badgeBuilder,
@@ -963,6 +971,7 @@ class _SliverGridComics extends StatelessWidget {
   const _SliverGridComics({
     required this.comics,
     required this.heroIDs,
+    required this.epoch,
     this.onLastItemBuild,
     this.badgeBuilder,
     this.menuBuilder,
@@ -975,6 +984,9 @@ class _SliverGridComics extends StatelessWidget {
   final List<Comic> comics;
 
   final List<int> heroIDs;
+
+  /// 数据加载时刻，用于限定首屏交错入场动画的播放窗口
+  final DateTime epoch;
 
   final bool showUpdateTime;
 
@@ -1015,21 +1027,31 @@ class _SliverGridComics extends StatelessWidget {
           showUpdateTime: showUpdateTime,
         );
         if (selection == null) {
-          return comic;
+          return StaggerIn(
+            index: index,
+            enabled: DateTime.now().difference(epoch) <
+                const Duration(milliseconds: 700),
+            child: comic,
+          );
         }
-        return AnimatedContainer(
-          key: ValueKey(comics[index].id),
-          duration: const Duration(milliseconds: 150),
-          decoration: BoxDecoration(
-            color: isSelected
-                ? Theme.of(
-                    context,
-                  ).colorScheme.secondaryContainer.toOpacity(0.72)
-                : null,
-            borderRadius: BorderRadius.circular(12),
+        return StaggerIn(
+          index: index,
+          enabled: DateTime.now().difference(epoch) <
+              const Duration(milliseconds: 700),
+          child: AnimatedContainer(
+            key: ValueKey(comics[index].id),
+            duration: const Duration(milliseconds: 150),
+            decoration: BoxDecoration(
+              color: isSelected
+                  ? Theme.of(
+                      context,
+                    ).colorScheme.secondaryContainer.toOpacity(0.72)
+                  : null,
+              borderRadius: BorderRadius.circular(12),
+            ),
+            margin: const EdgeInsets.all(4),
+            child: comic,
           ),
-          margin: const EdgeInsets.all(4),
-          child: comic,
         );
       }, childCount: comics.length),
       gridDelegate:

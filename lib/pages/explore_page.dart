@@ -299,7 +299,7 @@ class _ExplorePageState extends State<ExplorePage>
       child: MediaQuery.removePadding(
         context: context,
         removeTop: true,
-        child: IndexedStack(
+        child: DirectionalIndexedStack(
           index: group,
           children: [
             pages.isEmpty

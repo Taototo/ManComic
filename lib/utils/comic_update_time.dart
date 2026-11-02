@@ -110,7 +110,12 @@ class ComicUpdateTimeCache {
 
   static final ComicUpdateTimeCache instance = ComicUpdateTimeCache._();
 
-  final Map<String, String> _map = {};
+  /// 直接存解析好的日期。
+  ///
+  /// 列表滚动时每个格子每次 build 都会取值，若存字符串就要反复
+  /// [parseComicDate]，几千次字符串正则匹配会明显吃掉帧预算。
+  /// 这里只在读取文件时解析一次。
+  final Map<String, DateTime> _map = {};
 
   File? _file;
 
@@ -130,7 +135,10 @@ class ComicUpdateTimeCache {
         if (data is Map) {
           data.forEach((key, value) {
             if (key is String && value is String) {
-              _map[key] = value;
+              final time = parseComicDate(value);
+              if (time != null) {
+                _map[key] = time;
+              }
             }
           });
         }
@@ -142,25 +150,35 @@ class ComicUpdateTimeCache {
 
   DateTime? get(String sourceKey, String id) {
     _ensureLoaded();
-    final raw = _map["$sourceKey/$id"];
-    if (raw == null) return null;
-    return parseComicDate(raw);
+    return _map["$sourceKey/$id"];
   }
 
   void put(String sourceKey, String id, String rawTime) {
     final time = parseComicDate(rawTime);
     if (time == null) return;
     _ensureLoaded();
-    final value =
-        "${time.year}-${time.month.toString().padLeft(2, '0')}-${time.day.toString().padLeft(2, '0')}";
+    // 只取到天，便于比较与序列化
+    final day = DateTime(time.year, time.month, time.day);
     final key = "$sourceKey/$id";
-    if (_map[key] == value) return;
-    _map[key] = value;
+    final existing = _map[key];
+    if (existing != null &&
+        existing.year == day.year &&
+        existing.month == day.month &&
+        existing.day == day.day) {
+      return;
+    }
+    _map[key] = day;
     // 防抖落盘：连续浏览详情页时不会每页写一次文件
     _saveTimer?.cancel();
     _saveTimer = Timer(const Duration(seconds: 3), () {
       try {
-        file.writeAsStringSync(jsonEncode(_map));
+        file.writeAsStringSync(jsonEncode(
+          _map.map((key, value) => MapEntry(
+                key,
+                "${value.year}-${value.month.toString().padLeft(2, '0')}-"
+                    "${value.day.toString().padLeft(2, '0')}",
+              )),
+        ));
       } catch (e) {
         Log.error("UpdateTimeCache", "Failed to save: $e");
       }

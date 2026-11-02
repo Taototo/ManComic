@@ -18,9 +18,13 @@ class ComicPeek {
     dismiss();
     // 提前把封面送进图像缓存：封面多半刚在列表里显示过、已在内存，
     // 万一被回收也能借这次调用提前解码，弹层首帧就不会闪占位色。
+    // 这里必须和列表用同一个解码尺寸，否则缓存键不同、等于白预热。
     final image = _findImageProvider(comic);
     if (image != null) {
-      precacheImage(image, context).catchError((_) {});
+      precacheImage(
+        ResizeImage.resizeIfNeeded(kCoverDecodeWidth, null, image),
+        context,
+      ).catchError((_) {});
     }
     final overlay = Overlay.of(context, rootOverlay: true);
     final entry = OverlayEntry(
@@ -162,6 +166,7 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
                             // 首帧要重新解码，闪一下灰底。
                             : AnimatedImage(
                                 image: image,
+                                cacheWidth: kCoverDecodeWidth,
                                 fit: BoxFit.cover,
                                 filterQuality: FilterQuality.medium,
                               ),

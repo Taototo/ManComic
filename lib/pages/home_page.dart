@@ -1,3 +1,5 @@
+import 'dart:math';
+
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -17,6 +19,7 @@ import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
+import 'package:venera/foundation/image_provider/cached_image.dart';
 import 'package:venera/foundation/image_provider/history_image_provider.dart';
 import 'package:venera/pages/history_page.dart';
 import 'package:venera/pages/reader/reader.dart';
@@ -54,6 +57,7 @@ class HomePage extends StatelessWidget {
       'comic_source' => const _ComicSourceWidget(),
       'local' => const _Local(),
       'image_favorites' => const ImageFavorites(),
+      'random_pick' => const _RandomPick(),
       _ => const SliverToBoxAdapter(child: SizedBox.shrink()),
     };
   }
@@ -1078,6 +1082,234 @@ class _ImageFavoritesState extends State<ImageFavorites> {
 
 }
 
+/// 首页「今天读什么」：从收藏和历史里随机抽一本。
+///
+/// 收藏夹堆了几百本、或者翻来翻去不知道看哪本时，抽一张比翻列表轻松。
+/// 抽中的卡带一次「翻出来」的缩放+微旋转动效，点一下直接进详情页。
+class _RandomPick extends StatefulWidget {
+  const _RandomPick();
+
+  @override
+  State<_RandomPick> createState() => _RandomPickState();
+}
+
+class _RandomPickState extends State<_RandomPick> {
+  List<Comic> _pool = const [];
+
+  Comic? _picked;
+
+  /// 换一张时递增，用作 AnimatedSwitcher 的 key，触发翻牌动效
+  int _seed = 0;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPool();
+  }
+
+  Future<void> _loadPool() async {
+    final map = <String, Comic>{};
+    try {
+      for (final comic in await LocalFavoritesManager().getAllComicsAsync()) {
+        if (comic.sourceKey == 'local') continue;
+        map['${comic.sourceKey}/${comic.id}'] = comic;
+      }
+    } catch (e) {
+      Log.error("RandomPick", "Failed to load favorites: $e");
+    }
+    try {
+      for (final comic in HistoryManager().getAll()) {
+        if (comic.sourceKey == 'local') continue;
+        map.putIfAbsent('${comic.sourceKey}/${comic.id}', () => comic);
+      }
+    } catch (e) {
+      Log.error("RandomPick", "Failed to load history: $e");
+    }
+    if (!mounted) return;
+    setState(() {
+      _pool = map.values.toList();
+      _picked = _pick();
+    });
+  }
+
+  Comic? _pick() {
+    if (_pool.isEmpty) return null;
+    if (_pool.length == 1) return _pool.first;
+    final random = Random();
+    var next = _pool[random.nextInt(_pool.length)];
+    // 别连续抽到同一本
+    var guard = 0;
+    while (_picked != null &&
+        next.id == _picked!.id &&
+        next.sourceKey == _picked!.sourceKey &&
+        guard++ < 8) {
+      next = _pool[random.nextInt(_pool.length)];
+    }
+    return next;
+  }
+
+  void _draw() {
+    setState(() {
+      _picked = _pick();
+      _seed++;
+      HapticFeedback.selectionClick();
+    });
+  }
+
+  void _open(Comic comic) {
+    App.mainNavigatorKey?.currentContext?.to(
+      () => ComicPage(
+        id: comic.id,
+        sourceKey: comic.sourceKey,
+        cover: comic.cover,
+        title: comic.title,
+      ),
+    );
+  }
+
+  ImageProvider _providerOf(Comic comic) {
+    if (comic is History) {
+      return HistoryImageProvider(comic);
+    }
+    return CachedImageProvider(
+      comic.cover,
+      sourceKey: comic.sourceKey,
+      cid: comic.id,
+    );
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = context.colorScheme;
+    final picked = _picked;
+    return SliverToBoxAdapter(
+      child: Container(
+        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        decoration: BoxDecoration(
+          border: Border.all(color: cs.outlineVariant, width: 0.6),
+          borderRadius: BorderRadius.circular(12),
+        ),
+        clipBehavior: Clip.antiAlias,
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            SizedBox(
+              height: 56,
+              child: Row(
+                children: [
+                  const SizedBox(width: 16),
+                  Icon(Icons.casino_outlined, size: 18, color: cs.primary),
+                  const SizedBox(width: 8),
+                  Text('Today Picks'.tl, style: ts.s18),
+                  const Spacer(),
+                  if (picked != null)
+                    IconButton(
+                      onPressed: _draw,
+                      tooltip: 'Draw again'.tl,
+                      icon: const Icon(Icons.refresh, size: 20),
+                    ),
+                  const SizedBox(width: 4),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
+              child: picked == null
+                  ? Container(
+                      height: 78,
+                      alignment: Alignment.center,
+                      child: Text(
+                        'Favorite or read something first'.tl,
+                        style: ts.s14.withColor(cs.onSurfaceVariant),
+                      ),
+                    )
+                  : AnimatedSwitcher(
+                      duration: const Duration(milliseconds: 340),
+                      switchInCurve: Curves.easeOutCubic,
+                      switchOutCurve: Curves.easeIn,
+                      transitionBuilder: (child, animation) {
+                        final scale = CurvedAnimation(
+                          parent: animation,
+                          curve: Curves.easeOutBack,
+                        );
+                        return FadeTransition(
+                          opacity: animation,
+                          child: ScaleTransition(
+                            scale: Tween<double>(begin: 0.86, end: 1.0)
+                                .animate(scale),
+                            child: RotationTransition(
+                              turns: Tween<double>(begin: -0.012, end: 0.0)
+                                  .animate(scale),
+                              child: child,
+                            ),
+                          ),
+                        );
+                      },
+                      child: KeyedSubtree(
+                        key: ValueKey(_seed),
+                        child: _buildCard(context, picked),
+                      ),
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Widget _buildCard(BuildContext context, Comic comic) {
+    final cs = context.colorScheme;
+    final source = ComicSource.find(comic.sourceKey)?.name ?? comic.sourceKey;
+    return InkWell(
+      borderRadius: BorderRadius.circular(10),
+      onTap: () => _open(comic),
+      child: Padding(
+        padding: const EdgeInsets.all(8),
+        child: Row(
+          children: [
+            ClipRRect(
+              borderRadius: BorderRadius.circular(6),
+              child: SizedBox(
+                width: 58,
+                height: 78,
+                child: AnimatedImage(
+                  image: _providerOf(comic),
+                  fit: BoxFit.cover,
+                  cacheWidth: 240,
+                ),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    comic.title,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s16.copyWith(fontWeight: FontWeight.w600),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    source,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s12.withColor(cs.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(Icons.chevron_right, size: 20, color: cs.onSurfaceVariant),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
 /// 首页图片收藏卡片堆：每张卡就是「图片收藏」页里的一个条目，
 /// 长按后上下滑动切换，首尾循环。
 class _ImageFavCardStack extends StatefulWidget {
@@ -1216,6 +1448,7 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
     if (target != _index) {
       _animateTo(_drag < 0 ? -_cardHeight : _cardHeight, () {
         if (!mounted) return;
+        HapticFeedback.lightImpact();
         setState(() {
           _index = target;
           _drag = 0;
@@ -1265,9 +1498,17 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
                         visible: offset != 0,
                         maintainState: true,
                         maintainAnimation: true,
-                        child: Align(
+                        // 后卡随拖动从 94% 放大到 100%：像真的一叠卡片，
+                        // 前卡被抽走时下一张自己顶上来，而不是突然跳到顶层。
+                        child: Transform.scale(
                           alignment: Alignment.topCenter,
-                          child: _buildCard(behind),
+                          scale: 0.94 +
+                              0.06 *
+                                  (offset.abs() / 56).clamp(0.0, 1.0),
+                          child: Align(
+                            alignment: Alignment.topCenter,
+                            child: _buildCard(behind),
+                          ),
                         ),
                       ),
                     ),
@@ -1306,6 +1547,8 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
   }
 
   Widget _buildFront(double offset) {
+    // 被抽走的过程中轻微缩小 + 旋转，离开得更有体积感。
+    final progress = (offset.abs() / _cardHeight).clamp(0.0, 1.0);
     return RawGestureDetector(
       behavior: HitTestBehavior.opaque,
       gestures: _gestures,
@@ -1315,9 +1558,13 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
         offset: Offset(0, offset),
         child: Transform.rotate(
           angle: offset / _cardHeight * 0.03,
-          child: Align(
+          child: Transform.scale(
             alignment: Alignment.topCenter,
-            child: _buildCard(_index),
+            scale: 1 - 0.05 * progress,
+            child: Align(
+              alignment: Alignment.topCenter,
+              child: _buildCard(_index),
+            ),
           ),
         ),
       ),

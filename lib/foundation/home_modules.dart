@@ -30,6 +30,7 @@ class HomeModules {
     HomeModuleDef('local', 'Local Comics', Icons.folder_outlined),
     HomeModuleDef('image_favorites', 'Image Favorites',
         Icons.collections_outlined),
+    HomeModuleDef('random_pick', 'Today Picks', Icons.casino_outlined),
   ];
 
   static HomeModuleDef? byId(String id) {
