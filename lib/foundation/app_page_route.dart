@@ -155,12 +155,17 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
 
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
-    PageTransitionsBuilder builder;
-    if (App.isAndroid) {
-      builder = PredictiveBackPageTransitionsBuilder();
-    } else {
-      builder = SlidePageTransitionBuilder();
-  }
+    // 统一用「水平滑动」转场，Android 也不用 PredictiveBack/zoom 那套。
+    //
+    // zoom 转场（Material 默认）是**两页同时缩放 + 淡化**：进/出页面在
+    // 300ms 内都是半透明的，而本 App 的页面背景是透明的（只有卡片自己带
+    // 底色），两页一叠就会互相透出——上层页的卡片看起来"盖住"了下层页的
+    // 内容，边框还错开十几像素。侧滑返回走到一半松手时最明显。
+    //
+    // 纯滑动转场里，上层页始终不透明地把下层页推走/拉回，不存在两页同时
+    // 可见的瞬间，也就没有这种穿透。Android 的预测性返回手势仍然可用，
+    // 只是预览动画换成了跟手滑动。
+    PageTransitionsBuilder builder = SlidePageTransitionBuilder();
 
   return builder.buildTransitions(
         this,

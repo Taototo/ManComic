@@ -824,43 +824,11 @@ class _NaviMainViewState extends State<_NaviMainView> {
         Expanded(
           child: MediaQuery(
             data: pageData,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) {
-                // 退场的 entry 的 controller 是倒放的，据此和入场页区分。
-                //
-                // 退场页**不做淡出**：整页 fade 会让新旧两页在同一时间都处于
-                // 半透明，两页的卡片、文字互相穿透，看起来就是「重影透图」。
-                // 这里让它原样留在下层，由不透明的入场页盖住。
-                if (animation.status == AnimationStatus.reverse) {
-                  // 旧页向切换的反方向平移出去，全程不透明，与新页交界清晰。
-                  // 它的 controller 是倒放的，所以用 ReverseAnimation 取 0→1。
-                  return SlideTransition(
-                    position: Tween<Offset>(
-                      begin: Offset.zero,
-                      end: Offset(-_direction * 0.045, 0),
-                    ).animate(ReverseAnimation(animation)),
-                    child: child,
-                  );
-                }
-                return SlideTransition(
-                  position: Tween<Offset>(
-                    begin: Offset(_direction * 0.045, 0),
-                    end: Offset.zero,
-                  ).animate(CurvedAnimation(
-                    parent: animation,
-                    curve: Curves.easeOutCubic,
-                  )),
-                  // 页面自身背景多半是透明的，滑入时露出的部分会看见下层旧页。
-                  // 垫一层 surface，保证入场页是「实心」的，只露出移动的那一条边。
-                  child: ColoredBox(
-                    color: Theme.of(context).colorScheme.surface,
-                    child: child,
-                  ),
-                );
-              },
+            // key 挂在页签序号上：切页时旧页面在这里**立刻**被替换、销毁，
+            // 不再像 AnimatedSwitcher 那样让新旧两页共存 260ms。
+            child: _TabTransition(
+              key: ValueKey(state.currentPage),
+              direction: _direction,
               child: state.buildMainViewContent(),
             ),
           ),
@@ -880,6 +848,68 @@ class _NaviMainViewState extends State<_NaviMainView> {
           child: state.buildBottom(),
         ),
       ],
+    );
+  }
+}
+
+/// 页签切换的入场包装。
+///
+/// 核心约束：**同一时刻只允许一页存在于树上**。
+///
+/// 之前这里用 AnimatedSwitcher 做交叉过渡，新旧两页会共存 260ms。而这些页
+/// 面的根背景是透明的（只有卡片自己带底色），两页一叠就互相透出——看起来
+/// 像「另一页的卡片盖住了当前页的内容」，边框还会错开十几像素。
+///
+/// 现在 key 跟着页签序号走：切页的那一帧旧页整棵子树就被替换、dispose，
+/// 只剩新页做一次「淡入 + 轻微位移」。底下始终垫着 surface 底色，所以淡入
+/// 过程中不会闪黑、也不会透出任何别的东西。
+class _TabTransition extends StatefulWidget {
+  const _TabTransition({
+    super.key,
+    required this.direction,
+    required this.child,
+  });
+
+  /// 1 = 往右切（新页从右侧来），-1 = 往左切
+  final int direction;
+
+  final Widget child;
+
+  @override
+  State<_TabTransition> createState() => _TabTransitionState();
+}
+
+class _TabTransitionState extends State<_TabTransition>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 220),
+  )..forward();
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return ColoredBox(
+      color: Theme.of(context).colorScheme.surface,
+      child: AnimatedBuilder(
+        animation: _controller,
+        builder: (context, child) {
+          final t = Curves.easeOutCubic.transform(_controller.value);
+          return Opacity(
+            opacity: 0.65 + 0.35 * t,
+            child: Transform.translate(
+              offset: Offset(widget.direction * 16 * (1 - t), 0),
+              child: child,
+            ),
+          );
+        },
+        child: widget.child,
+      ),
     );
   }
 }

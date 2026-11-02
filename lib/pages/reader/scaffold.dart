@@ -810,6 +810,8 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
                       label: "Favorite".tl,
                       onPressed: addImageFavorite,
                       isActive: isLiked(),
+                      // 收藏心点亮时用红色，和详情页的点赞一致。
+                      activeColor: Colors.redAccent,
                     ),
                     _buildBottomButton(
                       icon: Icons.download_rounded,
@@ -897,12 +899,14 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     required String label,
     required VoidCallback onPressed,
     bool isActive = false,
+    Color? activeColor,
   }) {
     return _BottomActionButton(
       icon: icon,
       label: label,
       onPressed: onPressed,
       isActive: isActive,
+      activeColor: activeColor,
       // 翻页 / 切章时 isLiked 也会变，但那不是点出来的，不该弹。
       positionKey: '${context.reader.chapter}:${context.reader.page}',
     );
@@ -1581,6 +1585,7 @@ class _BottomActionButton extends StatefulWidget {
     required this.onPressed,
     required this.isActive,
     required this.positionKey,
+    this.activeColor,
   });
 
   final IconData icon;
@@ -1590,6 +1595,9 @@ class _BottomActionButton extends StatefulWidget {
   final VoidCallback onPressed;
 
   final bool isActive;
+
+  /// 激活时的图标/文字颜色。收藏心用红色，其余沿用主题色。
+  final Color? activeColor;
 
   /// 当前章节:页码。变化说明是翻页引起的，不是点击。
   final String positionKey;
@@ -1652,6 +1660,9 @@ class _BottomActionButtonState extends State<_BottomActionButton>
 
   @override
   Widget build(BuildContext context) {
+    // 收藏心的红色：激活时用红色描出实心心形，比主题色更符合"收藏"的直觉。
+    final activeColor =
+        widget.activeColor ?? context.colorScheme.primary;
     return Expanded(
       child: InkWell(
         onTap: widget.onPressed,
@@ -1667,7 +1678,10 @@ class _BottomActionButtonState extends State<_BottomActionButton>
           padding: const EdgeInsets.symmetric(vertical: 8),
           decoration: BoxDecoration(
             color: widget.isActive
-                ? context.colorScheme.primaryContainer.withValues(alpha: 0.8)
+                ? (widget.activeColor != null
+                    ? widget.activeColor!.withValues(alpha: 0.12)
+                    : context.colorScheme.primaryContainer
+                        .withValues(alpha: 0.8))
                 : Colors.transparent,
             borderRadius: BorderRadius.circular(12),
           ),
@@ -1684,7 +1698,7 @@ class _BottomActionButtonState extends State<_BottomActionButton>
                     widget.icon,
                     size: 20,
                     color: widget.isActive
-                        ? context.colorScheme.primary
+                        ? activeColor
                         : context.colorScheme.onSurfaceVariant,
                   ),
                 ),
@@ -1697,7 +1711,7 @@ class _BottomActionButtonState extends State<_BottomActionButton>
                   fontWeight:
                       widget.isActive ? FontWeight.w600 : FontWeight.normal,
                   color: widget.isActive
-                      ? context.colorScheme.primary
+                      ? activeColor
                       : context.colorScheme.onSurfaceVariant,
                 ),
                 maxLines: 1,
