@@ -113,15 +113,6 @@ void _checkOldConfigs() {
     }
     appdata.writeImplicitData();
   }
-
-  var sourceListUrl = appdata.settings['comicSourceListUrl'].toString();
-  if (sourceListUrl.contains("git.nyne.dev") ||
-      sourceListUrl.contains("venera-app/venera-configs")) {
-    // migrate to ManComic comic source list
-    appdata.settings['comicSourceListUrl'] =
-        "https://cdn.jsdelivr.net/gh/Taototo/venera-comic-sources@main/index.json";
-    appdata.saveData();
-  }
 }
 
 Future<void> _checkAppUpdates() async {

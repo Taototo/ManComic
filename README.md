@@ -87,7 +87,7 @@
 - **漫画源体检**：并发探测每个源的搜索可用性，标注「可用 / 无结果 / 失败 / 不支持搜索」与耗时，便于清理失效源。
 - **聚合搜索按作品合并**：跨源结果按标题聚类，一个作品只需选一次源。
 - 内置**漫画源编写帮助页**，不再跳转外部链接。
-- 默认源列表地址改指向本分支维护的源仓库（`Taototo/venera-comic-sources`），并自动迁移旧地址。
+- 不再内置任何漫画源列表，默认不预填源地址，由用户自行添加。
 
 ### 6. 数据与统计
 
@@ -140,13 +140,14 @@ flutter build apk --release
 
 ## 六、编写漫画源
 
-见 [doc/comic_source.md](doc/comic_source.md)，另有 [JS API](doc/js_api.md)、[无头模式](doc/headless_doc.md)、[漫画导入](doc/import_comic.md) 文档。
+本项目**不内置、也不分发任何漫画源列表**。所有漫画源均需由用户自行编写或添加，以规避第三方内容带来的版权与合规风险。
 
-源列表可直接使用本分支维护的仓库：
+- 编写教程：[doc/comic_source.md](doc/comic_source.md)
+- JS API：[doc/js_api.md](doc/js_api.md)
+- 无头模式：[doc/headless_doc.md](doc/headless_doc.md)
+- 漫画导入：[doc/import_comic.md](doc/import_comic.md)
 
-```
-https://cdn.jsdelivr.net/gh/Taototo/venera-comic-sources@main/index.json
-```
+在应用内「设置 → 漫画源」中可手动填写你自己的源列表地址，或按上述教程编写并加载单个源。
 
 ---
 

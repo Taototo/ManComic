@@ -377,5 +377,6 @@ async function processImage(image, cid, eid, page, sourceKey) {
 }
 ''';
 
-const _defaultSourceListUrl =
-    "https://cdn.jsdelivr.net/gh/Taototo/venera-comic-sources@main/index.json";
+// 不内置任何漫画源列表，避免分发第三方源带来的版权与合规风险。
+// 用户需自行在「设置 → 漫画源」中添加源列表地址，或按 doc/comic_source.md 编写自己的源。
+const _defaultSourceListUrl = "";
