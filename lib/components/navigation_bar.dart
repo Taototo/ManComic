@@ -66,8 +66,6 @@ typedef NaviItemTapListener = void Function(int);
 
 class NaviPaneState extends State<NaviPane>
     with SingleTickerProviderStateMixin {
-  bool _canPop = true;
-
   late int _currentPage = widget.initialPage;
 
   int get currentPage => _currentPage;
@@ -183,78 +181,65 @@ class NaviPaneState extends State<NaviPane>
             right: math.max(mq.viewPadding.right, mq.systemGestureInsets.right),
           )
         : EdgeInsets.zero;
-    return _NaviPopScope(
-      action: () {
-        if (App.mainNavigatorKey!.currentState!.canPop()) {
-          App.mainNavigatorKey!.currentState!.maybePop();
-        } else {
-          SystemNavigator.pop();
-        }
-      },
-      popGesture: App.isIOS && context.width >= changePoint,
-      child: AnimatedBuilder(
-        animation: controller,
-        builder: (context, child) {
-          final value = controller.value;
-          Widget content = Stack(
-            children: [
-              Positioned(
-                left: _kFoldedSideBarWidth * ((value - 2.0).clamp(-1.0, 0.0)),
-                top: 0,
-                bottom: 0,
-                child: buildLeft(),
-              ),
-              Positioned.fill(
-                left:
-                    _kFoldedSideBarWidth * ((value - 1).clamp(0, 1)) +
-                    (_kSideBarWidth - _kFoldedSideBarWidth) *
-                        ((value - 2).clamp(0, 1)),
-                child: buildMainView(),
-              ),
-            ],
+    return AnimatedBuilder(
+      animation: controller,
+      builder: (context, child) {
+        final value = controller.value;
+        Widget content = Stack(
+          children: [
+            Positioned(
+              left: _kFoldedSideBarWidth * ((value - 2.0).clamp(-1.0, 0.0)),
+              top: 0,
+              bottom: 0,
+              child: buildLeft(),
+            ),
+            Positioned.fill(
+              left:
+                  _kFoldedSideBarWidth * ((value - 1).clamp(0, 1)) +
+                  (_kSideBarWidth - _kFoldedSideBarWidth) *
+                      ((value - 2).clamp(0, 1)),
+              child: buildMainView(),
+            ),
+          ],
+        );
+        if (sideInsets != EdgeInsets.zero) {
+          content = Padding(
+            padding: sideInsets,
+            child: content,
           );
-          if (sideInsets != EdgeInsets.zero) {
-            content = Padding(
-              padding: sideInsets,
-              child: content,
-            );
-          }
-          return content;
-        },
-      ),
+        }
+        return content;
+      },
     );
   }
 
   Widget buildMainView() {
     return HeroControllerScope(
       controller: MaterialApp.createMaterialHeroController(),
+      // 系统返回（返回键、Android 预测性返回、手势返回）统一交给
+      // App.handleBack 处理：先关根导航器上的弹层，再退主导航器里的页面，
+      // 都没有才退出应用，保证一次返回只回退一层。
+      //
+      // 这里必须固定 canPop: false。之前用 NotificationListener 依据子
+      // 导航器状态动态设置 canPop，但这个标志只在收到通知时更新，容易
+      // 与真实栈状态错位：错成 true 会直接把整个 App 退出，错成 false
+      // 会让返回键失灵。
       child: PopScope(
-        canPop: _canPop,
+        canPop: false,
         onPopInvokedWithResult: (didPop, result) {
           if (didPop) {
             return;
           }
-          widget.navigatorKey.currentState?.maybePop(result);
+          App.handleBack();
         },
-        child: NotificationListener<NavigationNotification>(
-          onNotification: (NavigationNotification notification) {
-            final bool nextCanPop = !notification.canHandlePop;
-            if (nextCanPop != _canPop) {
-              setState(() {
-                _canPop = nextCanPop;
-              });
-            }
-            return false;
-          },
-          child: Navigator(
-            observers: [widget.observer],
-            key: widget.navigatorKey,
-            onGenerateRoute: (settings) => AppPageRoute(
-              preventRebuild: false,
-              builder: (context) {
-                return _NaviMainView(state: this);
-              },
-            ),
+        child: Navigator(
+          observers: [widget.observer],
+          key: widget.navigatorKey,
+          onGenerateRoute: (settings) => AppPageRoute(
+            preventRebuild: false,
+            builder: (context) {
+              return _NaviMainView(state: this);
+            },
           ),
         ),
       ),
@@ -741,7 +726,10 @@ class NaviObserver extends NavigatorObserver implements Listenable {
 
   @override
   void didPop(Route route, Route? previousRoute) {
-    routes.removeLast();
+    // 必须按路由对象移除。之前用 removeLast()，一旦有 route 被 popUntil
+    // 或由根导航器直接关掉，队尾就不一定是被关掉的那一个，队列会和真实
+    // 栈错位，导致 updatePage 里的「是否需要先退栈」判断失效。
+    routes.remove(route);
     notifyListeners();
   }
 
@@ -782,45 +770,6 @@ class NaviObserver extends NavigatorObserver implements Listenable {
     for (var listener in listeners) {
       listener();
     }
-  }
-}
-
-class _NaviPopScope extends StatelessWidget {
-  const _NaviPopScope({
-    required this.child,
-    this.popGesture = false,
-    required this.action,
-  });
-
-  final Widget child;
-  final bool popGesture;
-  final VoidCallback action;
-
-  static bool panStartAtEdge = false;
-
-  @override
-  Widget build(BuildContext context) {
-    Widget res = child;
-    if (popGesture) {
-      res = GestureDetector(
-        onPanStart: (details) {
-          if (details.globalPosition.dx < 64) {
-            panStartAtEdge = true;
-          }
-        },
-        onPanEnd: (details) {
-          if (details.velocity.pixelsPerSecond.dx < 0 ||
-              details.velocity.pixelsPerSecond.dx > 0) {
-            if (panStartAtEdge) {
-              action();
-            }
-          }
-          panStartAtEdge = false;
-        },
-        child: res,
-      );
-    }
-    return res;
   }
 }
 

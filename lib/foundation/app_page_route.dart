@@ -77,6 +77,35 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
 
   bool get preventRebuild;
 
+  /// 本页是否被「根导航器」上的弹层（收藏面板、弹窗、阅读器等）盖住。
+  ///
+  /// App 有两套导航栈：根导航器（弹层）和主导航器（三个 Tab 内的页面栈）。
+  /// 路由自带的边缘返回手势只知道自己在哪个栈，不知道另一套栈上还有东西
+  /// 盖着，而两套栈的栈顶路由会同时被判定为「当前页」，于是同一次侧滑被
+  /// 两边都消费掉：弹层关了，被盖住的页面也被划走了——看起来就是「一次
+  /// 侧滑跳了一级」。
+  ///
+  /// 所以只要根导航器上还有路由，主导航器里的页面就退出这次手势竞争。
+  /// 没有路由接管时，系统会补发一次普通返回（handlePopRoute），由根路由
+  /// 上的 PopScope 交给 [App.handleBack] 关掉弹层。
+  ///
+  /// 只判定主导航器：弹层内部自己的嵌套导航器自成一层，不该受牵连。
+  bool get _coveredByRootOverlay {
+    final root = App.rootNavigatorKey.currentState;
+    return root != null &&
+        root.canPop() &&
+        navigator != null &&
+        navigator == App.mainNavigatorKey?.currentState;
+  }
+
+  @override
+  bool get popGestureEnabled {
+    if (_coveredByRootOverlay) {
+      return false;
+    }
+    return super.popGestureEnabled;
+  }
+
   Widget? _child;
 
   @override
