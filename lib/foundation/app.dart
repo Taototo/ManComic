@@ -87,6 +87,13 @@ class _App {
   /// 这里做一次很短的节流，保证「一次手势只回退一层」。
   DateTime? _lastBackHandled;
 
+  /// 盖在界面上、却没有自己路由的浮层（目前只有长按封面预览 `ComicPeek`）
+  /// 的关闭回调。
+  ///
+  /// 这类浮层不在导航栈里，系统返回不会去关它，反而会把被它遮住的页面
+  /// 退掉，结果浮层孤零零地飘在上一个页面上。所以返回时要先关掉它。
+  VoidCallback? nonRouteOverlayDismisser;
+
   /// 统一的系统返回入口：一次只回退一层。
   ///
   /// App 里有两套导航器：
@@ -104,6 +111,14 @@ class _App {
       return;
     }
     _lastBackHandled = now;
+
+    // 非路由浮层（长按预览）最先处理：它不受导航栈管理，不先关掉的话，
+    // 被它盖住的页面会被退掉，浮层却留在上一个页面上。
+    final dismissOverlay = nonRouteOverlayDismisser;
+    if (dismissOverlay != null) {
+      dismissOverlay();
+      return;
+    }
 
     final root = rootNavigatorKey.currentState;
     // 根导航器：只有上面压着弹层时才需要处理。根路由自身挂着本方法所在的

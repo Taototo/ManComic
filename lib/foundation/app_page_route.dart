@@ -77,30 +77,39 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
 
   bool get preventRebuild;
 
-  /// 本页是否被「根导航器」上的弹层（收藏面板、弹窗、阅读器等）盖住。
+  /// 本页是否被「别的栈」上的东西盖住。
   ///
-  /// App 有两套导航栈：根导航器（弹层）和主导航器（三个 Tab 内的页面栈）。
-  /// 路由自带的边缘返回手势只知道自己在哪个栈，不知道另一套栈上还有东西
-  /// 盖着，而两套栈的栈顶路由会同时被判定为「当前页」，于是同一次侧滑被
-  /// 两边都消费掉：弹层关了，被盖住的页面也被划走了——看起来就是「一次
-  /// 侧滑跳了一级」。
+  /// 页面可能被两类东西遮住：
+  /// * 祖先导航器里的弹层——收藏面板、漫画源列表弹窗、阅读器、图片查看器…
+  ///   （根导航器在主 Tab 之上，弹窗内部又有自己的导航器，层层嵌套）；
+  /// * 没有自己路由的浮层——长按封面预览（`ComicPeek`）。
   ///
-  /// 所以只要根导航器上还有路由，主导航器里的页面就退出这次手势竞争。
-  /// 没有路由接管时，系统会补发一次普通返回（handlePopRoute），由根路由
-  /// 上的 PopScope 交给 [App.handleBack] 关掉弹层。
+  /// 路由自带的返回手势只知道「自己这条导航栈的栈顶是谁」，看不到外面盖着
+  /// 什么。而 `isCurrent` 是按导航器判断的，里外两条栈的栈顶会同时被认定为
+  /// 「当前页」，于是同一次返回被两边一起消费：弹层关了，被盖住的页面也被
+  /// 划走——看起来就是「一次返回跳过了一级」。
   ///
-  /// 只判定主导航器：弹层内部自己的嵌套导航器自成一层，不该受牵连。
-  bool get _coveredByRootOverlay {
-    final root = App.rootNavigatorKey.currentState;
-    return root != null &&
-        root.canPop() &&
-        navigator != null &&
-        navigator == App.mainNavigatorKey?.currentState;
+  /// 所以只要外面还盖着东西，本页就把这次返回让出去。没人接管时系统会补发
+  /// 一次普通返回（handlePopRoute），由根路由上的 PopScope 交给
+  /// [App.handleBack] 一层一层地退。
+  bool get _coveredByOverlay {
+    if (App.nonRouteOverlayDismisser != null) {
+      return true;
+    }
+    final nav = navigator;
+    if (nav == null) {
+      return false;
+    }
+    // 本导航器挂在某条祖先路由里（主 Tab 挂在根路由里、弹窗内部的导航器
+    // 挂在弹窗路由里…）。那条祖先路由如果已经不是栈顶，说明它上面还压着
+    // 别的东西，本页就不该接管这次返回。
+    final container = ModalRoute.of(nav.context);
+    return container != null && !container.isCurrent;
   }
 
   @override
   bool get popGestureEnabled {
-    if (_coveredByRootOverlay) {
+    if (_coveredByOverlay) {
       return false;
     }
     return super.popGestureEnabled;

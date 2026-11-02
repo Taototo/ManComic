@@ -31,12 +31,18 @@ class ComicPeek {
       ),
     );
     _entry = entry;
+    // 注册给返回入口：系统返回时先关掉这层预览，而不是把被它盖住的
+    // 列表页退掉。
+    App.nonRouteOverlayDismisser = dismiss;
     overlay.insert(entry);
   }
 
   static void dismiss() {
     _entry?.remove();
     _entry = null;
+    if (App.nonRouteOverlayDismisser == dismiss) {
+      App.nonRouteOverlayDismisser = null;
+    }
   }
 }
 
