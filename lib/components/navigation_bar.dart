@@ -829,23 +829,35 @@ class _NaviMainViewState extends State<_NaviMainView> {
               switchInCurve: Curves.easeOutCubic,
               switchOutCurve: Curves.easeInCubic,
               transitionBuilder: (child, animation) {
-                // 退场的 entry 的 controller 是倒放的，据此和新页面区分方向：
-                // 新页面从切换方向滑入，旧页面向反方向滑出。
-                final outgoing =
-                    animation.status == AnimationStatus.reverse;
-                final dx = (outgoing ? -_direction : _direction) * 0.05;
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
+                // 退场的 entry 的 controller 是倒放的，据此和入场页区分。
+                //
+                // 退场页**不做淡出**：整页 fade 会让新旧两页在同一时间都处于
+                // 半透明，两页的卡片、文字互相穿透，看起来就是「重影透图」。
+                // 这里让它原样留在下层，由不透明的入场页盖住。
+                if (animation.status == AnimationStatus.reverse) {
+                  // 旧页向切换的反方向平移出去，全程不透明，与新页交界清晰。
+                  // 它的 controller 是倒放的，所以用 ReverseAnimation 取 0→1。
+                  return SlideTransition(
                     position: Tween<Offset>(
-                      begin: Offset(dx, 0),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: ScaleTransition(
-                      scale: Tween<double>(begin: 0.985, end: 1.0)
-                          .animate(animation),
-                      child: child,
-                    ),
+                      begin: Offset.zero,
+                      end: Offset(-_direction * 0.045, 0),
+                    ).animate(ReverseAnimation(animation)),
+                    child: child,
+                  );
+                }
+                return SlideTransition(
+                  position: Tween<Offset>(
+                    begin: Offset(_direction * 0.045, 0),
+                    end: Offset.zero,
+                  ).animate(CurvedAnimation(
+                    parent: animation,
+                    curve: Curves.easeOutCubic,
+                  )),
+                  // 页面自身背景多半是透明的，滑入时露出的部分会看见下层旧页。
+                  // 垫一层 surface，保证入场页是「实心」的，只露出移动的那一条边。
+                  child: ColoredBox(
+                    color: Theme.of(context).colorScheme.surface,
+                    child: child,
                   ),
                 );
               },

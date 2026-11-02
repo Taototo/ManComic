@@ -34,17 +34,18 @@ class DirectionalIndexedStack extends StatelessWidget {
           Positioned.fill(
             child: IgnorePointer(
               ignoring: i != index,
-              child: AnimatedSlide(
-                duration: duration,
-                curve: Curves.easeOutCubic,
-                offset: Offset(
-                  i == index ? 0 : (i < index ? -slide : slide),
-                  0,
-                ),
-                child: AnimatedOpacity(
+              // 只画当前页。之前靠 AnimatedOpacity 交叉淡化，两页在过渡期
+              // 同时半透明，卡片和文字互相穿透，看着就是「重影」。
+              // Offstage 保留 State 但不绘制，切换时只让新页从侧面滑入。
+              child: Offstage(
+                offstage: i != index,
+                child: AnimatedSlide(
                   duration: duration,
-                  curve: Curves.easeOut,
-                  opacity: i == index ? 1 : 0,
+                  curve: Curves.easeOutCubic,
+                  offset: Offset(
+                    i == index ? 0 : (i < index ? -slide : slide),
+                    0,
+                  ),
                   child: children[i],
                 ),
               ),
