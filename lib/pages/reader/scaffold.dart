@@ -898,45 +898,13 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     required VoidCallback onPressed,
     bool isActive = false,
   }) {
-    return Expanded(
-      child: InkWell(
-        onTap: onPressed,
-        borderRadius: BorderRadius.circular(12),
-        child: Container(
-          padding: const EdgeInsets.symmetric(vertical: 8),
-          decoration: BoxDecoration(
-            color: isActive
-                ? context.colorScheme.primaryContainer.withValues(alpha: 0.8)
-                : Colors.transparent,
-            borderRadius: BorderRadius.circular(12),
-          ),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              Icon(
-                icon,
-                size: 20,
-                color: isActive
-                    ? context.colorScheme.primary
-                    : context.colorScheme.onSurfaceVariant,
-              ),
-              const SizedBox(height: 4),
-              Text(
-                label,
-                style: TextStyle(
-                  fontSize: 10,
-                  fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-                  color: isActive
-                      ? context.colorScheme.primary
-                      : context.colorScheme.onSurfaceVariant,
-                ),
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-              ),
-            ],
-          ),
-        ),
-      ),
+    return _BottomActionButton(
+      icon: icon,
+      label: label,
+      onPressed: onPressed,
+      isActive: isActive,
+      // 翻页 / 切章时 isLiked 也会变，但那不是点出来的，不该弹。
+      positionKey: '${context.reader.chapter}:${context.reader.page}',
     );
   }
 
@@ -1593,6 +1561,149 @@ class _SelectImageOverlayContentState
                 ),
               ],
             ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 阅读器底部的功能按钮（收藏 / 保存 / 分享 / 自动 / 设置）。
+///
+/// 三层反馈叠在一起：
+/// 1. 按住时图标轻微回缩 —— 任何按钮都有，手指一按就知道点到了；
+/// 2. 收藏这类有「激活」态的按钮，从未激活变成激活时弹一下 + 轻触感；
+/// 3. 翻页、切章也会让激活态变化，但那不是点击造成的，用 positionKey 抑制掉。
+class _BottomActionButton extends StatefulWidget {
+  const _BottomActionButton({
+    required this.icon,
+    required this.label,
+    required this.onPressed,
+    required this.isActive,
+    required this.positionKey,
+  });
+
+  final IconData icon;
+
+  final String label;
+
+  final VoidCallback onPressed;
+
+  final bool isActive;
+
+  /// 当前章节:页码。变化说明是翻页引起的，不是点击。
+  final String positionKey;
+
+  @override
+  State<_BottomActionButton> createState() => _BottomActionButtonState();
+}
+
+class _BottomActionButtonState extends State<_BottomActionButton>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 300),
+  );
+
+  late final Animation<double> _bounce = TweenSequence<double>([
+    TweenSequenceItem(
+      tween: Tween(begin: 1.0, end: 1.32)
+          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      weight: 35,
+    ),
+    TweenSequenceItem(
+      tween: Tween(begin: 1.32, end: 0.92)
+          .chain(CurveTween(curve: Curves.easeInOut)),
+      weight: 35,
+    ),
+    TweenSequenceItem(
+      tween: Tween(begin: 0.92, end: 1.0)
+          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      weight: 30,
+    ),
+  ]).animate(_controller);
+
+  bool _pressed = false;
+
+  late bool _wasActive = widget.isActive;
+
+  late String _positionKey = widget.positionKey;
+
+  @override
+  void didUpdateWidget(_BottomActionButton oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (_positionKey != widget.positionKey) {
+      _positionKey = widget.positionKey;
+      _wasActive = widget.isActive;
+      return;
+    }
+    if (!_wasActive && widget.isActive) {
+      HapticFeedback.lightImpact();
+      _controller.forward(from: 0);
+    }
+    _wasActive = widget.isActive;
+  }
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: InkWell(
+        onTap: widget.onPressed,
+        onHighlightChanged: (v) {
+          if (_pressed != v) {
+            setState(() {
+              _pressed = v;
+            });
+          }
+        },
+        borderRadius: BorderRadius.circular(12),
+        child: Container(
+          padding: const EdgeInsets.symmetric(vertical: 8),
+          decoration: BoxDecoration(
+            color: widget.isActive
+                ? context.colorScheme.primaryContainer.withValues(alpha: 0.8)
+                : Colors.transparent,
+            borderRadius: BorderRadius.circular(12),
+          ),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              AnimatedScale(
+                scale: _pressed ? 0.86 : 1.0,
+                duration: const Duration(milliseconds: 110),
+                curve: Curves.easeOut,
+                child: ScaleTransition(
+                  scale: _bounce,
+                  child: Icon(
+                    widget.icon,
+                    size: 20,
+                    color: widget.isActive
+                        ? context.colorScheme.primary
+                        : context.colorScheme.onSurfaceVariant,
+                  ),
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                widget.label,
+                style: TextStyle(
+                  fontSize: 10,
+                  fontWeight:
+                      widget.isActive ? FontWeight.w600 : FontWeight.normal,
+                  color: widget.isActive
+                      ? context.colorScheme.primary
+                      : context.colorScheme.onSurfaceVariant,
+                ),
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+              ),
+            ],
           ),
         ),
       ),

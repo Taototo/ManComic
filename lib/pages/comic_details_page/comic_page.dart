@@ -919,7 +919,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   }
 }
 
-class _ActionButton extends StatelessWidget {
+class _ActionButton extends StatefulWidget {
   const _ActionButton({
     required this.icon,
     required this.text,
@@ -948,6 +948,15 @@ class _ActionButton extends StatelessWidget {
   final void Function()? onLongPressed;
 
   @override
+  State<_ActionButton> createState() => _ActionButtonState();
+}
+
+class _ActionButtonState extends State<_ActionButton> {
+  /// 手指按住时为 true。收藏按钮点开的是面板、图标状态不会立刻变，
+  /// 靠这一下按压回缩给「点到了」的回执。
+  bool _pressed = false;
+
+  @override
   Widget build(BuildContext context) {
     return Container(
       margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
@@ -960,30 +969,43 @@ class _ActionButton extends StatelessWidget {
       ),
       child: InkWell(
         onTap: () {
-          if (!(isLoading ?? false)) {
-            onPressed();
+          if (!(widget.isLoading ?? false)) {
+            widget.onPressed();
           }
         },
-        onLongPress: onLongPressed,
+        onLongPress: widget.onLongPressed,
+        onHighlightChanged: (v) {
+          if (_pressed != v) {
+            setState(() {
+              _pressed = v;
+            });
+          }
+        },
         borderRadius: BorderRadius.circular(18),
         child: IconTheme.merge(
-          data: IconThemeData(size: 20, color: iconColor),
+          data: IconThemeData(size: 20, color: widget.iconColor),
           child: Row(
             mainAxisSize: MainAxisSize.min,
             children: [
-              if (isLoading ?? false)
-                const SizedBox(
-                  width: 20,
-                  height: 20,
-                  child: CircularProgressIndicator(strokeWidth: 1.8),
-                )
-              else
-                _BouncyActiveIcon(
-                  active: isActive ?? false,
-                  child: (isActive ?? false) ? (activeIcon ?? icon) : icon,
-                ),
+              // 加载中的 spinner 也必须放在 _BouncyActiveIcon 内部。
+              // 之前用 if/else 在外层切分支，请求开始会把图标整个卸载，
+              // 请求结束时再新建一个 State —— didUpdateWidget 不会触发，
+              // 于是「点赞成功」这一下的弹跳永远不会播。
+              _BouncyActiveIcon(
+                active: widget.isActive ?? false,
+                pressed: _pressed,
+                child: (widget.isLoading ?? false)
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 1.8),
+                      )
+                    : ((widget.isActive ?? false)
+                        ? (widget.activeIcon ?? widget.icon)
+                        : widget.icon),
+              ),
               const SizedBox(width: 8),
-              Text(text),
+              Text(widget.text),
             ],
           ).paddingHorizontal(16),
         ),
@@ -997,9 +1019,16 @@ class _ActionButton extends StatelessWidget {
 /// 图标本身是硬切（描边 → 实心），加上这一下缩放和轻触感，
 /// 收藏这种高频操作才有「点到了」的回执。
 class _BouncyActiveIcon extends StatefulWidget {
-  const _BouncyActiveIcon({required this.active, required this.child});
+  const _BouncyActiveIcon({
+    required this.active,
+    required this.child,
+    this.pressed = false,
+  });
 
   final bool active;
+
+  /// 手指按住时轻微回缩，松手弹回。
+  final bool pressed;
 
   final Widget child;
 
@@ -1049,9 +1078,14 @@ class _BouncyActiveIconState extends State<_BouncyActiveIcon>
 
   @override
   Widget build(BuildContext context) {
-    return ScaleTransition(
-      scale: _scale,
-      child: widget.child,
+    return AnimatedScale(
+      scale: widget.pressed ? 0.86 : 1.0,
+      duration: const Duration(milliseconds: 110),
+      curve: Curves.easeOut,
+      child: ScaleTransition(
+        scale: _scale,
+        child: widget.child,
+      ),
     );
   }
 }
