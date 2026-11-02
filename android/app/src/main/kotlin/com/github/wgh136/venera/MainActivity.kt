@@ -128,13 +128,13 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                     res.success(ok)
                 }
-                "restartApp" -> {
+                "closeApp" -> {
                     try {
-                        // 新实例的 onCreate 会应用待切换的图标
-                        restartApp()
+                        // 退出前把待切换的图标应用到桌面，用户从桌面重新打开即为新图标
+                        closeApp()
                         res.success(true)
                     } catch (e: Exception) {
-                        Log.e("Venera", "restartApp failed", e)
+                        Log.e("Venera", "closeApp failed", e)
                         res.success(false)
                     }
                 }
@@ -336,16 +336,19 @@ class MainActivity : FlutterFragmentActivity() {
         }
     }
 
-    /// 重启到新的任务，用于图标切换后让用户立即看到效果。
-    private fun restartApp() {
-        val intent = Intent(this, MainActivity::class.java)
-        intent.addFlags(
-            Intent.FLAG_ACTIVITY_NEW_TASK or
-                    Intent.FLAG_ACTIVITY_CLEAR_TASK or
-                    Intent.FLAG_ACTIVITY_RESET_TASK_IF_NEEDED
-        )
-        startActivity(intent)
-        finish()
+    /// 直接关闭应用，并在关闭前把待切换的图标应用到桌面。
+    ///
+    /// 用于图标切换弹窗里的「立即重启」：不再重启到新任务的启动页
+    /// （那会让用户先看一遍加载画面），而是就地退出；
+    /// 下次从桌面打开时就是新图标。组件切换本来就有
+    /// 「运行中执行可能被系统杀任务」的风险，这里反正在退出，无感。
+    private fun closeApp() {
+        try {
+            applyPendingIcon()
+        } catch (e: Exception) {
+            Log.e("Venera", "closeApp: applyPendingIcon failed", e)
+        }
+        finishAffinity()
     }
 
     /// 当前生效的屏幕亮度（0..1）。优先取本窗口的覆盖值，其次取系统亮度。

@@ -78,11 +78,14 @@ class AppIcon {
     return true;
   }
 
-  /// 重启应用（会先应用待切换的图标）。
-  static Future<void> restart() async {
+  /// 关闭应用，退出前把待切换的图标应用到桌面。
+  ///
+  /// 用于「立即重启」按钮：不再重启到新任务的加载页，
+  /// 而是直接退出，下次从桌面打开即为新图标。
+  static Future<void> closeAndApply() async {
     if (!Platform.isAndroid) return;
     try {
-      await _channel.invokeMethod('restartApp');
+      await _channel.invokeMethod('closeApp');
     } catch (_) {
       // ignore
     }

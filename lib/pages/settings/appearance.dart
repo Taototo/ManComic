@@ -162,21 +162,22 @@ class _AppIconPickerState extends State<_AppIconPicker> {
       builder: (dialogContext) => ContentDialog(
         title: "Icon Saved".tl,
         content: Text(
-          "The launcher icon will be updated after the app restarts. "
-                  "The change does not take effect in this session."
+          "The launcher icon will be updated the next time the app starts. "
+                  "Restart later, or close the app now to apply it."
               .tl,
         ).paddingHorizontal(16).paddingVertical(8),
         actions: [
           TextButton(
-            onPressed: () => dialogContext.pop(),
-            child: Text("Later".tl),
-          ),
-          FilledButton(
             onPressed: () {
               dialogContext.pop();
-              AppIcon.restart();
+              AppIcon.closeAndApply();
             },
             child: Text("Restart Now".tl),
+          ),
+          // 默认动作：稍后重启
+          FilledButton(
+            onPressed: () => dialogContext.pop(),
+            child: Text("Restart Later".tl),
           ),
         ],
       ),
