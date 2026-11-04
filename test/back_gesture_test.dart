@@ -154,16 +154,17 @@ void main() {
         tester.state<PredictiveBackGestureDetectorState>(
             find.byType(PredictiveBackGestureDetector));
 
-    // 划到 30%：路由的进度是「还剩多少」，所以动画值应为 0.7
+    // 划到 30%：系统 progress 按「触发返回的距离」归一化，页面位移做了
+    // 0.5 的减速映射，动画值应为 1 - 0.5 × 0.3 = 0.85
     expect(detector.handleStartBackGesture(_backEvent(0.3)), isTrue);
     await tester.pump();
-    expect(route.animation!.value, closeTo(0.7, 0.001));
+    expect(route.animation!.value, closeTo(0.85, 0.001));
 
     detector.handleCommitBackGesture();
     await tester.pump();
     // 关键断言：不能跳回 1.0。框架默认的 handleCommitBackGesture 会
     // reverse(from: upperBound)，页面先整页弹回原位再滑走（用户反馈的「闪一下」）。
-    expect(route.animation!.value, lessThan(0.75));
+    expect(route.animation!.value, lessThan(0.9));
 
     await tester.pumpAndSettle();
     expect(find.text('second'), findsNothing);
@@ -192,11 +193,12 @@ void main() {
     final detector = tester.state<PredictiveBackGestureDetectorState>(
         find.byType(PredictiveBackGestureDetector));
 
-    // 划走 85%，只剩一点点位移：按框架「时长随剩余比例缩放」的算法，
-    // 这点位移会在 50ms 内滑完，观感是"闪"一下消失。
+    // 划走 85%（系统 progress 0.85，减速映射后页面只剩一半多一点位移）：
+    // 按框架「时长随剩余比例缩放」的算法，这点位移会在五十毫秒内滑完，
+    // 观感是"闪"一下消失。
     detector.handleStartBackGesture(_backEvent(0.85));
     await tester.pump();
-    expect(route.animation!.value, closeTo(0.15, 0.001));
+    expect(route.animation!.value, closeTo(0.575, 0.001));
 
     detector.handleCommitBackGesture();
     await tester.pump();
@@ -231,9 +233,10 @@ void main() {
         tester.state<PredictiveBackGestureDetectorState>(
             find.byType(PredictiveBackGestureDetector));
 
+    // 划到 30%（减速映射后动画值 0.85）
     detector.handleStartBackGesture(_backEvent(0.3));
     await tester.pump();
-    expect(route.animation!.value, closeTo(0.7, 0.001));
+    expect(route.animation!.value, closeTo(0.85, 0.001));
 
     detector.handleCancelBackGesture();
     await tester.pumpAndSettle();

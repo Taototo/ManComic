@@ -162,20 +162,78 @@ class NaviPaneState extends State<NaviPane>
     final confirmed = await showDialog<bool>(
       context: rootContext,
       builder: (dialogContext) {
-        return ContentDialog(
-          title: "Exit".tl,
-          content: Text("Are you sure you want to exit?".tl)
-              .paddingHorizontal(16),
-          actions: [
-            Button.text(
-              onPressed: () => Navigator.pop(dialogContext, false),
-              child: Text("Cancel".tl),
+        // 退出确认弹窗。
+        //
+        // 之前直接套通用 ContentDialog，只有一行字加两个文字按钮，看起来
+        // 像个半成品。按 Material 3 的确认对话框排版重做：图标 + 标题 +
+        // 说明文字，两个按钮等宽并排，退出用警示色（error）突出分量。
+        var colorScheme = Theme.of(dialogContext).colorScheme;
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(24),
+          ),
+          backgroundColor: colorScheme.surface,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Center(
+                  child: Container(
+                    width: 64,
+                    height: 64,
+                    decoration: BoxDecoration(
+                      color: colorScheme.errorContainer,
+                      shape: BoxShape.circle,
+                    ),
+                    child: Icon(
+                      Icons.exit_to_app_rounded,
+                      size: 28,
+                      color: colorScheme.onErrorContainer,
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+                Text(
+                  "Exit".tl,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    fontSize: 16,
+                    fontWeight: FontWeight.w600,
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Text(
+                  "Are you sure you want to exit?".tl,
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 13,
+                    color: colorScheme.outline,
+                  ),
+                ),
+                const SizedBox(height: 24),
+                Row(
+                  children: [
+                    Expanded(
+                      child: Button.outlined(
+                        onPressed: () => Navigator.pop(dialogContext, false),
+                        child: Text("Cancel".tl),
+                      ),
+                    ),
+                    const SizedBox(width: 12),
+                    Expanded(
+                      child: Button.filled(
+                        color: colorScheme.error,
+                        onPressed: () => Navigator.pop(dialogContext, true),
+                        child: Text("Exit".tl),
+                      ),
+                    ),
+                  ],
+                ),
+              ],
             ),
-            Button.text(
-              onPressed: () => Navigator.pop(dialogContext, true),
-              child: Text("Exit".tl),
-            ),
-          ],
+          ),
         );
       },
     );

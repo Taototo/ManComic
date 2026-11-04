@@ -112,6 +112,32 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
     return popped;
   }
 
+  /// 侧滑取消（松手退回）的回弹。
+  ///
+  /// 框架默认是 `forward()`：时长按「剩余比例」缩放，只拖了一半的话
+  /// 150ms 就弹回去了，显得仓促。这里固定给一段更从容的缓出回弹；
+  /// 与框架实现一样，在动画结束时复位导航器的手势状态。
+  @override
+  void handleCancelBackGesture() {
+    final controller = this.controller;
+    final navigator = this.navigator;
+    if (controller == null || navigator == null || controller.isCompleted) {
+      navigator?.didStopUserGesture();
+      return;
+    }
+    controller.animateTo(
+      1.0,
+      duration: const Duration(milliseconds: 300),
+      curve: Curves.easeOutCubic,
+    );
+    late final AnimationStatusListener statusCallback;
+    statusCallback = (status) {
+      controller.removeStatusListener(statusCallback);
+      navigator.didStopUserGesture();
+    };
+    controller.addStatusListener(statusCallback);
+  }
+
   bool get enableIOSGesture;
 
   bool get preventRebuild;
@@ -602,6 +628,14 @@ class PredictiveBackGestureDetectorState extends State<PredictiveBackGestureDete
     super.dispose();
   }
 
+  /// 系统手势进度 → 页面位移的减速系数。
+  ///
+  /// 系统给的 progress 按「触发返回的距离」归一化，而这段距离只有屏幕宽度的
+  /// 一小段——直接用 `1 - progress` 的话，手指拖一点点页面就整页滑走，观感
+  /// 就是「按住一拖页面一下就缩进去了」。乘上系数让页面每拖一段只走一半，
+  /// 手指的移动与页面的位移大致成比例；松手后剩余的距离由补完动画顺出去。
+  static const double _kDragRatio = 0.5;
+
   @override
   bool handleStartBackGesture(PredictiveBackEvent backEvent) {
     // 按键返回没有触摸位置，交给系统走原来的 popRoute 流程。
@@ -610,7 +644,9 @@ class PredictiveBackGestureDetectorState extends State<PredictiveBackGestureDete
     }
     _active = true;
     // 系统给的 progress 是「离起点多远」，路由要的是「还剩多少」。
-    widget.route.handleStartBackGesture(progress: 1 - backEvent.progress);
+    widget.route.handleStartBackGesture(
+      progress: 1 - _kDragRatio * backEvent.progress,
+    );
     return true;
   }
 
@@ -620,7 +656,7 @@ class PredictiveBackGestureDetectorState extends State<PredictiveBackGestureDete
       return;
     }
     widget.route.handleUpdateBackGestureProgress(
-      progress: 1 - backEvent.progress,
+      progress: 1 - _kDragRatio * backEvent.progress,
     );
   }
 
@@ -778,7 +814,31 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
   void initState() {
     super.initState();
     _gestureDriven = widget.dragging;
+    widget.primaryAnimation.addStatusListener(_handleAnimationStatus);
     _setupAnimations();
+  }
+
+  @override
+  void dispose() {
+    widget.primaryAnimation.removeStatusListener(_handleAnimationStatus);
+    super.dispose();
+  }
+
+  /// 动画一结束就解除「跟手线性」锁定。
+  ///
+  /// 锁定只是为了避免松手瞬间曲线切换造成的位移突变；动画停下来后值不再
+  /// 变化，此时恢复默认缓动不会产生任何跳变，却能让这一页之后的进出动画
+  /// 回到正常的缓动曲线（否则经历过一次取消回弹的页面会一直匀速）。
+  void _handleAnimationStatus(AnimationStatus status) {
+    if (_gestureDriven &&
+        !widget.dragging &&
+        (status == AnimationStatus.completed ||
+            status == AnimationStatus.dismissed)) {
+      _gestureDriven = false;
+      if (mounted) {
+        setState(_setupAnimations);
+      }
+    }
   }
 
   @override
@@ -786,6 +846,10 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
     super.didUpdateWidget(oldWidget);
     if (widget.dragging && !_gestureDriven) {
       _gestureDriven = true;
+    }
+    if (oldWidget.primaryAnimation != widget.primaryAnimation) {
+      oldWidget.primaryAnimation.removeStatusListener(_handleAnimationStatus);
+      widget.primaryAnimation.addStatusListener(_handleAnimationStatus);
     }
     if (oldWidget.primaryAnimation != widget.primaryAnimation ||
         oldWidget.secondaryAnimation != widget.secondaryAnimation ||

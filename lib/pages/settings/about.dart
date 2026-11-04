@@ -649,51 +649,118 @@ Future<void> _downloadAndInstallUpdate(AppUpdateInfo info) async {
             var received = progress["received"] ?? 0;
             var total = progress["total"] ?? 0;
             var speed = progress["speed"] ?? 0;
-            Widget content;
-            if (received <= 0) {
-              content = const SizedBox(
-                height: 48,
-                child: Center(child: CircularProgressIndicator()),
-              );
-            } else {
-              var value = total > 0 ? received / total : 0.0;
-              content = Column(
-                mainAxisSize: MainAxisSize.min,
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  LinearProgressIndicator(value: total > 0 ? value : null),
-                  const SizedBox(height: 8),
-                  Text(
-                    total > 0
-                        ? "${(value * 100).toStringAsFixed(1)}%   "
-                            "${_toMb(received)} / ${_toMb(total)} MB"
-                        : "${_toMb(received)} MB",
-                    style: const TextStyle(fontSize: 12),
-                  ),
-                  if (speed > 0)
-                    Text(
-                      "${_toMb(speed)} MB/s",
-                      style: TextStyle(
-                        fontSize: 12,
-                        color: Theme.of(context).colorScheme.outline,
+            var colorScheme = Theme.of(context).colorScheme;
+
+            // 下载进度弹窗。
+            //
+            // 之前直接复用通用 ContentDialog（顶部一个 X + 标题栏，进度条
+            // 贴着内容边），观感更像一个塞满控件的页面。这里按 Material 3
+            // 的对话框排版重做：居中的图标 + 大号百分比 + 圆角进度条 +
+            // 两端对齐的字节与速度，取消收成整宽按钮。
+            var showProgress = received > 0;
+            var value = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
+            return Dialog(
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(24),
+              ),
+              backgroundColor: colorScheme.surface,
+              child: Padding(
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  crossAxisAlignment: CrossAxisAlignment.stretch,
+                  children: [
+                    Center(
+                      child: Container(
+                        width: 64,
+                        height: 64,
+                        decoration: BoxDecoration(
+                          color: colorScheme.primaryContainer,
+                          shape: BoxShape.circle,
+                        ),
+                        child: Icon(
+                          Icons.cloud_download_outlined,
+                          size: 30,
+                          color: colorScheme.onPrimaryContainer,
+                        ),
                       ),
                     ),
-                ],
-              );
-            }
-            return ContentDialog(
-              title: "Downloading update".tl,
-              content: content,
-              actions: [
-                Button.text(
-                  onPressed: () {
-                    dialogOpen = false;
-                    cancelToken.cancel();
-                    Navigator.pop(dialogContext);
-                  },
-                  child: Text("Cancel".tl),
+                    const SizedBox(height: 16),
+                    Text(
+                      "Downloading update".tl,
+                      textAlign: TextAlign.center,
+                      style: const TextStyle(
+                        fontSize: 16,
+                        fontWeight: FontWeight.w600,
+                      ),
+                    ),
+                    const SizedBox(height: 20),
+                    if (!showProgress)
+                      const SizedBox(
+                        height: 40,
+                        child:
+                            Center(child: CircularProgressIndicator(strokeWidth: 4)),
+                      )
+                    else ...[
+                      Text(
+                        total > 0
+                            ? "${(value * 100).toStringAsFixed(1)}%"
+                            : "${_toMb(received)} MB",
+                        textAlign: TextAlign.center,
+                        style: TextStyle(
+                          fontSize: 32,
+                          fontWeight: FontWeight.w700,
+                          color: colorScheme.primary,
+                          letterSpacing: -0.5,
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                      ClipRRect(
+                        borderRadius: BorderRadius.circular(99),
+                        child: LinearProgressIndicator(
+                          value: total > 0 ? value : null,
+                          minHeight: 10,
+                          backgroundColor:
+                              colorScheme.surfaceContainerHighest,
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      Row(
+                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                        children: [
+                          Text(
+                            total > 0
+                                ? "${_toMb(received)} / ${_toMb(total)} MB"
+                                : "${_toMb(received)} MB",
+                            style: TextStyle(
+                              fontSize: 12,
+                              color: colorScheme.outline,
+                            ),
+                          ),
+                          if (speed > 0)
+                            Text(
+                              "${_toMb(speed)} MB/s",
+                              style: TextStyle(
+                                fontSize: 12,
+                                color: colorScheme.outline,
+                              ),
+                            ),
+                        ],
+                      ),
+                    ],
+                    const SizedBox(height: 20),
+                    Button.filled(
+                      onPressed: () {
+                        dialogOpen = false;
+                        cancelToken.cancel();
+                        Navigator.pop(dialogContext);
+                      },
+                      child: Text("Cancel".tl),
+                    ),
+                  ],
                 ),
-              ],
+              ),
             );
           });
         });

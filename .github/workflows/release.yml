@@ -83,10 +83,17 @@ jobs:
           aapt=$(ls "$ANDROID_SDK_ROOT"/build-tools/*/aapt | sort | tail -1)
           "$aapt" dump badging build/app/outputs/flutter-apk/app-release.apk | head -1
 
+      # 应用内更新按约定名 `ManComic-<版本>.apk` 探测安装包直链，
+      # 发布资产必须沿用这个名字，不能用 gradle 的默认产物名。
+      - name: Rename APK
+        run: |
+          cp build/app/outputs/flutter-apk/app-release.apk "ManComic-${GITHUB_REF_NAME#v}.apk"
+          sha256sum "ManComic-${GITHUB_REF_NAME#v}.apk"
+
       - name: Publish release
         uses: softprops/action-gh-release@v2
         with:
           name: ManComic ${{ github.ref_name }}
-          files: build/app/outputs/flutter-apk/app-release.apk
+          files: ManComic-*.apk
           generate_release_notes: true
           fail_on_unmatched_files: true
