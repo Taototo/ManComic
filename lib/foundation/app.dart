@@ -2,7 +2,6 @@ import 'dart:io';
 import 'dart:ui';
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:venera/foundation/history.dart';
 
@@ -104,11 +103,24 @@ class _App {
   /// 视觉上根导航器永远在上面，所以顺序必须是「先根、后主、最后退出应用」。
   /// 由单一入口按这个顺序退栈，才不会出现一次侧滑关掉两层、或者关掉
   /// 被弹层遮住的下层页面。
-  Future<void> handleBack() async {
+  /// 统一的系统返回入口：一次只回退一层。
+  ///
+  /// App 里有两套导航器：
+  /// * 根导航器（rootNavigatorKey）挂着主导航器上方的弹层，如收藏面板、
+  ///   弹窗、阅读器；
+  /// * 主导航器（mainNavigatorKey）装着三个 Tab 里的页面栈。
+  ///
+  /// 视觉上根导航器永远在上面，所以顺序必须是「先根、后主、最后退出应用」。
+  /// 由单一入口按这个顺序退栈，才不会出现一次侧滑关掉两层、或者关掉
+  /// 被弹层遮住的下层页面。
+  ///
+  /// 返回 true 表示这次返回已经被消费；返回 false 表示栈里已经没有可退的
+  /// 页面（退到最底层了），由调用方决定是否退出应用。
+  Future<bool> handleBack() async {
     final now = DateTime.now();
     final last = _lastBackHandled;
     if (last != null && now.difference(last) < const Duration(milliseconds: 120)) {
-      return;
+      return true;
     }
     _lastBackHandled = now;
 
@@ -117,14 +129,14 @@ class _App {
     final dismissOverlay = nonRouteOverlayDismisser;
     if (dismissOverlay != null) {
       dismissOverlay();
-      return;
+      return true;
     }
 
     final root = rootNavigatorKey.currentState;
     // 根导航器：只有上面压着弹层时才需要处理。根路由自身挂着本方法所在的
     // PopScope，这里必须先判 canPop()，否则会绕回自己形成递归。
     if (root != null && root.canPop() && await root.maybePop()) {
-      return;
+      return true;
     }
 
     // 主导航器：不要先判 canPop()。收藏页的多选/搜索状态是用 PopScope 表达
@@ -133,14 +145,11 @@ class _App {
     // 会继续往下走。
     final main = mainNavigatorKey?.currentState;
     if (main != null && await main.maybePop()) {
-      return;
+      return true;
     }
 
-    // 已经退到最底层：Android 上按返回键退出应用；其它平台没有系统返回键，
-    // 不应该由这里主动结束进程。
-    if (isAndroid) {
-      SystemNavigator.pop();
-    }
+    // 已经退到最底层，交给调用方决定是否退出。
+    return false;
   }
 
   Future<void> init() async {

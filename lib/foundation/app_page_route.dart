@@ -3,6 +3,7 @@ import 'dart:ui';
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
+import 'package:flutter/services.dart';
 import 'package:venera/foundation/app.dart';
 
 const double _kBackGestureWidth = 20.0;
@@ -154,8 +155,9 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
   }
 
   @override
-  Widget buildTransitions(BuildContext context, Animation<double> animation, Animation<double> secondaryAnimation, Widget child) {
-    // 统一用「水平滑动」转场，Android 也不用 PredictiveBack/zoom 那套。
+  Widget buildTransitions(BuildContext context, Animation<double> animation,
+      Animation<double> secondaryAnimation, Widget child) {
+    // 统一用「水平滑动」转场，Android 也不用 zoom 那套。
     //
     // zoom 转场（Material 默认）是**两页同时缩放 + 淡化**：进/出页面在
     // 300ms 内都是半透明的，而本 App 的页面背景是透明的（只有卡片自己带
@@ -163,23 +165,32 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
     // 内容，边框还错开十几像素。侧滑返回走到一半松手时最明显。
     //
     // 纯滑动转场里，上层页始终不透明地把下层页推走/拉回，不存在两页同时
-    // 可见的瞬间，也就没有这种穿透。Android 的预测性返回手势仍然可用，
-    // 只是预览动画换成了跟手滑动。
-    PageTransitionsBuilder builder = SlidePageTransitionBuilder();
+    // 可见的瞬间，也就没有这种穿透。
+    Widget result = const SlidePageTransitionBuilder().buildTransitions(
+      this,
+      context,
+      animation,
+      secondaryAnimation,
+      child,
+    );
 
-  return builder.buildTransitions(
-        this,
-        context,
-        animation,
-        secondaryAnimation,
-    enableIOSGesture && App.isIOS
-      ? IOSBackGestureDetector(
+    if (enableIOSGesture && App.isIOS) {
+      // iOS：左边缘拖拽返回，自带跟手进度。
+      return IOSBackGestureDetector(
         gestureWidth: _kBackGestureWidth,
         enabledCallback: () => _isPopGestureEnabled<T>(this),
         onStartPopGesture: () => _startPopGesture(this),
-        child: child,
-        )
-      : child);
+        child: result,
+      );
+    }
+
+    if (App.isAndroid) {
+      // Android：系统手势返回（预测性返回）是全局的，没有「左边缘拖拽」
+      // 这种局部识别器，只能挂到 WidgetsBinding 的观察者上。
+      return _PredictiveBackGestureDetector(route: this, child: result);
+    }
+
+    return result;
   }
 
   IOSBackGestureController _startPopGesture(PageRoute<T> route) {
@@ -493,37 +504,246 @@ class _BackSwipeRecognizer extends OneSequenceGestureRecognizer {
   void didStopTrackingLastPointer(int pointer) {}
 }
 
+/// Android 预测性返回（侧滑返回）的接管者。
+///
+/// Flutter 只在自带的 [PredictiveBackPageTransitionsBuilder] 里监听系统手势，
+/// 本 App 用的是自己的水平滑动转场，不接管这些事件的话，手指划动时页面
+/// **完全不动**，松手后才整页滑走——观感就是「划到一半突然跳一下」。
+///
+/// 这里把系统手势的 start / update / cancel / commit 转给 [PageRoute] 的进度
+/// 接口，转场动画就跟着手指走，松手时由路由自己补完或回弹。
+///
+/// 只有 Android 会收到这些事件；Android 13 及以下、以及按返回键触发时，
+/// 系统不会发送手势事件，仍然走原来的 popRoute 流程。
+class _PredictiveBackGestureDetector extends StatefulWidget {
+  const _PredictiveBackGestureDetector({
+    required this.route,
+    required this.child,
+  });
+
+  final PageRoute<dynamic> route;
+
+  final Widget child;
+
+  @override
+  State<_PredictiveBackGestureDetector> createState() =>
+      _PredictiveBackGestureDetectorState();
+}
+
+class _PredictiveBackGestureDetectorState extends State<_PredictiveBackGestureDetector>
+    with WidgetsBindingObserver {
+  /// 本次手势是否由自己接管，避免同栈里多个路由同时响应。
+  bool _active = false;
+
+  /// 只有「本页是栈顶、且真的能退」时才接管。
+  ///
+  /// `popGestureEnabled` 里还包含「本页是否被弹层盖住」的判断，弹层自身的
+  /// 返回由它自己的路由处理；`popDisposition` 则覆盖了收藏页多选这类用
+  /// PopScope 表达的内部状态——那时的返回要交给 PopScope，不能直接弹栈。
+  bool get _enabled =>
+      widget.route.isCurrent &&
+      widget.route.popDisposition != RoutePopDisposition.doNotPop &&
+      widget.route.popGestureEnabled &&
+      !widget.route.isFirst;
+
+  @override
+  void initState() {
+    super.initState();
+    WidgetsBinding.instance.addObserver(this);
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  @override
+  bool handleStartBackGesture(PredictiveBackEvent backEvent) {
+    // 按键返回没有触摸位置，交给系统走原来的 popRoute 流程。
+    if (backEvent.isButtonEvent || !_enabled) {
+      return false;
+    }
+    _active = true;
+    // 系统给的 progress 是「离起点多远」，路由要的是「还剩多少」。
+    widget.route.handleStartBackGesture(progress: 1 - backEvent.progress);
+    return true;
+  }
+
+  @override
+  void handleUpdateBackGestureProgress(PredictiveBackEvent backEvent) {
+    if (!_active) {
+      return;
+    }
+    widget.route.handleUpdateBackGestureProgress(
+      progress: 1 - backEvent.progress,
+    );
+  }
+
+  @override
+  void handleCancelBackGesture() {
+    if (!_active) {
+      return;
+    }
+    _active = false;
+    widget.route.handleCancelBackGesture();
+    _ensureGestureStopped();
+  }
+
+  @override
+  void handleCommitBackGesture() {
+    if (!_active) {
+      return;
+    }
+    _active = false;
+    widget.route.handleCommitBackGesture();
+    _ensureGestureStopped();
+  }
+
+  /// 手势结束后确保导航器退出「手势进行中」状态。
+  ///
+  /// 正常情况下路由会自己在补完动画结束时复位；但如果手势途中本页已经被
+  /// 别的操作弹掉，路由会因为「不是栈顶」而跳过复位，导航器就永久卡在
+  /// 手势状态里，之后的侧滑返回全部失灵。
+  ///
+  /// 动画还在跑的时候不能动：`userGestureInProgress` 一变，转场曲线就会
+  /// 从线性切回缓动，正在播的回退动画会突然变速。
+  void _ensureGestureStopped() {
+    final navigator = widget.route.navigator;
+    if (navigator == null || !navigator.userGestureInProgress) {
+      return;
+    }
+    if (widget.route.animation?.isAnimating ?? false) {
+      return;
+    }
+    navigator.didStopUserGesture();
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
+/// 水平滑动转场：上层页从右侧滑入，下层页同时左移给出一段距离。
 class SlidePageTransitionBuilder extends PageTransitionsBuilder {
+  const SlidePageTransitionBuilder();
+
+  /// 下层页被推开的比例，取屏幕宽度的一部分。
+  static const double _secondaryOffset = -0.4;
+
+  /// 上层页左边缘的投影，用来把「压在下面」的层次感做出来。
+  ///
+  /// 原来这里用的是 `PhysicalModel(elevation: 6)`：它为了画阴影会强制整页
+  /// 走一次 `saveLayer`，滑动期间每一帧都要重做，在漫画页这种满屏图片的
+  /// 场景下就是明显的掉帧。换成普通的 BoxShadow 后，阴影只在页面重绘时
+  /// 画一次（配合外面的 RepaintBoundary），滑动只是移动图层。
+  static const BoxDecoration _shadow = BoxDecoration(
+    boxShadow: [
+      BoxShadow(
+        color: Color(0x1F000000),
+        offset: Offset(-2, 0),
+        blurRadius: 6,
+      ),
+    ],
+  );
+
   @override
   Widget buildTransitions<T>(
-      PageRoute<T> route,
-      BuildContext context,
-      Animation<double> animation,
-      Animation<double> secondaryAnimation,
-      Widget child) {
-    final Animation<double> primaryAnimation = App.isIOS
-        ? animation
-        : CurvedAnimation(parent: animation, curve: Curves.ease);
-    final Animation<double> secondaryCurve = App.isIOS
-        ? secondaryAnimation
-        : CurvedAnimation(parent: secondaryAnimation, curve: Curves.ease);
+    PageRoute<T> route,
+    BuildContext context,
+    Animation<double> animation,
+    Animation<double> secondaryAnimation,
+    Widget child,
+  ) {
+    // 手指拖着走的时候必须线性：手指移动多少，页面就走多少。松手后的
+    // 补完动画才用缓动曲线，起手快、收尾慢，符合「被甩出去」的直觉。
+    return _SlidePageTransition(
+      primaryAnimation: animation,
+      secondaryAnimation: secondaryAnimation,
+      dragging: route.popGestureInProgress,
+      child: child,
+    );
+  }
+}
 
+/// 真正承载滑动转场的组件。
+///
+/// 之所以要单独做成 StatefulWidget，是因为 `buildTransitions` 在转场期间
+/// 每帧都会被调用，如果在里面现算 `CurveTween`/`Tween`，就会每帧丢弃并
+/// 重建动画对象、让 SlideTransition 反复退订再订阅。把动画缓存在 State 里，
+/// 只有动画来源或曲线模式变化时才重建。
+class _SlidePageTransition extends StatefulWidget {
+  const _SlidePageTransition({
+    required this.primaryAnimation,
+    required this.secondaryAnimation,
+    required this.dragging,
+    required this.child,
+  });
+
+  /// 本页进入/离开时的进度，1 表示完全就位。
+  final Animation<double> primaryAnimation;
+
+  /// 本页被下一页覆盖时的进度，1 表示已被完全盖住。
+  final Animation<double> secondaryAnimation;
+
+  /// 是否正在跟着手指走（此时不能用曲线，否则跟手会有拖影感）。
+  final bool dragging;
+
+  final Widget child;
+
+  @override
+  State<_SlidePageTransition> createState() => _SlidePageTransitionState();
+}
+
+class _SlidePageTransitionState extends State<_SlidePageTransition> {
+  late Animation<Offset> _primaryPosition;
+
+  late Animation<Offset> _secondaryPosition;
+
+  @override
+  void initState() {
+    super.initState();
+    _setupAnimations();
+  }
+
+  @override
+  void didUpdateWidget(covariant _SlidePageTransition oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (oldWidget.primaryAnimation != widget.primaryAnimation ||
+        oldWidget.secondaryAnimation != widget.secondaryAnimation ||
+        oldWidget.dragging != widget.dragging) {
+      _setupAnimations();
+    }
+  }
+
+  void _setupAnimations() {
+    final curve = widget.dragging ? Curves.linear : Curves.fastOutSlowIn;
+    _primaryPosition = widget.primaryAnimation
+        .drive(CurveTween(curve: curve))
+        .drive(Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero));
+    _secondaryPosition = widget.secondaryAnimation
+        .drive(CurveTween(curve: curve))
+        .drive(
+          Tween<Offset>(
+            begin: Offset.zero,
+            end: const Offset(SlidePageTransitionBuilder._secondaryOffset, 0),
+          ),
+        );
+  }
+
+  @override
+  Widget build(BuildContext context) {
     return SlideTransition(
-      position: Tween<Offset>(
-        begin: const Offset(1, 0),
-        end: Offset.zero,
-      ).animate(primaryAnimation),
+      position: _secondaryPosition,
+      transformHitTests: false,
       child: SlideTransition(
-        position: Tween<Offset>(
-          begin: Offset.zero,
-          end: const Offset(-0.4, 0),
-        ).animate(secondaryCurve),
-        child: PhysicalModel(
-          color: Colors.transparent,
-          borderRadius: BorderRadius.zero,
-          clipBehavior: Clip.hardEdge,
-          elevation: 6,
-          child: Material(child: child),
+        position: _primaryPosition,
+        child: RepaintBoundary(
+          // RepaintBoundary 把整页内容固化成一层：滑动时只移动图层，
+          // 不再逐帧重绘页面里的图片和文字。
+          child: DecoratedBox(
+            decoration: SlidePageTransitionBuilder._shadow,
+            child: Material(child: widget.child),
+          ),
         ),
       ),
     );

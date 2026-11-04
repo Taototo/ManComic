@@ -666,7 +666,8 @@
     "Update downloaded": "更新包已下载",
     "Unable to start the installer": "无法启动安装程序",
     "Download failed": "下载失败",
-    "New version found but no APK published": "发现新版本，但安装包尚未发布"
+    "New version found but no APK published": "发现新版本，但安装包尚未发布",
+    "Are you sure you want to exit?": "确定要退出应用吗？"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -1335,6 +1336,7 @@
     "Update downloaded": "更新套件已下載",
     "Unable to start the installer": "無法啟動安裝程式",
     "Download failed": "下載失敗",
-    "New version found but no APK published": "發現新版本，但安裝檔尚未發布"
+    "New version found but no APK published": "發現新版本，但安裝檔尚未發布",
+    "Are you sure you want to exit?": "確定要離開應用程式嗎？"
   }
 }

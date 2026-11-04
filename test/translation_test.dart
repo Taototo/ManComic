@@ -70,6 +70,9 @@ void main() {
       "Unknown error",
       "@a Tasks",
       "@a sources",
+      // 退到最底层再返回时的退出确认
+      "Exit",
+      "Are you sure you want to exit?",
     ];
     for (var key in keys) {
       expect(translations['zh_CN']![key], isNotNull, reason: '缺少中文: $key');

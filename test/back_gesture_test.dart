@@ -5,6 +5,30 @@ import 'package:venera/foundation/app_page_route.dart';
 
 /// 验证「被外层盖住的路由不接管返回手势」这条规则，以及非路由浮层的接入。
 void main() {
+  testWidgets('滑动转场可以正常构建并完成进出动画', (tester) async {
+    final navKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+
+    navKey.currentState!.push(AppPageRoute(
+      builder: (_) => const Scaffold(body: Text('second')),
+    ));
+    await tester.pump();
+    // 动画中途：两页同时在树上，正是之前 PhysicalModel 每帧 saveLayer 的场景
+    await tester.pump(const Duration(milliseconds: 150));
+    expect(find.text('second'), findsOneWidget);
+
+    await tester.pumpAndSettle();
+    expect(find.text('second'), findsOneWidget);
+
+    navKey.currentState!.pop();
+    await tester.pumpAndSettle();
+    expect(find.text('second'), findsNothing);
+    expect(tester.takeException(), isNull);
+  });
+
   testWidgets('内层导航栈被外层路由盖住时让出返回手势', (tester) async {
     final innerKey = GlobalKey<NavigatorState>();
 
@@ -75,6 +99,25 @@ void main() {
     await App.handleBack();
     expect(dismissed, 1);
     expect(_topRoute(root), same(page));
+  });
+
+  testWidgets('退到最底层时 handleBack 返回 false，交给调用方确认退出', (tester) async {
+    // handleBack 对同一次返回有 120ms 节流（防止一次手势退两层），
+    // 前面的用例刚调用过，这里先等真实时间过去再测。
+    await tester.runAsync(
+      () => Future<void>.delayed(const Duration(milliseconds: 150)),
+    );
+
+    App.nonRouteOverlayDismisser = null;
+    App.mainNavigatorKey = null;
+
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: App.rootNavigatorKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+
+    // 栈里只剩根路由：没有可退的了，返回 false 交由调用方弹「是否退出」
+    expect(await App.handleBack(), isFalse);
   });
 }
 

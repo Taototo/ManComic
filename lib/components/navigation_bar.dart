@@ -142,6 +142,49 @@ class NaviPaneState extends State<NaviPane>
     super.dispose();
   }
 
+  /// 退出确认弹窗是否正在显示，避免连续侧滑叠出好几个。
+  bool _exitConfirming = false;
+
+  /// 已经在最底层了还返回：先确认一次再退出。
+  ///
+  /// 侧滑返回在根页面上会直接结束进程，手滑一下就关掉整个 App 太重了，
+  /// 统一拦一层确认。
+  Future<void> _confirmExit() async {
+    // 只有 Android 有系统返回手势和返回键，其它平台不会走到这里。
+    if (_exitConfirming || !App.isAndroid) {
+      return;
+    }
+    final rootContext = App.rootContext;
+    if (!rootContext.mounted) {
+      return;
+    }
+    _exitConfirming = true;
+    final confirmed = await showDialog<bool>(
+      context: rootContext,
+      builder: (dialogContext) {
+        return ContentDialog(
+          title: "Exit".tl,
+          content: Text("Are you sure you want to exit?".tl)
+              .paddingHorizontal(16),
+          actions: [
+            Button.text(
+              onPressed: () => Navigator.pop(dialogContext, false),
+              child: Text("Cancel".tl),
+            ),
+            Button.text(
+              onPressed: () => Navigator.pop(dialogContext, true),
+              child: Text("Exit".tl),
+            ),
+          ],
+        );
+      },
+    );
+    _exitConfirming = false;
+    if (confirmed == true) {
+      SystemNavigator.pop();
+    }
+  }
+
   double targetFormContext(BuildContext context) {
     var width = MediaQuery.of(context).size.width;
     double target = 0;
@@ -226,11 +269,14 @@ class NaviPaneState extends State<NaviPane>
       // 会让返回键失灵。
       child: PopScope(
         canPop: false,
-        onPopInvokedWithResult: (didPop, result) {
+        onPopInvokedWithResult: (didPop, result) async {
           if (didPop) {
             return;
           }
-          App.handleBack();
+          final handled = await App.handleBack();
+          if (!handled && mounted) {
+            _confirmExit();
+          }
         },
         child: Navigator(
           observers: [widget.observer],
