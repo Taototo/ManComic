@@ -2,6 +2,10 @@ part of 'favorites_page.dart';
 
 const _localAllFolderLabel = '^_^[%local_all%]^_^';
 
+/// 「已阅」虚拟文件夹在 UI 层的指代名，实际存储用
+/// [LocalFavoritesManager.readFolderName] 表。
+const _localReadFolderLabel = '^_^[%local_read%]^_^';
+
 /// If the number of comics in a folder exceeds this limit, it will be
 /// fetched asynchronously.
 const _asyncDataFetchLimit = 500;
@@ -39,6 +43,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   int? lastSelectedIndex;
 
   bool get isAllFolder => widget.folder == _localAllFolderLabel;
+
+  bool get isReadFolder => widget.folder == _localReadFolderLabel;
 
   LocalFavoritesManager get manager => LocalFavoritesManager();
 
@@ -79,7 +85,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   void updateComics() {
     if (isLoading) return;
-    if (isAllFolder) {
+    if (isReadFolder) {
+      comics = manager.getFolderComics(LocalFavoritesManager.readFolderName);
+    } else if (isAllFolder) {
       var totalComics = manager.totalComics;
       if (totalComics < _asyncDataFetchLimit) {
         comics = manager.getAllComics();
@@ -288,6 +296,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     var title = favPage.folder ?? "Unselected".tl;
     if (title == _localAllFolderLabel) {
       title = "All".tl;
+    } else if (title == _localReadFolderLabel) {
+      title = "Finished Reading".tl;
     }
 
     Widget body = SmoothCustomScrollView(
@@ -424,7 +434,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   },
                 ),
               ),
-              if (!isAllFolder)
+              // 「已阅」是内置分类，不提供重命名/排序/导出/删除等文件夹管理
+              if (!isAllFolder && !isReadFolder)
                 MenuButton(
                   entries: [
                     MenuEntry(
@@ -544,12 +555,39 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                 "Selected @c comics".tlParams({"c": selectedComics.length})),
             actions: [
               MenuButton(entries: [
-                if (!isAllFolder)
+                if (!isAllFolder && !isReadFolder)
+                  MenuEntry(
+                      icon: Icons.done_all,
+                      text: "Mark as Read".tl,
+                      onClick: () {
+                        showConfirmDialog(
+                          context: context,
+                          title: "Mark as Read".tl,
+                          content: "Move @c comics to \"Finished Reading\"?"
+                              .tlParams({"c": selectedComics.length}),
+                          onConfirm: () {
+                            LocalFavoritesManager().batchMoveToRead(
+                              widget.folder,
+                              selectedComics.keys
+                                  .map((e) => e as FavoriteItem)
+                                  .toList(),
+                            );
+                            updateComics();
+                            _cancel();
+                          },
+                        );
+                      }),
+                if (isReadFolder)
+                  MenuEntry(
+                      icon: Icons.drive_file_move,
+                      text: "Move to folder".tl,
+                      onClick: () => favoriteOption('moveFromRead')),
+                if (!isAllFolder && !isReadFolder)
                   MenuEntry(
                       icon: Icons.drive_file_move,
                       text: "Move to folder".tl,
                       onClick: () => favoriteOption('move')),
-                if (!isAllFolder)
+                if (!isAllFolder && !isReadFolder)
                   MenuEntry(
                       icon: Icons.copy,
                       text: "Copy to folder".tl,
@@ -566,7 +604,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     icon: Icons.flip,
                     text: "Invert Selection".tl,
                     onClick: invertSelection),
-                if (!isAllFolder)
+                if (!isAllFolder && !isReadFolder)
                   MenuEntry(
                       icon: Icons.delete_outline,
                       text: "Delete Comic".tl,
@@ -680,7 +718,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
             selections: selectedComics,
             menuBuilder: (c) {
               return [
-                if (!isAllFolder)
+                if (!isAllFolder && !isReadFolder)
                   MenuEntry(
                     icon: Icons.delete,
                     text: "Delete".tl,
@@ -690,6 +728,41 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                         c.id,
                         (c as FavoriteItem).type,
                       );
+                    },
+                  ),
+                if (isReadFolder)
+                  MenuEntry(
+                    icon: Icons.delete,
+                    text: "Delete".tl,
+                    onClick: () {
+                      LocalFavoritesManager().deleteComicWithId(
+                        LocalFavoritesManager.readFolderName,
+                        c.id,
+                        (c as FavoriteItem).type,
+                      );
+                    },
+                  ),
+                if (!isAllFolder && !isReadFolder)
+                  MenuEntry(
+                    icon: Icons.done_all,
+                    text: "Mark as Read".tl,
+                    onClick: () {
+                      LocalFavoritesManager()
+                          .moveToRead(widget.folder, c as FavoriteItem);
+                      updateComics();
+                    },
+                  ),
+                if (isReadFolder)
+                  MenuEntry(
+                    icon: Icons.drive_file_move,
+                    text: "Move to folder".tl,
+                    onClick: () {
+                      setState(() {
+                        selectedComics.clear();
+                        selectedComics[c as FavoriteItem] = true;
+                        multiSelectMode = true;
+                      });
+                      favoriteOption('moveFromRead');
                     },
                   ),
                 MenuEntry(
@@ -827,7 +900,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       StatefulBuilder(
         builder: (context, setState) {
           return PopUpWidgetScaffold(
-            title: favPage.folder ?? "Unselected".tl,
+            title: isReadFolder
+                ? "Finished Reading".tl
+                : favPage.folder ?? "Unselected".tl,
             body: Padding(
               padding: EdgeInsets.only(bottom: context.padding.bottom + 16),
               child: Container(
@@ -918,6 +993,15 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                                 comics,
                               );
                             }
+                          } else if (option == 'moveFromRead') {
+                            var comics = selectedComics.keys
+                                .map((e) => e as FavoriteItem)
+                                .toList();
+                            for (var f in selectedLocalFolders) {
+                              for (var comic in comics) {
+                                LocalFavoritesManager().moveFromRead(f, comic);
+                              }
+                            }
                           } else {
                             var comics = selectedComics.keys
                                 .map((e) => e as FavoriteItem)
@@ -934,7 +1018,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                           updateComics();
                           _cancel();
                         },
-                        child: Text(option == 'move' ? "Move".tl : "Add".tl),
+                        child: Text(
+                            option == 'add' ? "Add".tl : "Move".tl),
                       ),
                     ),
                   ],

@@ -88,7 +88,8 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
               padding: widget.withAppbar
                   ? EdgeInsets.zero
                   : EdgeInsets.only(top: context.padding.top),
-              itemCount: folders.length + networkFolders.length + 3,
+              // Local 标题 + 全部 + 已阅 + 自建文件夹 + Network 标题 + 网络收藏
+              itemCount: folders.length + networkFolders.length + 4,
               itemBuilder: (context, index) {
                 if (index == 0) {
                   return buildLocalTitle();
@@ -96,6 +97,10 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
                 index--;
                 if (index == 0) {
                   return buildLocalFolder(_localAllFolderLabel);
+                }
+                index--;
+                if (index == 0) {
+                  return buildLocalFolder(_localReadFolderLabel);
                 }
                 index--;
                 if (index < folders.length) {
@@ -198,12 +203,16 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
     int count = 0;
     if (name == _localAllFolderLabel) {
       count = LocalFavoritesManager().totalComics;
+    } else if (name == _localReadFolderLabel) {
+      count = LocalFavoritesManager().readCount();
     } else {
       count = LocalFavoritesManager().folderComics(name);
     }
-    var folderName = name == _localAllFolderLabel
-        ? "All".tl
-        : getFavoriteDataOrNull(name)?.title ?? name;
+    var folderName = switch (name) {
+      _localAllFolderLabel => "All".tl,
+      _localReadFolderLabel => "Finished Reading".tl,
+      _ => getFavoriteDataOrNull(name)?.title ?? name,
+    };
     return InkWell(
       onTap: () {
         if (isSelected) {

@@ -99,6 +99,26 @@ class _ImageFavoritesItemState extends State<_ImageFavoritesItem> {
             goPhotoView(widget.imageFavoritesComic.images.first);
           },
         ),
+        MenuEntry(
+          icon: Icons.delete_outline,
+          text: 'Delete'.tl,
+          color: Theme.of(context).colorScheme.error,
+          onClick: () {
+            showConfirmDialog(
+              context: App.rootContext,
+              title: "Delete".tl,
+              content: "Delete @c favorite images of this comic?".tlParams({
+                "c": widget.imageFavoritesComic.images.length,
+              }),
+              btnColor: Theme.of(context).colorScheme.error,
+              onConfirm: () {
+                ImageFavoriteManager().deleteImageFavorite(
+                  widget.imageFavoritesComic.images,
+                );
+              },
+            );
+          },
+        ),
       ],
     );
   }

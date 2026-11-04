@@ -210,6 +210,14 @@ class LocalFavoritesManager with ChangeNotifier {
 
   static LocalFavoritesManager? cache;
 
+  /// 「已阅」专用表名。
+  ///
+  /// 它是一张真实的收藏夹表（结构与普通收藏夹完全一致，复用同一套增删
+  /// 移动逻辑），但被排除在 [folderNames] 之外——「全部」与文件夹列表都
+  /// 通过 [folderNames] 枚举，所以移入已阅的漫画会自动从这两处消失，
+  /// 不需要逐处过滤。UI 里用 `_localReadFolderLabel` 指代它。
+  static const readFolderName = '__read__';
+
   late Database _db;
 
   late Map<String, int> counts;
@@ -238,6 +246,21 @@ class LocalFavoritesManager with ChangeNotifier {
         folder_name text primary key,
         source_key text,
         source_folder text
+      );
+    """);
+    // 「已阅」表必须先于任何 folderNames 枚举创建，保证升级用户也能用。
+    _db.execute("""
+      create table if not exists "$readFolderName"(
+        id text,
+        name TEXT,
+        author TEXT,
+        type int,
+        tags TEXT,
+        cover_path TEXT,
+        time TEXT,
+        display_order int,
+        translated_tags TEXT,
+        primary key (id, type)
       );
     """);
     var folderNames = _getFolderNamesWithDB();
@@ -279,6 +302,7 @@ class LocalFavoritesManager with ChangeNotifier {
     for (var folder in folderNames) {
       counts[folder] = count(folder);
     }
+    counts[readFolderName] = count(readFolderName);
     _initHashedIds(folderNames, _db.handle).then((value) {
       _hashedIds = value;
       notifyListeners();
@@ -363,6 +387,8 @@ class LocalFavoritesManager with ChangeNotifier {
     final folders = _getTablesWithDB();
     folders.remove('folder_sync');
     folders.remove('folder_order');
+    // 「已阅」不是普通收藏夹，永远不出现在文件夹枚举里
+    folders.remove(readFolderName);
     var folderToOrder = <String, int>{};
     for (var folder in folders) {
       var res = _db.select("""
@@ -492,6 +518,11 @@ class LocalFavoritesManager with ChangeNotifier {
   }
 
   bool existsFolder(String name) {
+    // 「已阅」表不在 folderNames 枚举里，但对增删改查而言它就是一张
+    // 普通收藏夹表，直接放行。
+    if (name == readFolderName) {
+      return _getTablesWithDB().contains(readFolderName);
+    }
     return folderNames.contains(name);
   }
 
@@ -654,8 +685,11 @@ class LocalFavoritesManager with ChangeNotifier {
     } else {
       counts[folder] = counts[folder]! + 1;
     }
-    var hash = comic.id.hashCode ^ comic.type.value;
-    _hashedIds[hash] = (_hashedIds[hash] ?? 0) + 1;
+    // 「已阅」不计入全部收藏的 hashedIds（totalComics 只统计普通收藏夹）
+    if (folder != readFolderName) {
+      var hash = comic.id.hashCode ^ comic.type.value;
+      _hashedIds[hash] = (_hashedIds[hash] ?? 0) + 1;
+    }
     notifyListeners();
     return true;
   }
@@ -689,6 +723,10 @@ class LocalFavoritesManager with ChangeNotifier {
     delete from "$sourceFolder"
     where id == ? and type == ?;
   """, [id, type.value]);
+
+    counts[sourceFolder] = count(sourceFolder);
+    counts[targetFolder] = count(targetFolder);
+    refreshHashedIds();
 
     notifyListeners();
   }
@@ -774,8 +812,67 @@ class LocalFavoritesManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// 「已阅」数量。
+  int readCount() => count(readFolderName);
+
+  bool isRead(String id, ComicType type) =>
+      comicExists(readFolderName, id, type);
+
+  /// 移入「已阅」：从原收藏夹删除，同时加入已阅表（已存在则只删除原位置）。
+  void moveToRead(String sourceFolder, FavoriteItem comic) {
+    if (comicExists(readFolderName, comic.id, comic.type)) {
+      deleteComicWithId(sourceFolder, comic.id, comic.type);
+      return;
+    }
+    addComic(readFolderName, comic, maxValue(readFolderName) + 1);
+    deleteComicWithId(sourceFolder, comic.id, comic.type);
+  }
+
+  /// 批量移入「已阅」。
+  void batchMoveToRead(String sourceFolder, List<FavoriteItem> items) {
+    if (!existsFolder(sourceFolder)) {
+      throw Exception("Source folder does not exist");
+    }
+    _db.execute("BEGIN TRANSACTION");
+    var displayOrder = maxValue(readFolderName) + 1;
+    try {
+      for (var item in items) {
+        if (!comicExists(readFolderName, item.id, item.type)) {
+          _db.execute("""
+            insert into "$readFolderName" (id, name, author, type, tags, cover_path, time, translated_tags, display_order)
+            select id, name, author, type, tags, cover_path, time, translated_tags, ?
+            from "$sourceFolder"
+            where id == ? and type == ?;
+          """, [displayOrder, item.id, item.type.value]);
+          displayOrder++;
+        }
+        _db.execute("""
+          delete from "$sourceFolder"
+          where id == ? and type == ?;
+        """, [item.id, item.type.value]);
+      }
+    } catch (e) {
+      Log.error("Batch Move To Read", e.toString());
+      _db.execute("ROLLBACK");
+      return;
+    }
+    _db.execute("COMMIT");
+    counts[sourceFolder] = count(sourceFolder);
+    counts[readFolderName] = count(readFolderName);
+    refreshHashedIds();
+    notifyListeners();
+  }
+
+  /// 从「已阅」移回普通收藏夹。
+  void moveFromRead(String targetFolder, FavoriteItem comic) {
+    moveFavorite(readFolderName, targetFolder, comic.id, comic.type);
+  }
+
   /// delete a folder
   void deleteFolder(String name) {
+    if (name == readFolderName) {
+      throw Exception("Read folder cannot be deleted");
+    }
     _db.execute("""
       drop table "$name";
     """);
@@ -799,7 +896,9 @@ class LocalFavoritesManager with ChangeNotifier {
     } else {
       counts[folder] = count(folder);
     }
-    reduceHashedId(id, type.value);
+    if (folder != readFolderName) {
+      reduceHashedId(id, type.value);
+    }
     notifyListeners();
   }
 
@@ -825,7 +924,9 @@ class LocalFavoritesManager with ChangeNotifier {
     }
     _db.execute("COMMIT");
     for (var comic in comics) {
-      reduceHashedId(comic.id, comic.type.value);
+      if (folder != readFolderName) {
+        reduceHashedId(comic.id, comic.type.value);
+      }
     }
     notifyListeners();
   }

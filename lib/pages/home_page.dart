@@ -1032,6 +1032,10 @@ class _ImageFavoritesState extends State<ImageFavorites> {
           ),
           borderRadius: BorderRadius.circular(8),
         ),
+        // 卡片堆切换时卡片会带位移/旋转绘制，必须在这里兜底裁剪：
+        // 一旦内容溢出模块边界，就会直接画到相邻模块（上/下的卡片）上，
+        // 看起来就是「切换时和上面的卡片重叠」。
+        clipBehavior: Clip.antiAlias,
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () {
