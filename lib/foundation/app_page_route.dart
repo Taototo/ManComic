@@ -221,16 +221,15 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation,
       Animation<double> secondaryAnimation, Widget child) {
-    // 统一用「水平滑动」转场，Android 也不用 zoom 那套。
+    // 用「渐隐」转场：退场页原地淡出，下层页保持不动。
     //
-    // zoom 转场（Material 默认）是**两页同时缩放 + 淡化**：进/出页面在
-    // 300ms 内都是半透明的，而本 App 的页面背景是透明的（只有卡片自己带
-    // 底色），两页一叠就会互相透出——上层页的卡片看起来"盖住"了下层页的
-    // 内容，边框还错开十几像素。侧滑返回走到一半松手时最明显。
+    // 之前这里用的是水平滑动（上层页从右侧滑入、返回时整页横着飞走）。
+    // 滑动虽然利落，但漫画这种满屏内容的页面横飞出去观感很"重"，不如
+    // 系统默认那种页面淡掉、下面的内容自然露出来的过渡自然。
     //
-    // 纯滑动转场里，上层页始终不透明地把下层页推走/拉回，不存在两页同时
-    // 可见的瞬间，也就没有这种穿透。
-    Widget result = const SlidePageTransitionBuilder().buildTransitions(
+    // 没有直接套 Material 自带的 zoom 转场，原因见 FadePageTransitionBuilder
+    // 的注释：它是两页同时缩放并淡化，而这个 App 的页面背景是透明的。
+    Widget result = const FadePageTransitionBuilder().buildTransitions(
       this,
       context,
       animation,
@@ -728,28 +727,21 @@ class PredictiveBackGestureDetectorState extends State<PredictiveBackGestureDete
   Widget build(BuildContext context) => widget.child;
 }
 
-/// 水平滑动转场：上层页从右侧滑入，下层页同时左移给出一段距离。
-class SlidePageTransitionBuilder extends PageTransitionsBuilder {
-  const SlidePageTransitionBuilder();
+/// 渐隐转场：退场页原地淡出（伴随极轻微的缩小），下层页完全不动。
+///
+/// 为什么不用 Material 自带的 zoom 转场（Android 默认）：它是**两页同时
+/// 缩放并淡化**。本 App 的页面背景是透明的（只有卡片自己带底色），两页在
+/// 动画中途都处于半透明状态，内容会互相透出来——上层卡片看起来"盖住"了
+/// 下层内容，边框还错开十几像素。这里只让上层页参与透明度变化，下层页
+/// 全程不透明、不位移，就不会出现两页同时可见的错位。
+class FadePageTransitionBuilder extends PageTransitionsBuilder {
+  const FadePageTransitionBuilder();
 
-  /// 下层页被推开的比例，取屏幕宽度的一部分。
-  static const double _secondaryOffset = -0.4;
-
-  /// 上层页左边缘的投影，用来把「压在下面」的层次感做出来。
+  /// 淡出时额外收缩的比例。
   ///
-  /// 原来这里用的是 `PhysicalModel(elevation: 6)`：它为了画阴影会强制整页
-  /// 走一次 `saveLayer`，滑动期间每一帧都要重做，在漫画页这种满屏图片的
-  /// 场景下就是明显的掉帧。换成普通的 BoxShadow 后，阴影只在页面重绘时
-  /// 画一次（配合外面的 RepaintBoundary），滑动只是移动图层。
-  static const BoxDecoration _shadow = BoxDecoration(
-    boxShadow: [
-      BoxShadow(
-        color: Color(0x1F000000),
-        offset: Offset(-2, 0),
-        blurRadius: 6,
-      ),
-    ],
-  );
+  /// 纯透明度变化缺少"后退"的纵深感，配上 6% 的收缩刚好；再大就会像
+  /// zoom 转场那样看出页面在变形。
+  static const double _minScale = 0.94;
 
   @override
   Widget buildTransitions<T>(
@@ -759,26 +751,23 @@ class SlidePageTransitionBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    // 手指拖着走的时候必须线性：手指移动多少，页面就走多少。
-    return _SlidePageTransition(
+    // 下层页（secondaryAnimation）不参与：渐隐只需要动上层这一页。
+    return _FadePageTransition(
       primaryAnimation: animation,
-      secondaryAnimation: secondaryAnimation,
       dragging: route.popGestureInProgress,
       child: child,
     );
   }
 }
 
-/// 真正承载滑动转场的组件。
+/// 承载渐隐转场的组件。
 ///
-/// 之所以要单独做成 StatefulWidget，是因为 `buildTransitions` 在转场期间
-/// 每帧都会被调用，如果在里面现算 `CurveTween`/`Tween`，就会每帧丢弃并
-/// 重建动画对象、让 SlideTransition 反复退订再订阅。把动画缓存在 State 里，
-/// 只有动画来源或曲线模式变化时才重建。
-class _SlidePageTransition extends StatefulWidget {
-  const _SlidePageTransition({
+/// 单独做成 StatefulWidget 的原因同以前的滑动版：`buildTransitions` 在
+/// 转场期间每帧都会被调用，若在里面现算 Tween / CurvedAnimation，就会每帧
+/// 丢弃重建动画对象，让 FadeTransition 反复退订再订阅。
+class _FadePageTransition extends StatefulWidget {
+  const _FadePageTransition({
     required this.primaryAnimation,
-    required this.secondaryAnimation,
     required this.dragging,
     required this.child,
   });
@@ -786,28 +775,29 @@ class _SlidePageTransition extends StatefulWidget {
   /// 本页进入/离开时的进度，1 表示完全就位。
   final Animation<double> primaryAnimation;
 
-  /// 本页被下一页覆盖时的进度，1 表示已被完全盖住。
-  final Animation<double> secondaryAnimation;
-
-  /// 是否正在跟着手指走（此时不能用曲线，否则跟手会有拖影感）。
+  /// 是否正在跟着手指走（此时必须线性，否则跟手会有拖影感）。
   final bool dragging;
 
   final Widget child;
 
   @override
-  State<_SlidePageTransition> createState() => _SlidePageTransitionState();
+  State<_FadePageTransition> createState() => _FadePageTransitionState();
 }
 
-class _SlidePageTransitionState extends State<_SlidePageTransition> {
-  late Animation<Offset> _primaryPosition;
+class _FadePageTransitionState extends State<_FadePageTransition> {
+  late Animation<double> _opacity;
 
-  late Animation<Offset> _secondaryPosition;
+  late Animation<double> _scale;
+
+  /// 给正常进出动画套缓动的那层；
+  /// [AnimationController] 被手势直接驱动时不用它。
+  CurvedAnimation? _curved;
 
   /// 这一页是否被手指拖过。
   ///
   /// 一旦跟过手就锁定为线性：松手后表示「手势进行中」的标志可能立刻被复位，
-  /// 若此时把曲线从线性切回缓动，同一个动画值对应的位移会突变——页面会
-  /// 在松手的一瞬间跳一下。锁定后松手前后的位移就严格连贯。
+  /// 若此时把曲线从线性切回缓动，同一个动画值对应的透明度会突变——页面会在
+  /// 松手的一瞬间闪一下。锁定后松手前后的透明度严格连贯。
   bool _gestureDriven = false;
 
   @override
@@ -821,14 +811,16 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
   @override
   void dispose() {
     widget.primaryAnimation.removeStatusListener(_handleAnimationStatus);
+    _curved?.dispose();
+    _curved = null;
     super.dispose();
   }
 
   /// 动画一结束就解除「跟手线性」锁定。
   ///
-  /// 锁定只是为了避免松手瞬间曲线切换造成的位移突变；动画停下来后值不再
-  /// 变化，此时恢复默认缓动不会产生任何跳变，却能让这一页之后的进出动画
-  /// 回到正常的缓动曲线（否则经历过一次取消回弹的页面会一直匀速）。
+  /// 锁定只是为了避免松手瞬间曲线切换造成的跳变；动画停下来后值不再变化，
+  /// 此时恢复默认缓动不会产生任何突变，却能让这一页之后的进出动画回到正常
+  /// 的缓动曲线。
   void _handleAnimationStatus(AnimationStatus status) {
     if (_gestureDriven &&
         !widget.dragging &&
@@ -842,7 +834,7 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
   }
 
   @override
-  void didUpdateWidget(covariant _SlidePageTransition oldWidget) {
+  void didUpdateWidget(covariant _FadePageTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
     if (widget.dragging && !_gestureDriven) {
       _gestureDriven = true;
@@ -852,42 +844,52 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
       widget.primaryAnimation.addStatusListener(_handleAnimationStatus);
     }
     if (oldWidget.primaryAnimation != widget.primaryAnimation ||
-        oldWidget.secondaryAnimation != widget.secondaryAnimation ||
         oldWidget.dragging != widget.dragging) {
       _setupAnimations();
     }
   }
 
   void _setupAnimations() {
-    final curve =
-        (widget.dragging || _gestureDriven) ? Curves.linear : Curves.fastOutSlowIn;
-    _primaryPosition = widget.primaryAnimation
-        .drive(CurveTween(curve: curve))
-        .drive(Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero));
-    _secondaryPosition = widget.secondaryAnimation
-        .drive(CurveTween(curve: curve))
-        .drive(
-          Tween<Offset>(
-            begin: Offset.zero,
-            end: const Offset(SlidePageTransitionBuilder._secondaryOffset, 0),
-          ),
-        );
+    final oldCurved = _curved;
+    _curved = null;
+    oldCurved?.dispose();
+
+    Animation<double> source;
+    if (widget.dragging || _gestureDriven) {
+      // 跟手：手指决定进度，必须一一对应。
+      source = widget.primaryAnimation;
+    } else {
+      final curved = CurvedAnimation(
+        parent: widget.primaryAnimation,
+        // 进入时先快后慢地浮现，落位柔和。
+        curve: Curves.easeOutCubic,
+        // 退场保持线性：控制器本身已经是线性回退，再叠一条 easeOut 会让
+        // 页面先「憋」住几乎不透明、最后几十毫秒唰地消失。
+        reverseCurve: Curves.linear,
+      );
+      _curved = curved;
+      source = curved;
+    }
+
+    _opacity = source;
+    _scale = source.drive(
+      Tween<double>(
+        begin: FadePageTransitionBuilder._minScale,
+        end: 1.0,
+      ),
+    );
   }
 
   @override
   Widget build(BuildContext context) {
-    return SlideTransition(
-      position: _secondaryPosition,
-      transformHitTests: false,
-      child: SlideTransition(
-        position: _primaryPosition,
+    return FadeTransition(
+      opacity: _opacity,
+      child: ScaleTransition(
+        scale: _scale,
         child: RepaintBoundary(
-          // RepaintBoundary 把整页内容固化成一层：滑动时只移动图层，
-          // 不再逐帧重绘页面里的图片和文字。
-          child: DecoratedBox(
-            decoration: SlidePageTransitionBuilder._shadow,
-            child: Material(child: widget.child),
-          ),
+          // 把整页内容固化成一层：淡出期间只合成这一层，不必逐帧重绘
+          // 页面里的图片和文字。
+          child: Material(child: widget.child),
         ),
       ),
     );

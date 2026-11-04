@@ -17,7 +17,7 @@ PredictiveBackEvent _backEvent(double progress) =>
 
 /// 验证「被外层盖住的路由不接管返回手势」这条规则，以及非路由浮层的接入。
 void main() {
-  testWidgets('滑动转场可以正常构建并完成进出动画', (tester) async {
+  testWidgets('渐隐转场可以正常构建并完成进出动画', (tester) async {
     final navKey = GlobalKey<NavigatorState>();
     await tester.pumpWidget(MaterialApp(
       navigatorKey: navKey,
@@ -28,9 +28,19 @@ void main() {
       builder: (_) => const Scaffold(body: Text('second')),
     ));
     await tester.pump();
-    // 动画中途：两页同时在树上，正是之前 PhysicalModel 每帧 saveLayer 的场景
+    // 动画中途：两页同时在树上，新增的页面还处于半透明状态
     await tester.pump(const Duration(milliseconds: 150));
     expect(find.text('second'), findsOneWidget);
+
+    final fade = tester.widget<FadeTransition>(
+      find
+          .ancestor(
+            of: find.text('second'),
+            matching: find.byType(FadeTransition),
+          )
+          .first,
+    );
+    expect(fade.opacity.value, inExclusiveRange(0.0, 1.0));
 
     await tester.pumpAndSettle();
     expect(find.text('second'), findsOneWidget);
