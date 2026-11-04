@@ -591,7 +591,7 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                 activeIcon: const Icon(Icons.bookmark),
                 isActive: isFavorite || isAddToLocalFav,
                 text: 'Favorite'.tl,
-                onPressed: openFavPanel,
+                onPressed: favoriteAction,
                 onLongPressed: quickFavorite,
                 iconColor: context.useTextColor(Colors.purple),
               ),

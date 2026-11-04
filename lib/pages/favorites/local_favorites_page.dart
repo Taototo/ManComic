@@ -594,12 +594,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       text: "Move to folder".tl,
                       onClick: () => favoriteOption('move'),
                     ),
-                  if (!isAllFolder && !isReadFolder)
-                    MenuEntry(
-                      icon: Icons.copy,
-                      text: "Copy to folder".tl,
-                      onClick: () => favoriteOption('add'),
-                    ),
                   MenuEntry(
                     icon: Icons.select_all,
                     text: "Select All".tl,
@@ -615,6 +609,12 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     text: "Invert Selection".tl,
                     onClick: invertSelection,
                   ),
+                  MenuEntry(
+                    icon: Icons.download,
+                    text: "Download".tl,
+                    onClick: downloadSelected,
+                  ),
+                  // 删除是危险操作，固定放在菜单最后。
                   if (!isAllFolder && !isReadFolder)
                     MenuEntry(
                       icon: Icons.delete_outline,
@@ -631,47 +631,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                           onConfirm: () {
                             _deleteComicWithId();
                           },
-                        );
-                      },
-                    ),
-                  MenuEntry(
-                    icon: Icons.download,
-                    text: "Download".tl,
-                    onClick: downloadSelected,
-                  ),
-                  if (selectedComics.length == 1)
-                    MenuEntry(
-                      icon: Icons.copy,
-                      text: "Copy Title".tl,
-                      onClick: () {
-                        Clipboard.setData(
-                          ClipboardData(text: selectedComics.keys.first.title),
-                        );
-                        context.showMessage(message: "Copied".tl);
-                      },
-                    ),
-                  if (selectedComics.length == 1)
-                    MenuEntry(
-                      icon: Icons.chrome_reader_mode_outlined,
-                      text: "Read".tl,
-                      onClick: () {
-                        final c = selectedComics.keys.first as FavoriteItem;
-                        App.rootContext.to(
-                          () => ReaderWithLoading(
-                            id: c.id,
-                            sourceKey: c.sourceKey,
-                          ),
-                        );
-                      },
-                    ),
-                  if (selectedComics.length == 1)
-                    MenuEntry(
-                      icon: Icons.arrow_forward_ios,
-                      text: "Jump to Detail".tl,
-                      onClick: () {
-                        final c = selectedComics.keys.first as FavoriteItem;
-                        App.mainNavigatorKey?.currentContext?.to(
-                          () => ComicPage(id: c.id, sourceKey: c.sourceKey),
                         );
                       },
                     ),
@@ -973,10 +932,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                                 ? null
                                 : (v) {
                                     setState(() {
+                                      // 一本漫画只能属于一个分类，
+                                      // 移动目标只能选一个。
+                                      selectedLocalFolders.clear();
                                       if (v!) {
                                         selectedLocalFolders.add(folder);
-                                      } else {
-                                        selectedLocalFolders.remove(folder);
                                       }
                                     });
                                   },
@@ -1010,23 +970,12 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                                 LocalFavoritesManager().moveFromRead(f, comic);
                               }
                             }
-                          } else {
-                            var comics = selectedComics.keys
-                                .map((e) => e as FavoriteItem)
-                                .toList();
-                            for (var f in selectedLocalFolders) {
-                              LocalFavoritesManager().batchCopyFavorites(
-                                favPage.folder as String,
-                                f,
-                                comics,
-                              );
-                            }
                           }
                           App.rootContext.pop();
                           updateComics();
                           _cancel();
                         },
-                        child: Text(option == 'add' ? "Add".tl : "Move".tl),
+                        child: Text("Move".tl),
                       ),
                     ),
                   ],

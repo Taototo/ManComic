@@ -13,18 +13,6 @@ class _AppSettingsState extends State<AppSettings> {
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("App".tl)),
-        // 漫画源入口：从首页模块移到这里
-        _SettingPartTitle(title: "Comic Sources".tl, icon: Icons.dns_outlined),
-        ListTile(
-          title: Text("Comic Sources".tl),
-          subtitle: Text(
-            "@c sources".tlParams({"c": ComicSource.all().length}),
-          ),
-          trailing: const Icon(Icons.arrow_right),
-          onTap: () {
-            context.to(() => const ComicSourcePage());
-          },
-        ).toSliver(),
         _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
         ListTile(
           title: Text("Storage Path for local comics".tl),

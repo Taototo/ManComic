@@ -304,7 +304,43 @@ class LocalFavoritesManager with ChangeNotifier {
     } else {
       appdata.settings['followUpdatesFolder'] = null;
     }
+    _normalizeExclusiveFolders();
     initCounts();
+  }
+
+  /// 数据规范化：一本漫画只允许属于一个分类。
+  /// 历史数据可能存在多分类共存，这里统一只保留最先创建的分类（已阅优先级最低，
+  /// 排在最后处理），在启动时一次性清理。
+  void _normalizeExclusiveFolders() {
+    var folders = [..._getFolderNamesWithDB(), readFolderName];
+    var seen = <int>{};
+    var changed = false;
+    for (var folder in folders) {
+      var rows = _db.select("""
+        select id, type from "$folder";
+      """);
+      for (var row in rows) {
+        var hash = (row['id'] as String).hashCode ^ (row['type'] as int);
+        if (seen.contains(hash)) {
+          _db.execute(
+            """
+            delete from "$folder"
+            where id == ? and type == ?;
+          """,
+            [row['id'], row['type']],
+          );
+          changed = true;
+        } else {
+          seen.add(hash);
+        }
+      }
+    }
+    if (changed) {
+      Log.info(
+        "Favorites",
+        "Removed comics that existed in multiple folders (exclusive policy)",
+      );
+    }
   }
 
   void initCounts() {
@@ -778,12 +814,32 @@ class LocalFavoritesManager with ChangeNotifier {
     } else {
       counts[folder] = counts[folder]! + 1;
     }
+    // 一本漫画同一时间只能属于一个普通分类：
+    // 收进新分类时，自动从其他普通分类移除（防止多分类共存）。
+    var movedFromOther = false;
+    for (var f in folderNames) {
+      if (f == folder) continue;
+      if (comicExists(f, comic.id, comic.type)) {
+        movedFromOther = true;
+        _db.execute(
+          """
+          delete from "$f"
+          where id == ? and type == ?;
+        """,
+          [comic.id, comic.type.value],
+        );
+        counts[f] = count(f);
+      }
+    }
     // 「已阅」不计入全部收藏的 hashedIds（totalComics 只统计普通收藏夹）
     var hash = comic.id.hashCode ^ comic.type.value;
     if (folder == readFolderName) {
       _readHashedIds[hash] = (_readHashedIds[hash] ?? 0) + 1;
     } else {
-      _hashedIds[hash] = (_hashedIds[hash] ?? 0) + 1;
+      // 从其他分类移过来的话，hash 的总数不变（只是换了位置）。
+      if (!movedFromOther) {
+        _hashedIds[hash] = (_hashedIds[hash] ?? 0) + 1;
+      }
       // 「已阅」独占：把漫画重新收藏进普通收藏夹时，自动移出已阅。
       if (_readHashedIds.containsKey(hash)) {
         _db.execute(
@@ -799,6 +855,42 @@ class LocalFavoritesManager with ChangeNotifier {
     }
     notifyListeners();
     return true;
+  }
+
+  /// 取消收藏：从所有普通分类与「已阅」中同时移除该漫画。
+  ///
+  /// 详情页收藏按钮在已收藏状态下点击时调用——由于一本漫画只属于一个分类，
+  /// 「取消」不需要区分来源，直接全局移除即可。
+  void unfavorite(String id, ComicType type) {
+    var hash = id.hashCode ^ type.value;
+    _db.execute("BEGIN TRANSACTION");
+    try {
+      for (var folder in _getFolderNamesWithDB()) {
+        _db.execute(
+          """
+          delete from "$folder"
+          where id == ? and type == ?;
+        """,
+          [id, type.value],
+        );
+      }
+      _db.execute(
+        """
+        delete from "$readFolderName"
+        where id == ? and type == ?;
+      """,
+        [id, type.value],
+      );
+    } catch (e) {
+      Log.error("Unfavorite", e.toString());
+      _db.execute("ROLLBACK");
+      return;
+    }
+    _db.execute("COMMIT");
+    _hashedIds.remove(hash);
+    _readHashedIds.remove(hash);
+    initCounts();
+    notifyListeners();
   }
 
   void moveFavorite(

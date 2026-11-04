@@ -57,6 +57,7 @@ class _SettingsPageState extends State<SettingsPage> {
     "Reading",
     "Appearance",
     "Local Favorites",
+    "Comic Sources",
     "APP",
     "Network",
     "About",
@@ -68,6 +69,7 @@ class _SettingsPageState extends State<SettingsPage> {
     Icons.book,
     Icons.color_lens,
     Icons.collections_bookmark_rounded,
+    Icons.dns_outlined,
     Icons.apps,
     Icons.public,
     Icons.info,
@@ -246,10 +248,12 @@ class _SettingsPageState extends State<SettingsPage> {
       1 => const ReaderSettings(),
       2 => const AppearanceSettings(),
       3 => const LocalFavoritesSettings(),
-      4 => const AppSettings(),
-      5 => const NetworkSettings(),
-      6 => const AboutSettings(),
-      7 => const DebugPage(),
+      // 「漫画源」直接作为设置的顶级分类，点开即源管理页。
+      4 => const ComicSourcePage(),
+      5 => const AppSettings(),
+      6 => const NetworkSettings(),
+      7 => const AboutSettings(),
+      8 => const DebugPage(),
       _ => throw UnimplementedError(),
     };
   }
@@ -271,10 +275,11 @@ class _SettingsDetailPage extends StatelessWidget {
       1 => const ReaderSettings(),
       2 => const AppearanceSettings(),
       3 => const LocalFavoritesSettings(),
-      4 => const AppSettings(),
-      5 => const NetworkSettings(),
-      6 => const AboutSettings(),
-      7 => const DebugPage(),
+      4 => const ComicSourcePage(),
+      5 => const AppSettings(),
+      6 => const NetworkSettings(),
+      7 => const AboutSettings(),
+      8 => const DebugPage(),
       _ => throw UnimplementedError(),
     };
   }
