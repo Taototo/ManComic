@@ -11,6 +11,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/utils/tags_translation.dart';
+import 'package:venera/utils/translations.dart';
 import 'dart:io';
 
 import 'app.dart';
@@ -224,6 +225,10 @@ class LocalFavoritesManager with ChangeNotifier {
 
   var _hashedIds = <int, int>{};
 
+  /// 「已阅」表内漫画的 hash 集合，与普通收藏夹分开维护：
+  /// totalComics（「全部」数量）不能包含已阅，但收藏标识（isExist）要包含。
+  var _readHashedIds = <int, int>{};
+
   int get totalComics {
     return _hashedIds.length;
   }
@@ -303,15 +308,22 @@ class LocalFavoritesManager with ChangeNotifier {
       counts[folder] = count(folder);
     }
     counts[readFolderName] = count(readFolderName);
-    _initHashedIds(folderNames, _db.handle).then((value) {
-      _hashedIds = value;
-      notifyListeners();
-    });
+    _refreshHashedIds();
   }
 
   void refreshHashedIds() {
-    _initHashedIds(folderNames, _db.handle).then((value) {
-      _hashedIds = value;
+    _refreshHashedIds();
+  }
+
+  /// 在一个 Isolate 里同时重建普通收藏夹与「已阅」的 hash 映射。
+  void _refreshHashedIds() {
+    _initHashedIds([...folderNames, readFolderName], _db.handle).then((value) {
+      var merged = <int, int>{};
+      for (var folder in folderNames) {
+        merged.addAll(value[folder] ?? const {});
+      }
+      _hashedIds = merged;
+      _readHashedIds = value[readFolderName] ?? {};
       notifyListeners();
     });
   }
@@ -327,12 +339,24 @@ class LocalFavoritesManager with ChangeNotifier {
     }
   }
 
-  static Future<Map<int, int>> _initHashedIds(
+  void _reduceReadHashedId(String id, int type) {
+    var hash = id.hashCode ^ type;
+    if (_readHashedIds.containsKey(hash)) {
+      if (_readHashedIds[hash]! > 1) {
+        _readHashedIds[hash] = _readHashedIds[hash]! - 1;
+      } else {
+        _readHashedIds.remove(hash);
+      }
+    }
+  }
+
+  static Future<Map<String, Map<int, int>>> _initHashedIds(
       List<String> folders, Pointer<void> p) {
     return Isolate.run(() {
       var db = sqlite3.fromPointer(p);
-      var hashedIds = <int, int>{};
+      var result = <String, Map<int, int>>{};
       for (var folder in folders) {
+        var hashedIds = <int, int>{};
         var rows = db.select("""
           select id, type from "$folder";
         """);
@@ -342,8 +366,9 @@ class LocalFavoritesManager with ChangeNotifier {
           var hash = id.hashCode ^ type;
           hashedIds[hash] = (hashedIds[hash] ?? 0) + 1;
         }
+        result[folder] = hashedIds;
       }
-      return hashedIds;
+      return result;
     });
   }
 
@@ -686,9 +711,20 @@ class LocalFavoritesManager with ChangeNotifier {
       counts[folder] = counts[folder]! + 1;
     }
     // 「已阅」不计入全部收藏的 hashedIds（totalComics 只统计普通收藏夹）
-    if (folder != readFolderName) {
-      var hash = comic.id.hashCode ^ comic.type.value;
+    var hash = comic.id.hashCode ^ comic.type.value;
+    if (folder == readFolderName) {
+      _readHashedIds[hash] = (_readHashedIds[hash] ?? 0) + 1;
+    } else {
       _hashedIds[hash] = (_hashedIds[hash] ?? 0) + 1;
+      // 「已阅」独占：把漫画重新收藏进普通收藏夹时，自动移出已阅。
+      if (_readHashedIds.containsKey(hash)) {
+        _db.execute("""
+          delete from "$readFolderName"
+          where id == ? and type == ?;
+        """, [comic.id, comic.type.value]);
+        counts[readFolderName] = count(readFolderName);
+        _readHashedIds.remove(hash);
+      }
     }
     notifyListeners();
     return true;
@@ -818,23 +854,43 @@ class LocalFavoritesManager with ChangeNotifier {
   bool isRead(String id, ComicType type) =>
       comicExists(readFolderName, id, type);
 
-  /// 移入「已阅」：从原收藏夹删除，同时加入已阅表（已存在则只删除原位置）。
+  /// 该漫画被收藏到的所有收藏夹显示名（含「已阅」），用于详情页展示。
+  List<String> getComicFolders(String id, ComicType type) {
+    var res = <String>[];
+    for (var folder in folderNames) {
+      if (comicExists(folder, id, type)) {
+        res.add(getFavoriteDataOrNull(folder)?.title ?? folder);
+      }
+    }
+    if (isRead(id, type)) {
+      res.add("Finished Reading".tl);
+    }
+    return res;
+  }
+
+  /// 移入「已阅」：从**所有**普通收藏夹删除，同时加入已阅表。
+  /// 「已阅」是独占状态，不允许同时存在于已阅和任何普通收藏夹。
   void moveToRead(String sourceFolder, FavoriteItem comic) {
     if (comicExists(readFolderName, comic.id, comic.type)) {
       deleteComicWithId(sourceFolder, comic.id, comic.type);
       return;
     }
     addComic(readFolderName, comic, maxValue(readFolderName) + 1);
-    deleteComicWithId(sourceFolder, comic.id, comic.type);
+    for (var folder in _getFolderNamesWithDB()) {
+      if (comicExists(folder, comic.id, comic.type)) {
+        deleteComicWithId(folder, comic.id, comic.type);
+      }
+    }
   }
 
-  /// 批量移入「已阅」。
+  /// 批量移入「已阅」（同样从所有普通收藏夹移除）。
   void batchMoveToRead(String sourceFolder, List<FavoriteItem> items) {
     if (!existsFolder(sourceFolder)) {
       throw Exception("Source folder does not exist");
     }
     _db.execute("BEGIN TRANSACTION");
     var displayOrder = maxValue(readFolderName) + 1;
+    var allFolders = _getFolderNamesWithDB();
     try {
       for (var item in items) {
         if (!comicExists(readFolderName, item.id, item.type)) {
@@ -846,10 +902,12 @@ class LocalFavoritesManager with ChangeNotifier {
           """, [displayOrder, item.id, item.type.value]);
           displayOrder++;
         }
-        _db.execute("""
-          delete from "$sourceFolder"
-          where id == ? and type == ?;
-        """, [item.id, item.type.value]);
+        for (var folder in allFolders) {
+          _db.execute("""
+            delete from "$folder"
+            where id == ? and type == ?;
+          """, [item.id, item.type.value]);
+        }
       }
     } catch (e) {
       Log.error("Batch Move To Read", e.toString());
@@ -857,6 +915,9 @@ class LocalFavoritesManager with ChangeNotifier {
       return;
     }
     _db.execute("COMMIT");
+    for (var folder in allFolders) {
+      counts[folder] = count(folder);
+    }
     counts[sourceFolder] = count(sourceFolder);
     counts[readFolderName] = count(readFolderName);
     refreshHashedIds();
@@ -896,7 +957,9 @@ class LocalFavoritesManager with ChangeNotifier {
     } else {
       counts[folder] = count(folder);
     }
-    if (folder != readFolderName) {
+    if (folder == readFolderName) {
+      _reduceReadHashedId(id, type.value);
+    } else {
       reduceHashedId(id, type.value);
     }
     notifyListeners();
@@ -924,7 +987,9 @@ class LocalFavoritesManager with ChangeNotifier {
     }
     _db.execute("COMMIT");
     for (var comic in comics) {
-      if (folder != readFolderName) {
+      if (folder == readFolderName) {
+        _reduceReadHashedId(comic.id, comic.type.value);
+      } else {
         reduceHashedId(comic.id, comic.type.value);
       }
     }
@@ -1161,7 +1226,8 @@ class LocalFavoritesManager with ChangeNotifier {
 
   bool isExist(String id, ComicType type) {
     var hash = id.hashCode ^ type.value;
-    return _hashedIds.containsKey(hash);
+    // 收藏标识对「已阅」同样生效：进了已阅的漫画依然算已收藏。
+    return _hashedIds.containsKey(hash) || _readHashedIds.containsKey(hash);
   }
 
   void updateInfo(String folder, FavoriteItem comic, [bool notify = true]) {

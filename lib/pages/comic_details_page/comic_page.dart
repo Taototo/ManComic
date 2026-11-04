@@ -562,6 +562,45 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
               ),
             ],
           ).fixHeight(48),
+          // 显示被收藏在哪些文件夹；未收藏则不渲染任何内容。
+          // 监听 LocalFavoritesManager，收藏面板/快速收藏/移入已阅后即时刷新。
+          ListenableBuilder(
+            listenable: LocalFavoritesManager(),
+            builder: (context, _) {
+              var favFolders = LocalFavoritesManager()
+                  .getComicFolders(comic.id, comic.comicType);
+              if (favFolders.isEmpty) {
+                return const SizedBox.shrink();
+              }
+              return Container(
+                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
+                decoration: BoxDecoration(
+                  color: context.colorScheme.surfaceContainerLow,
+                  borderRadius: BorderRadius.circular(24),
+                ),
+                child: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Icon(
+                      Icons.bookmark_rounded,
+                      size: 16,
+                      color: context.useTextColor(Colors.purple),
+                    ),
+                    const SizedBox(width: 8),
+                    Flexible(
+                      child: Text(
+                        "${"Favorited in".tl} ${favFolders.join(" / ")}",
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                      ),
+                    ),
+                  ],
+                ),
+              ).toAlign(Alignment.centerLeft);
+            },
+          ),
           if (isMobile)
             Row(
               children: [
