@@ -10,6 +10,46 @@ class AboutSettings extends StatefulWidget {
 class _AboutSettingsState extends State<AboutSettings> {
   bool isCheckingUpdate = false;
 
+  /// 检查更新的统一入口：手动按钮和「启动时检查」开关共用。
+  Future<void> _check([bool interactive = true]) async {
+    if (isCheckingUpdate) {
+      return;
+    }
+    setState(() {
+      isCheckingUpdate = true;
+    });
+    await checkUpdateUi(interactive);
+    if (mounted) {
+      setState(() {
+        isCheckingUpdate = false;
+      });
+    }
+  }
+
+  /// 「上次自动检查」的说明文字。
+  ///
+  /// 启动检查是静默的（没更新不弹窗），用户没法确认开关是否真的在工作，
+  /// 所以把时间点摆在这里。
+  String _lastCheckLabel() {
+    var ts = appdata.implicitData['lastCheckUpdate'];
+    if (ts is! int || ts <= 0) {
+      return "Checks for a new version when the app starts.".tl;
+    }
+    var diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ts));
+    if (diff.inMinutes < 1) {
+      return "Last checked just now".tl;
+    }
+    if (diff.inMinutes < 60) {
+      return "Last checked @n minutes ago"
+          .tlParams({"n": diff.inMinutes.toString()});
+    }
+    if (diff.inHours < 24) {
+      return "Last checked @n hours ago"
+          .tlParams({"n": diff.inHours.toString()});
+    }
+    return "Last checked @n days ago".tlParams({"n": diff.inDays.toString()});
+  }
+
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
@@ -49,23 +89,20 @@ class _AboutSettingsState extends State<AboutSettings> {
           trailing: Button.filled(
             isLoading: isCheckingUpdate,
             child: Text("Check".tl),
-            onPressed: () {
-              setState(() {
-                isCheckingUpdate = true;
-              });
-              checkUpdateUi().whenComplete(() {
-                if (mounted) {
-                  setState(() {
-                    isCheckingUpdate = false;
-                  });
-                }
-              });
-            },
+            onPressed: _check,
           ).fixHeight(32),
         ).toSliver(),
         _SwitchSetting(
           title: "Check for updates on startup".tl,
           settingKey: "checkUpdateOnStart",
+          subtitle: _lastCheckLabel(),
+          onChanged: () {
+            // 打开开关就立刻跑一次：真有新版本能马上弹出来，没有也会提示，
+            // 用户不必等到下次冷启动才确认这个开关到底生效没有。
+            if (appdata.settings['checkUpdateOnStart'] == true) {
+              _check();
+            }
+          },
         ).toSliver(),
         ListTile(
           title: Text("GitHub".tl),
@@ -328,7 +365,10 @@ Future<AppUpdateInfo?> _fetchFromPubspec() async {
 ///
 /// [showMessageIfNoUpdate] 为 false 时，没有更新（或检查失败）不打扰用户，
 /// 用于应用启动时的静默检查（启动检查本身已有 24 小时节流）。
-Future<void> checkUpdateUi(
+///
+/// 返回「是否真正读到了远端版本信息」：网络不通、接口全挂时返回 false，
+/// 调用方据此决定要不要在下次启动重试，避免失败也吃掉一整天的检查额度。
+Future<bool> checkUpdateUi(
     [bool showMessageIfNoUpdate = true, bool delay = false]) async {
   try {
     var info = await fetchLatestVersion();
@@ -336,8 +376,14 @@ Future<void> checkUpdateUi(
       if (showMessageIfNoUpdate) {
         App.rootContext.showMessage(message: "Check for updates failed".tl);
       }
-      return;
+      return false;
     }
+    // 读到远端版本才算「检查成功」：记下时间点，既用于启动检查的节流，
+    // 也用于设置页的「上次检查」展示。失败时不写，交给调用方稍后重试。
+    appdata.implicitData['lastCheckUpdate'] =
+        DateTime.now().millisecondsSinceEpoch;
+    appdata.implicitData['lastCheckUpdateVersion'] = appVersionName;
+    appdata.writeImplicitData();
     if (!compareVersion(info.version, appVersionName)) {
       if (showMessageIfNoUpdate) {
         // 只有真实读到了 Release 才敢说「已是最新」；走回退通道拿到的版本号
@@ -348,7 +394,7 @@ Future<void> checkUpdateUi(
               : "Check for updates failed".tl,
         );
       }
-      return;
+      return true;
     }
     // 版本号更新但 Release 里没有 APK：不弹「更新」，否则用户会跳到空的发布页。
     if (!info.hasApk) {
@@ -359,7 +405,7 @@ Future<void> checkUpdateUi(
               : "Check for updates failed".tl,
         );
       }
-      return;
+      return true;
     }
     if (delay) {
       await Future.delayed(const Duration(seconds: 2));
@@ -411,11 +457,13 @@ Future<void> checkUpdateUi(
             ],
           );
         });
+    return true;
   } catch (e, s) {
     Log.error("Check Update", e.toString(), s);
     if (showMessageIfNoUpdate) {
       App.rootContext.showMessage(message: "Check for updates failed".tl);
     }
+    return false;
   }
 }
 

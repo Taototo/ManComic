@@ -9,6 +9,7 @@ import 'package:rhttp/rhttp.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
@@ -115,17 +116,45 @@ void _checkOldConfigs() {
   }
 }
 
+/// 自动检查的节流间隔。
+const _kUpdateCheckInterval = Duration(hours: 24);
+
+/// 检查失败后的重试间隔。
+///
+/// 失败（断网、GitHub 被墙）不能占用 24 小时的额度，否则一次开机时的网络
+/// 抖动就会让「启动时检查更新」整天失效；但也不能每次启动都去撞墙，
+/// 所以失败后隔半小时再试。
+const _kUpdateCheckRetryInterval = Duration(minutes: 30);
+
 Future<void> _checkAppUpdates() async {
-  var lastCheck = appdata.implicitData['lastCheckUpdate'] ?? 0;
   var now = DateTime.now().millisecondsSinceEpoch;
-  if (now - lastCheck < 24 * 60 * 60 * 1000) {
+  // 刚升级完一定查一次：新版本里可能带了「更新检查」本身的修复，
+  // 若还被上一版写下的 24 小时节流挡住，用户只会觉得开关依然没用。
+  var versionChanged =
+      appdata.implicitData['lastCheckUpdateVersion'] != appVersionName;
+  var lastSuccess = appdata.implicitData['lastCheckUpdate'] ?? 0;
+  if (!versionChanged &&
+      now - lastSuccess < _kUpdateCheckInterval.inMilliseconds) {
     return;
   }
-  appdata.implicitData['lastCheckUpdate'] = now;
-  appdata.writeImplicitData();
+  var lastFail = appdata.implicitData['lastCheckUpdateFailed'] ?? 0;
+  if (now - lastFail < _kUpdateCheckRetryInterval.inMilliseconds) {
+    return;
+  }
   ComicSourcePage.checkComicSourceUpdate();
-  if (appdata.settings['checkUpdateOnStart']) {
-    await checkUpdateUi(false, true);
+  if (!appdata.settings['checkUpdateOnStart']) {
+    // 没开自动更新时，这次只用于漫画源更新检查，仍然记一个时间点做节流。
+    appdata.implicitData['lastCheckUpdate'] = now;
+    appdata.implicitData['lastCheckUpdateVersion'] = appVersionName;
+    appdata.writeImplicitData();
+    return;
+  }
+  var ok = await checkUpdateUi(false, true);
+  // 成功时 checkUpdateUi 会自己记下时间点；失败只记一个短节流，
+  // 让下次启动早一点再试，而不是把一整天的额度用掉。
+  if (!ok) {
+    appdata.implicitData['lastCheckUpdateFailed'] = now;
+    appdata.writeImplicitData();
   }
 }
 

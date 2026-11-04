@@ -8,7 +8,7 @@ import 'package:venera/foundation/app.dart';
 
 const double _kBackGestureWidth = 20.0;
 const int _kMaxDroppedSwipePageForwardAnimationTime = 800;
-const int _kMaxPageBackAnimationTime = 300;
+const int _kMaxPageBackAnimationTime = 420;
 const double _kMinFlingVelocity = 1.0;
 
 class AppPageRoute<T> extends PageRoute<T> with _AppRouteTransitionMixin{
@@ -62,6 +62,14 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
   @override
   Duration get transitionDuration => const Duration(milliseconds: 300);
 
+  /// 返回比进入更缓一点。
+  ///
+  /// 进入动画要跟手、要利落，300ms 刚好；返回时页面是「退场」，同样的
+  /// 时长会显得一闪而过，所以单独拉长到 380ms。两者互不影响：
+  /// [reverseTransitionDuration] 只在 pop / 侧滑松手后生效。
+  @override
+  Duration get reverseTransitionDuration => const Duration(milliseconds: 380);
+
   @override
   Color? get barrierColor => null;
 
@@ -72,6 +80,36 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
   bool canTransitionTo(TransitionRoute<dynamic> nextRoute) {
     // Don't perform outgoing animation if the next route is a fullscreen dialog.
     return nextRoute is PageRoute && !nextRoute.fullscreenDialog;
+  }
+
+  /// 侧滑松手后补完退场的时长。
+  ///
+  /// [AnimationController.reverse] 会把时长按「剩余位移占全程的比例」缩放：
+  /// 划走七成再松手，只剩三成位移，380ms × 0.3 ≈ 114ms 就滑完了，观感就是
+  /// 「唰」一下闪走。这里给剩余位移补一个下限——短距离也至少两百多毫秒，
+  /// 同时保留划得越少、走得越快的手感。
+  static Duration _reverseDurationFor(double remaining) {
+    final ms = 210 + 260 * remaining.clamp(0.0, 1.0);
+    return Duration(milliseconds: ms.round());
+  }
+
+  @override
+  bool didPop(T? result) {
+    final controller = this.controller;
+    final remaining = controller?.value ?? 1.0;
+    final popped = super.didPop(result);
+    // 正常返回时 remaining 已经是 1，用 reverseTransitionDuration 即可；
+    // 只有「滑到一半松手」（预测性返回提交、iOS 边缘手势）才会带着未走完的
+    // 进度退场，这时接管动画时长。
+    if (controller != null && remaining > 0.0 && remaining < 1.0) {
+      controller.animateBack(
+        0.0,
+        duration: _reverseDurationFor(remaining),
+        // 转场层在手势期间锁定为线性，曲线交给控制器，收尾才有缓出去的感觉。
+        curve: Curves.easeOutCubic,
+      );
+    }
+    return popped;
   }
 
   bool get enableIOSGesture;
@@ -230,9 +268,11 @@ class IOSBackGestureController {
     } else {
       navigator.pop();
       if (controller.isAnimating) {
-        final droppedPageBackAnimationTime = lerpDouble(
-                0, _kMaxDroppedSwipePageForwardAnimationTime, controller.value)!
-            .floor();
+        // 同样给剩余位移留出时间：从 210ms 起，划得越少走得越快，
+        // 但不会出现「只剩一小段却瞬间消失」的观感。
+        final droppedPageBackAnimationTime =
+            lerpDouble(210, _kMaxPageBackAnimationTime, controller.value)!
+                .floor();
         controller.animateBack(0.0,
             duration: Duration(milliseconds: droppedPageBackAnimationTime),
             curve: animationCurve);

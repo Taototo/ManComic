@@ -171,6 +171,44 @@ void main() {
     expect(navKey.currentState!.userGestureInProgress, isFalse);
   });
 
+  testWidgets('快划到底再松手，剩余动画不会瞬间闪完', (tester) async {
+    App.nonRouteOverlayDismisser = null;
+    final navKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+
+    late AppPageRoute route;
+    route = AppPageRoute(
+      builder: (_) => PredictiveBackGestureDetector(
+        route: route,
+        child: const Scaffold(body: Text('second')),
+      ),
+    );
+    navKey.currentState!.push(route);
+    await tester.pumpAndSettle();
+
+    final detector = tester.state<PredictiveBackGestureDetectorState>(
+        find.byType(PredictiveBackGestureDetector));
+
+    // 划走 85%，只剩一点点位移：按框架「时长随剩余比例缩放」的算法，
+    // 这点位移会在 50ms 内滑完，观感是"闪"一下消失。
+    detector.handleStartBackGesture(_backEvent(0.85));
+    await tester.pump();
+    expect(route.animation!.value, closeTo(0.15, 0.001));
+
+    detector.handleCommitBackGesture();
+    await tester.pump();
+    await tester.pump(const Duration(milliseconds: 80));
+    // 80ms 后应该还在退场途中（现在至少有 210ms 的下限）
+    expect(route.animation!.value, greaterThan(0));
+
+    await tester.pumpAndSettle();
+    expect(find.text('second'), findsNothing);
+    expect(navKey.currentState!.userGestureInProgress, isFalse);
+  });
+
   testWidgets('取消手势后页面回位，且手势状态复位', (tester) async {
     App.nonRouteOverlayDismisser = null;
     final navKey = GlobalKey<NavigatorState>();
