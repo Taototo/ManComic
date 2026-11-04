@@ -54,3 +54,9 @@ android/key.properties
 
 # WorkBuddy 本地数据
 .workbuddy/
+# 临时文件（本地发布/CI 调试用）
+.tok
+.ci_log.txt
+.runs.txt
+.release_*.json
+.asset_resp.json

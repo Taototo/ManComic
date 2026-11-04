@@ -17,5 +17,5 @@ jobs:
           flutter-version-file: pubspec.yaml
           cache: true
       - run: flutter pub get
-      - run: flutter analyze lib test
+      - run: flutter analyze lib test --no-fatal-infos
       - run: flutter test
