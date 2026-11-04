@@ -41,4 +41,31 @@ void main() {
       expect(normalizeVersion("v"), isNull);
     });
   });
+
+  group('latestTagFromReleasesFeed', () {
+    // 更新检查的二级兜底：API 被限流时靠这个订阅源拿版本号
+    test('取第一条 entry 的 tag', () {
+      const feed = '''
+<?xml version="1.0" encoding="UTF-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <link type="application/atom+xml" rel="self" href="https://github.com/o/r/releases.atom"/>
+  <entry>
+    <id>tag:github.com,2008:Repository/1/v1.4.3</id>
+    <link rel="alternate" type="text/html" href="https://github.com/o/r/releases/tag/v1.4.3"/>
+    <title>ManComic 1.4.3</title>
+  </entry>
+  <entry>
+    <link rel="alternate" type="text/html" href="https://github.com/o/r/releases/tag/v1.4.2"/>
+    <title>ManComic 1.4.2</title>
+  </entry>
+</feed>''';
+      expect(latestTagFromReleasesFeed(feed), "v1.4.3");
+    });
+
+    test('拿不到 tag 时返回 null', () {
+      expect(latestTagFromReleasesFeed('<feed><title>404</title></feed>'),
+          isNull);
+      expect(latestTagFromReleasesFeed(''), isNull);
+    });
+  });
 }

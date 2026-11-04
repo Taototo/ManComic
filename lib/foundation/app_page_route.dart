@@ -187,7 +187,7 @@ mixin _AppRouteTransitionMixin<T> on PageRoute<T> {
     if (App.isAndroid) {
       // Android：系统手势返回（预测性返回）是全局的，没有「左边缘拖拽」
       // 这种局部识别器，只能挂到 WidgetsBinding 的观察者上。
-      return _PredictiveBackGestureDetector(route: this, child: result);
+      return PredictiveBackGestureDetector(route: this, child: result);
     }
 
     return result;
@@ -515,10 +515,14 @@ class _BackSwipeRecognizer extends OneSequenceGestureRecognizer {
 ///
 /// 只有 Android 会收到这些事件；Android 13 及以下、以及按返回键触发时，
 /// 系统不会发送手势事件，仍然走原来的 popRoute 流程。
-class _PredictiveBackGestureDetector extends StatefulWidget {
-  const _PredictiveBackGestureDetector({
+///
+/// 公开出来是为了单测能直接驱动它（`Platform.isAndroid` 在 flutter_tester
+/// 里恒为 false，走不到 `buildTransitions` 里挂载它的分支）。
+class PredictiveBackGestureDetector extends StatefulWidget {
+  const PredictiveBackGestureDetector({
     required this.route,
     required this.child,
+    super.key,
   });
 
   final PageRoute<dynamic> route;
@@ -526,11 +530,11 @@ class _PredictiveBackGestureDetector extends StatefulWidget {
   final Widget child;
 
   @override
-  State<_PredictiveBackGestureDetector> createState() =>
-      _PredictiveBackGestureDetectorState();
+  State<PredictiveBackGestureDetector> createState() =>
+      PredictiveBackGestureDetectorState();
 }
 
-class _PredictiveBackGestureDetectorState extends State<_PredictiveBackGestureDetector>
+class PredictiveBackGestureDetectorState extends State<PredictiveBackGestureDetector>
     with WidgetsBindingObserver {
   /// 本次手势是否由自己接管，避免同栈里多个路由同时响应。
   bool _active = false;
@@ -596,8 +600,33 @@ class _PredictiveBackGestureDetectorState extends State<_PredictiveBackGestureDe
       return;
     }
     _active = false;
-    widget.route.handleCommitBackGesture();
-    _ensureGestureStopped();
+
+    final navigator = widget.route.navigator;
+    if (navigator == null) {
+      return;
+    }
+    if (!widget.route.isCurrent) {
+      // 手势途中栈顶变了：不能再 pop（会退掉别的页面）。
+      _ensureGestureStopped();
+      return;
+    }
+
+    // 不能调用 route.handleCommitBackGesture()：它内部是
+    // `navigator.pop()` 之后 `controller.reverse(from: upperBound)`，
+    // 会先把动画值硬拉回 1.0（页面整页弹回原位）再滑走。手指划到 70%
+    // 松手时，观感就是「返回前先闪一下当前页」。
+    //
+    // 直接 pop：路由的 didPop 会对控制器调用 reverse()，从当前值开始
+    // 回退——页面从手指停下的位置继续滑出，位置连续、没有跳变。
+    //
+    // 手势状态必须在 pop 之前复位：路由退场后会被立刻销毁，销毁时清掉
+    // 动画的状态监听，任何「等动画结束再复位」的回调都不会被调用，导航器
+    // 会永久停在手势状态（后续侧滑全部失灵）。复位会让转场曲线由线性切回
+    // 缓动，这一点由 _SlidePageTransition 的「跟过手就一直线性」抵消。
+    if (navigator.userGestureInProgress) {
+      navigator.didStopUserGesture();
+    }
+    navigator.pop();
   }
 
   /// 手势结束后确保导航器退出「手势进行中」状态。
@@ -654,8 +683,7 @@ class SlidePageTransitionBuilder extends PageTransitionsBuilder {
     Animation<double> secondaryAnimation,
     Widget child,
   ) {
-    // 手指拖着走的时候必须线性：手指移动多少，页面就走多少。松手后的
-    // 补完动画才用缓动曲线，起手快、收尾慢，符合「被甩出去」的直觉。
+    // 手指拖着走的时候必须线性：手指移动多少，页面就走多少。
     return _SlidePageTransition(
       primaryAnimation: animation,
       secondaryAnimation: secondaryAnimation,
@@ -699,15 +727,26 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
 
   late Animation<Offset> _secondaryPosition;
 
+  /// 这一页是否被手指拖过。
+  ///
+  /// 一旦跟过手就锁定为线性：松手后表示「手势进行中」的标志可能立刻被复位，
+  /// 若此时把曲线从线性切回缓动，同一个动画值对应的位移会突变——页面会
+  /// 在松手的一瞬间跳一下。锁定后松手前后的位移就严格连贯。
+  bool _gestureDriven = false;
+
   @override
   void initState() {
     super.initState();
+    _gestureDriven = widget.dragging;
     _setupAnimations();
   }
 
   @override
   void didUpdateWidget(covariant _SlidePageTransition oldWidget) {
     super.didUpdateWidget(oldWidget);
+    if (widget.dragging && !_gestureDriven) {
+      _gestureDriven = true;
+    }
     if (oldWidget.primaryAnimation != widget.primaryAnimation ||
         oldWidget.secondaryAnimation != widget.secondaryAnimation ||
         oldWidget.dragging != widget.dragging) {
@@ -716,7 +755,8 @@ class _SlidePageTransitionState extends State<_SlidePageTransition> {
   }
 
   void _setupAnimations() {
-    final curve = widget.dragging ? Curves.linear : Curves.fastOutSlowIn;
+    final curve =
+        (widget.dragging || _gestureDriven) ? Curves.linear : Curves.fastOutSlowIn;
     _primaryPosition = widget.primaryAnimation
         .drive(CurveTween(curve: curve))
         .drive(Tween<Offset>(begin: const Offset(1, 0), end: Offset.zero));

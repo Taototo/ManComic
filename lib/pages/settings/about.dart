@@ -86,6 +86,7 @@ class AppUpdateInfo {
     required this.url,
     this.apkSize = 0,
     this.apkSha256,
+    this.fromRelease = false,
   });
 
   /// 纯版本号，形如 `1.4.2`（已去掉 `v` 前缀与 `+build` 后缀）。
@@ -102,6 +103,13 @@ class AppUpdateInfo {
 
   /// APK 的 SHA-256（小写十六进制），null 表示 Release 未提供摘要。
   final String? apkSha256;
+
+  /// 版本号是否直接来自 GitHub Release（可信）。
+  ///
+  /// 走回退通道（发布页重定向 / 仓库里的 pubspec.yaml）时只能算「版本提示」，
+  /// 它可能过期，也可能对应一个还没挂安装包的发布——所以只有可信来源才允许
+  /// 回答「已是最新版本」或「安装包还没发布」。
+  final bool fromRelease;
 }
 
 /// 创建用于更新检查的 Dio 实例。
@@ -128,20 +136,38 @@ AppDio _downloadDio() => AppDio(
       ),
     );
 
+/// 兜底请求用的 Dio：网络不通时快速失败，不要卡住整个检查流程。
+AppDio _fastDio() => AppDio(
+      BaseOptions(
+        connectTimeout: const Duration(seconds: 6),
+        receiveTimeout: const Duration(seconds: 8),
+        headers: {"cache-time": "no"},
+        validateStatus: (code) => code != null && code < 500,
+      ),
+    );
+
 /// 查询最新版本。
 ///
-/// 依次尝试：GitHub Release -> 仓库 main 分支的 pubspec.yaml。
-/// 任一成功即返回，全部失败返回 null（由调用方提示网络错误）。
+/// 三级回退，任一成功即返回：
+/// 1. GitHub Release API：版本号 + 安装包直链 + 大小 + 摘要，信息最全；
+/// 2. releases 的 Atom 订阅源：不需要 API 配额，被限流时仍可用；
+/// 3. 仓库 main 分支的 pubspec.yaml：只能拿到版本号，且可能被 CDN 缓存。
+///
+/// 全部失败返回 null（由调用方提示检查失败）。
 Future<AppUpdateInfo?> fetchLatestVersion() async {
-  var info = await _fetchFromRelease();
+  var info = await _fetchFromReleaseApi();
+  if (info != null) {
+    return info;
+  }
+  info = await _fetchFromReleaseFeed();
   if (info != null) {
     return info;
   }
   return await _fetchFromPubspec();
 }
 
-/// 从 GitHub Release 读取最新版本，同时拿到 APK 的直链、大小与摘要。
-Future<AppUpdateInfo?> _fetchFromRelease() async {
+/// 从 GitHub Release API 读取最新版本，同时拿到 APK 的直链、大小与摘要。
+Future<AppUpdateInfo?> _fetchFromReleaseApi() async {
   try {
     var res = await _updateDio().get(
       "https://api.github.com/repos/$appRepoOwner/$appRepoName/releases/latest",
@@ -194,6 +220,7 @@ Future<AppUpdateInfo?> _fetchFromRelease() async {
       url: url,
       apkSize: apkSize,
       apkSha256: apkSha256,
+      fromRelease: true,
     );
   } catch (e, s) {
     Log.error("Check Update", "Failed to read release info: $e", s);
@@ -201,28 +228,94 @@ Future<AppUpdateInfo?> _fetchFromRelease() async {
   }
 }
 
+/// 从 releases 的 Atom 订阅源拿最新 tag。
+///
+/// GitHub API 对未认证请求按 IP 限流（每小时 60 次），国内还常常连不上；
+/// 这个订阅源走网页域名、没有配额限制，也不需要跟随重定向（rhttp 适配器
+/// 会强制跟随跳转，拿不到 Location 头，所以不能用 `releases/latest`）。
+Future<AppUpdateInfo?> _fetchFromReleaseFeed() async {
+  try {
+    var res = await _fastDio().get("$appRepoUrl/releases.atom");
+    if (res.statusCode != 200) {
+      return null;
+    }
+    var tag = latestTagFromReleasesFeed(res.data.toString());
+    if (tag == null) {
+      return null;
+    }
+    var version = normalizeVersion(tag);
+    if (version == null) {
+      return null;
+    }
+    var asset = await _probeApkAsset(tag, version);
+    return AppUpdateInfo(
+      version: version,
+      url: asset?.url ?? appReleasesUrl,
+      apkSize: asset?.size ?? 0,
+      fromRelease: true,
+    );
+  } catch (e, s) {
+    Log.error("Check Update", "Failed to read release feed: $e", s);
+    return null;
+  }
+}
+
+/// 探测发布页里按约定命名的安装包是否存在。
+///
+/// 发布流程把 APK 固定命名为 `ManComic-<版本号>.apk`，所以只要知道 tag 就能
+/// 推出直链。探测失败（不存在或网络不通）时返回 null，由调用方决定兜底。
+Future<({String url, int size})?> _probeApkAsset(
+  String tag,
+  String version,
+) async {
+  var url = "$appRepoUrl/releases/download/$tag/ManComic-$version.apk";
+  try {
+    var res = await _fastDio().head<void>(
+      url,
+      options: Options(
+        followRedirects: true,
+        validateStatus: (code) => code != null && code < 400,
+      ),
+    );
+    var length = res.headers.value(Headers.contentLengthHeader);
+    return (url: url, size: int.tryParse(length ?? "") ?? 0);
+  } catch (e, s) {
+    Log.error("Check Update", "Failed to probe $url: $e", s);
+    return null;
+  }
+}
+
 /// 从仓库 main 分支的 pubspec.yaml 读取版本号。
 ///
-/// 这条回退只用于「新版本已推送但还没发 Release」的场景，
-/// 返回值不带 APK 直链，调用方据此不弹更新提示（避免点了却下载不到）。
+/// 这条通道只用于「新版本已推送但还没发 Release」的场景：拿到版本号后再按
+/// 约定探测安装包，探不到就当作检查失败——不能凭它回答「已是最新版本」，
+/// 因为 CDN 缓存可能还停在旧版本上。
 Future<AppUpdateInfo?> _fetchFromPubspec() async {
   var urls = [
-    // jsdelivr 在部分网络环境下比 raw 更易访问，放在前面做首选重试
+    // raw 的缓存时间短，但带个时间戳参数更保险；jsdelivr 国内可达性好，
+    // 但对 @main 的缓存可长达 12 小时，只能作为补充。
+    "https://raw.githubusercontent.com/$appRepoOwner/$appRepoName/main/pubspec.yaml"
+        "?t=${DateTime.now().millisecondsSinceEpoch}",
     "https://cdn.jsdelivr.net/gh/$appRepoOwner/$appRepoName@main/pubspec.yaml",
-    "https://raw.githubusercontent.com/$appRepoOwner/$appRepoName/main/pubspec.yaml",
   ];
   for (var url in urls) {
     try {
-      var res = await _updateDio().get(url);
+      var res = await _fastDio().get(url);
       if (res.statusCode != 200) {
         continue;
       }
       var data = loadYaml(res.data.toString());
       if (data is Map && data["version"] != null) {
         var version = normalizeVersion(data["version"].toString());
-        if (version != null) {
-          return AppUpdateInfo(version: version, url: appReleasesUrl);
+        if (version == null) {
+          continue;
         }
+        var asset = await _probeApkAsset("v$version", version);
+        return AppUpdateInfo(
+          version: version,
+          url: asset?.url ?? appReleasesUrl,
+          apkSize: asset?.size ?? 0,
+        );
       }
     } catch (e, s) {
       Log.error("Check Update", "Failed to read pubspec from $url: $e", s);
@@ -247,7 +340,13 @@ Future<void> checkUpdateUi(
     }
     if (!compareVersion(info.version, appVersionName)) {
       if (showMessageIfNoUpdate) {
-        App.rootContext.showMessage(message: "No new version available".tl);
+        // 只有真实读到了 Release 才敢说「已是最新」；走回退通道拿到的版本号
+        // 可能是 CDN 上的旧值，说「已是最新」会让人误以为更新检查坏了。
+        App.rootContext.showMessage(
+          message: info.fromRelease
+              ? "No new version available".tl
+              : "Check for updates failed".tl,
+        );
       }
       return;
     }
@@ -255,7 +354,9 @@ Future<void> checkUpdateUi(
     if (!info.hasApk) {
       if (showMessageIfNoUpdate) {
         App.rootContext.showMessage(
-          message: "New version found but no APK published".tl,
+          message: info.fromRelease
+              ? "New version found but no APK published".tl
+              : "Check for updates failed".tl,
         );
       }
       return;

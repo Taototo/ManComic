@@ -1,7 +1,19 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/app_page_route.dart';
+
+/// 构造一个系统侧滑返回事件（Android 预测性返回）。
+///
+/// `Platform.isAndroid` 在 flutter_tester 里恒为 false，转场不会挂上检测器，
+/// 所以这里直接把事件喂给 [PredictiveBackGestureDetectorState]。
+PredictiveBackEvent _backEvent(double progress) =>
+    PredictiveBackEvent.fromMap(<String, Object?>{
+      'progress': progress,
+      'swipeEdge': 0,
+      'touchOffset': const <double>[0.0, 300.0],
+    });
 
 /// 验证「被外层盖住的路由不接管返回手势」这条规则，以及非路由浮层的接入。
 void main() {
@@ -118,6 +130,78 @@ void main() {
 
     // 栈里只剩根路由：没有可退的了，返回 false 交由调用方弹「是否退出」
     expect(await App.handleBack(), isFalse);
+  });
+
+  testWidgets('松手提交时页面不回弹，从手指位置直接滑走', (tester) async {
+    App.nonRouteOverlayDismisser = null;
+    final navKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+
+    late AppPageRoute route;
+    route = AppPageRoute(
+      builder: (_) => PredictiveBackGestureDetector(
+        route: route,
+        child: const Scaffold(body: Text('second')),
+      ),
+    );
+    navKey.currentState!.push(route);
+    await tester.pumpAndSettle();
+
+    final detector =
+        tester.state<PredictiveBackGestureDetectorState>(
+            find.byType(PredictiveBackGestureDetector));
+
+    // 划到 30%：路由的进度是「还剩多少」，所以动画值应为 0.7
+    expect(detector.handleStartBackGesture(_backEvent(0.3)), isTrue);
+    await tester.pump();
+    expect(route.animation!.value, closeTo(0.7, 0.001));
+
+    detector.handleCommitBackGesture();
+    await tester.pump();
+    // 关键断言：不能跳回 1.0。框架默认的 handleCommitBackGesture 会
+    // reverse(from: upperBound)，页面先整页弹回原位再滑走（用户反馈的「闪一下」）。
+    expect(route.animation!.value, lessThan(0.75));
+
+    await tester.pumpAndSettle();
+    expect(find.text('second'), findsNothing);
+    // 手势状态必须复位，否则后续侧滑返回全部失灵
+    expect(navKey.currentState!.userGestureInProgress, isFalse);
+  });
+
+  testWidgets('取消手势后页面回位，且手势状态复位', (tester) async {
+    App.nonRouteOverlayDismisser = null;
+    final navKey = GlobalKey<NavigatorState>();
+    await tester.pumpWidget(MaterialApp(
+      navigatorKey: navKey,
+      home: const Scaffold(body: Text('home')),
+    ));
+
+    late AppPageRoute route;
+    route = AppPageRoute(
+      builder: (_) => PredictiveBackGestureDetector(
+        route: route,
+        child: const Scaffold(body: Text('second')),
+      ),
+    );
+    navKey.currentState!.push(route);
+    await tester.pumpAndSettle();
+
+    final detector =
+        tester.state<PredictiveBackGestureDetectorState>(
+            find.byType(PredictiveBackGestureDetector));
+
+    detector.handleStartBackGesture(_backEvent(0.3));
+    await tester.pump();
+    expect(route.animation!.value, closeTo(0.7, 0.001));
+
+    detector.handleCancelBackGesture();
+    await tester.pumpAndSettle();
+    expect(find.text('second'), findsOneWidget);
+    expect(route.animation!.value, 1.0);
+    expect(navKey.currentState!.userGestureInProgress, isFalse);
   });
 }
 

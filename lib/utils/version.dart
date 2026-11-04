@@ -44,3 +44,12 @@ bool compareVersion(String version1, String version2) {
   }
   return false;
 }
+
+/// 从 GitHub releases 的 Atom 订阅源里取出最新版本的 tag。
+///
+/// 源里按时间倒序排列，第一处 `/releases/tag/<tag>` 就是最新版本。
+/// 返回 null 表示没解析出来（源格式变了、或被代理返回了错误页）。
+String? latestTagFromReleasesFeed(String xml) {
+  var match = RegExp(r'/releases/tag/([^"<\s]+)').firstMatch(xml);
+  return match?.group(1);
+}
