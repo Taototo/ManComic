@@ -19,6 +19,7 @@ import androidx.activity.result.contract.ActivityResultContract
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
+import androidx.core.content.FileProvider
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
@@ -156,6 +157,39 @@ class MainActivity : FlutterFragmentActivity() {
                         window.clearFlags(android.view.WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON)
                     }
                     res.success(null)
+                }
+
+                "installApk" -> {
+                    // 应用内更新：通过 FileProvider 把 APK 交给系统安装器。
+                    // 首次安装时系统会自动引导用户授予「安装未知应用」权限。
+                    val path = call.argument<String>("path")
+                    if (path == null) {
+                        res.success(false)
+                    } else {
+                        try {
+                            val file = File(path)
+                            if (!file.exists()) {
+                                Log.e("Venera", "installApk: file not found: $path")
+                                res.success(false)
+                            } else {
+                                val uri = FileProvider.getUriForFile(
+                                    this,
+                                    "$packageName.fileprovider",
+                                    file
+                                )
+                                val intent = Intent(Intent.ACTION_VIEW).apply {
+                                    setDataAndType(uri, "application/vnd.android.package-archive")
+                                    addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                                    addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                                }
+                                startActivity(intent)
+                                res.success(true)
+                            }
+                        } catch (e: Exception) {
+                            Log.e("Venera", "installApk failed", e)
+                            res.success(false)
+                        }
+                    }
                 }
 
                 "getDirectoryPath" -> {

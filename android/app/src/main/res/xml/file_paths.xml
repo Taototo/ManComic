@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- 应用内更新：把 dataPath/updates 目录下的 APK 通过 content:// 授权给系统安装器 -->
+<paths>
+    <files-path
+        name="updates"
+        path="updates/" />
+</paths>

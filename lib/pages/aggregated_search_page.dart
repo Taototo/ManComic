@@ -229,7 +229,9 @@ class _AggregatedSearchPageState extends State<AggregatedSearchPage> {
           badgeBuilder: (c) {
             for (final cluster in _clusters) {
               if (identical(cluster.$1, c)) {
-                return cluster.$2 > 1 ? "${cluster.$2} sources".tl : null;
+                return cluster.$2 > 1
+                    ? "@a sources".tlParams({"a": "${cluster.$2}"})
+                    : null;
               }
             }
             return null;

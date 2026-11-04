@@ -3,7 +3,7 @@
 [![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
 [![platform](https://img.shields.io/badge/platform-Android-3ddc84)](https://www.android.com/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/Taototo/ManComic/blob/main/LICENSE)
-[![version](https://img.shields.io/badge/version-1.2.5-orange)](https://github.com/Taototo/ManComic)
+[![version](https://img.shields.io/github/v/release/Taototo/ManComic)](https://github.com/Taototo/ManComic/releases)
 
 一个支持本地与网络漫画源的 Android 漫画阅读器，基于开源项目 **Venera** 深度定制。
 
@@ -25,7 +25,7 @@
 | 上游技术栈 | Flutter + Dart，JavaScript 编写漫画源，flutter_qjs 作为 JS 引擎 |
 | 本分支起点 | 基于上游 **1.6.3** 版本的代码 |
 | 本分支仓库 | https://github.com/Taototo/ManComic |
-| 本分支版本 | 1.2.5（本分支独立编号，与上游版本号无对应关系） |
+| 本分支版本 | 1.4.2（本分支独立编号，与上游版本号无对应关系） |
 
 **为什么会有这个分支**：上游已停止维护，但漫画源生态与 Android 端体验仍有大量可改进空间。本分支在其坚实的基础上做了平台精简、界面重做、阅读器增强，以及一系列围绕「追更、找源、统计」的功能补全。
 
@@ -42,7 +42,7 @@
 ### 1. 平台与工程
 
 - 移除全部非 Android 平台工程与依赖（ios / macos / linux / windows / debian / fastlane 等），仓库大幅瘦身。
-- 更换为自有签名证书；版本号体系改为 `1.2.5+255`，`versionCode = N × 10`，保证每次升级可覆盖安装。
+- 更换为自有签名证书；版本号体系为 `1.4.2+272`，`versionCode = N × 10`，保证每次升级可覆盖安装。
 - 只产出**通用 APK**（不再分架构打包）。
 - 补全 Rust 构建链（`librhttp.so` 三架构），修复因缺失 native 库导致「所有网络请求失败」的问题。
 - 修复 `dio` 层对畸形 `Content-Type` 的解析容错，单响应上限 50MB；JS 引擎增加 URL 过滤与超大 HTML 截断容错，避免个别源拖死整页。
@@ -135,6 +135,24 @@ flutter build apk --release
 产物：`build/app/outputs/flutter-apk/app-release.apk`
 
 > 首次构建会在 `~/.gradle` 与 `target/` 产生大量缓存，建议预留 5GB 以上空间。
+
+### 自动发版
+
+推送 `v<版本号>` 形式的 tag（如 `git tag v1.4.2 && git push origin v1.4.2`）会触发 `.github/workflows/release.yml`：
+
+1. 校验 `pubspec.yaml`、`android/app/build.gradle`、`lib/foundation/consts.dart` 三处版本号与 tag 完全一致，不一致直接失败（避免发出「版本对了但包不对」的安装包）
+2. 构建通用 APK，`aapt` 校验包内 versionCode，自动创建 Release 并把 APK 挂为资产
+
+首次使用需在仓库 Settings → Secrets 中配置：
+
+| Secret | 内容 |
+| --- | --- |
+| `KEYSTORE_BASE64` | keystore 文件的 base64（`base64 -w0 ManComi.jks`） |
+| `KEYSTORE_PASSWORD` | keystore 口令 |
+| `KEY_PASSWORD` | key 口令 |
+| `KEY_ALIAS` | key 别名 |
+
+Release 发布后，已安装用户点「检查更新」即可直接下载安装。
 
 ---
 

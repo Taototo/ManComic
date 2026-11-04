@@ -606,8 +606,8 @@ class _SingleExplorePageState extends AutomaticGlobalState<_SingleExplorePage>
         },
       );
     } else {
-      return const Center(
-        child: Text("Empty Page"),
+      return Center(
+        child: Text("Empty Page".tl),
       );
     }
   }

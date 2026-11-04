@@ -1271,7 +1271,7 @@ class ComicListState extends State<ComicList> {
                 child: Padding(
                   padding:
                       const EdgeInsets.symmetric(horizontal: 16, vertical: 6),
-                  child: Text("Page $_page / ${_maxPage ?? '?'}"),
+                  child: Text("第 $_page / ${_maxPage ?? '?'} 页"),
                 ),
               ),
             ),
