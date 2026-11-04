@@ -303,7 +303,11 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       // 进过详情页之后，发现页角标就能显示出来。
       final updateTime = res.data.findUpdateTime();
       if (updateTime != null) {
-        ComicUpdateTimeCache.instance.put(widget.sourceKey, widget.id, updateTime);
+        ComicUpdateTimeCache.instance.put(
+          widget.sourceKey,
+          widget.id,
+          updateTime,
+        );
       }
     }
     if (res.error) {
@@ -485,6 +489,50 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                   (ComicSource.find(comic.sourceKey)?.name) ?? '',
                   style: ts.s12,
                 ),
+                // 收藏位置：跟在来源名下面，作为一行轻量元信息；
+                // 未收藏时整行不渲染，不占高度。
+                ListenableBuilder(
+                  listenable: LocalFavoritesManager(),
+                  builder: (context, _) {
+                    var favFolders = LocalFavoritesManager().getComicFolders(
+                      comic.id,
+                      comic.comicType,
+                    );
+                    if (favFolders.isEmpty) {
+                      return const SizedBox.shrink();
+                    }
+                    return Padding(
+                      padding: const EdgeInsets.only(top: 6),
+                      child: Row(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Padding(
+                            padding: const EdgeInsets.only(top: 1),
+                            child: Icon(
+                              Icons.bookmark_rounded,
+                              size: 13,
+                              color: context.colorScheme.primary.toOpacity(
+                                0.85,
+                              ),
+                            ),
+                          ),
+                          const SizedBox(width: 4),
+                          Flexible(
+                            child: Text(
+                              "${"Favorited in".tl} ${favFolders.join(" · ")}",
+                              style: ts.s12.copyWith(
+                                color: context.colorScheme.onSurfaceVariant,
+                                height: 1.3,
+                              ),
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                          ),
+                        ],
+                      ),
+                    );
+                  },
+                ),
               ],
             ),
           ),
@@ -562,45 +610,6 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
               ),
             ],
           ).fixHeight(48),
-          // 显示被收藏在哪些文件夹；未收藏则不渲染任何内容。
-          // 监听 LocalFavoritesManager，收藏面板/快速收藏/移入已阅后即时刷新。
-          ListenableBuilder(
-            listenable: LocalFavoritesManager(),
-            builder: (context, _) {
-              var favFolders = LocalFavoritesManager()
-                  .getComicFolders(comic.id, comic.comicType);
-              if (favFolders.isEmpty) {
-                return const SizedBox.shrink();
-              }
-              return Container(
-                margin: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 12, vertical: 6),
-                decoration: BoxDecoration(
-                  color: context.colorScheme.surfaceContainerLow,
-                  borderRadius: BorderRadius.circular(24),
-                ),
-                child: Row(
-                  mainAxisSize: MainAxisSize.min,
-                  children: [
-                    Icon(
-                      Icons.bookmark_rounded,
-                      size: 16,
-                      color: context.useTextColor(Colors.purple),
-                    ),
-                    const SizedBox(width: 8),
-                    Flexible(
-                      child: Text(
-                        "${"Favorited in".tl} ${favFolders.join(" / ")}",
-                        maxLines: 1,
-                        overflow: TextOverflow.ellipsis,
-                      ),
-                    ),
-                  ],
-                ),
-              ).toAlign(Alignment.centerLeft);
-            },
-          ),
           if (isMobile)
             Row(
               children: [
@@ -1040,8 +1049,8 @@ class _ActionButtonState extends State<_ActionButton> {
                         child: CircularProgressIndicator(strokeWidth: 1.8),
                       )
                     : ((widget.isActive ?? false)
-                        ? (widget.activeIcon ?? widget.icon)
-                        : widget.icon),
+                          ? (widget.activeIcon ?? widget.icon)
+                          : widget.icon),
               ),
               const SizedBox(width: 8),
               Text(widget.text),
@@ -1084,18 +1093,24 @@ class _BouncyActiveIconState extends State<_BouncyActiveIcon>
 
   late final Animation<double> _scale = TweenSequence<double>([
     TweenSequenceItem(
-      tween: Tween(begin: 1.0, end: 1.3)
-          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      tween: Tween(
+        begin: 1.0,
+        end: 1.3,
+      ).chain(CurveTween(curve: Curves.easeOutCubic)),
       weight: 35,
     ),
     TweenSequenceItem(
-      tween: Tween(begin: 1.3, end: 0.94)
-          .chain(CurveTween(curve: Curves.easeInOut)),
+      tween: Tween(
+        begin: 1.3,
+        end: 0.94,
+      ).chain(CurveTween(curve: Curves.easeInOut)),
       weight: 35,
     ),
     TweenSequenceItem(
-      tween: Tween(begin: 0.94, end: 1.0)
-          .chain(CurveTween(curve: Curves.easeOutCubic)),
+      tween: Tween(
+        begin: 0.94,
+        end: 1.0,
+      ).chain(CurveTween(curve: Curves.easeOutCubic)),
       weight: 30,
     ),
   ]).animate(_controller);
@@ -1121,10 +1136,7 @@ class _BouncyActiveIconState extends State<_BouncyActiveIcon>
       scale: widget.pressed ? 0.86 : 1.0,
       duration: const Duration(milliseconds: 110),
       curve: Curves.easeOut,
-      child: ScaleTransition(
-        scale: _scale,
-        child: widget.child,
-      ),
+      child: ScaleTransition(scale: _scale, child: widget.child),
     );
   }
 }

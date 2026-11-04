@@ -36,7 +36,8 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
 
   @override
   void initState() {
-    favPage = widget.favPage ??
+    favPage =
+        widget.favPage ??
         context.findAncestorStateOfType<_FavoritesPageState>()!;
     favPage.folderList = this;
     folders = LocalFavoritesManager().folderNames;
@@ -76,10 +77,7 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
                   const SizedBox(width: 8),
                   const CloseButton(),
                   const SizedBox(width: 8),
-                  Text(
-                    "Folders".tl,
-                    style: ts.s18,
-                  ),
+                  Text("Folders".tl, style: ts.s18),
                 ],
               ),
             ).paddingTop(context.padding.top),
@@ -88,7 +86,8 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
               padding: widget.withAppbar
                   ? EdgeInsets.zero
                   : EdgeInsets.only(top: context.padding.top),
-              // Local 标题 + 全部 + 已阅 + 自建文件夹 + Network 标题 + 网络收藏
+              // Local 标题 + 全部 + 自建分类 + 已阅（固定在本地分组底部）
+              // + Network 标题 + 网络收藏
               itemCount: folders.length + networkFolders.length + 4,
               itemBuilder: (context, index) {
                 if (index == 0) {
@@ -99,14 +98,17 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
                   return buildLocalFolder(_localAllFolderLabel);
                 }
                 index--;
-                if (index == 0) {
-                  return buildLocalFolder(_localReadFolderLabel);
-                }
-                index--;
                 if (index < folders.length) {
                   return buildLocalFolder(folders[index]);
                 }
                 index -= folders.length;
+                if (index == 0) {
+                  return buildLocalFolder(
+                    _localReadFolderLabel,
+                    withTopGap: true,
+                  );
+                }
+                index--;
                 if (index == 0) {
                   return buildNetworkTitle();
                 }
@@ -114,7 +116,7 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
                 return buildNetworkFolder(networkFolders[index]);
               },
             ),
-          )
+          ),
         ],
       ),
     );
@@ -125,10 +127,7 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       padding: const EdgeInsets.symmetric(vertical: 8),
       child: Row(
         children: [
-          Icon(
-            Icons.local_activity,
-            color: context.colorScheme.secondary,
-          ),
+          Icon(Icons.local_activity, color: context.colorScheme.secondary),
           const SizedBox(width: 12),
           Text("Local".tl),
           const Spacer(),
@@ -177,20 +176,14 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       ),
       child: Row(
         children: [
-          Icon(
-            Icons.cloud,
-            color: context.colorScheme.secondary,
-          ),
+          Icon(Icons.cloud, color: context.colorScheme.secondary),
           const SizedBox(width: 12),
           Text("Network".tl),
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.settings),
             onPressed: () {
-              showPopUpWidget(
-                App.rootContext,
-                setFavoritesPagesWidget(),
-              );
+              showPopUpWidget(App.rootContext, setFavoritesPagesWidget());
             },
           ),
         ],
@@ -198,7 +191,7 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
     );
   }
 
-  Widget buildLocalFolder(String name) {
+  Widget buildLocalFolder(String name, {bool withTopGap = false}) {
     bool isSelected = name == favPage.folder && !favPage.isNetwork;
     int count = 0;
     if (name == _localAllFolderLabel) {
@@ -213,48 +206,62 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       _localReadFolderLabel => "Finished Reading".tl,
       _ => getFavoriteDataOrNull(name)?.title ?? name,
     };
-    return InkWell(
-      onTap: () {
-        if (isSelected) {
-          return;
-        }
-        favPage.setFolder(false, name);
-        widget.onSelected?.call();
-      },
-      child: Container(
-        height: 42,
-        alignment: Alignment.centerLeft,
-        decoration: BoxDecoration(
-          color: isSelected
-              ? context.colorScheme.primaryContainer.toOpacity(0.36)
-              : null,
-          border: Border(
-            left: BorderSide(
-              color:
-                  isSelected ? context.colorScheme.primary : Colors.transparent,
-              width: 2,
+    return Padding(
+      padding: EdgeInsets.only(top: withTopGap ? 4 : 0),
+      child: InkWell(
+        onTap: () {
+          if (isSelected) {
+            return;
+          }
+          favPage.setFolder(false, name);
+          widget.onSelected?.call();
+        },
+        child: Container(
+          height: 42,
+          alignment: Alignment.centerLeft,
+          decoration: BoxDecoration(
+            color: isSelected
+                ? context.colorScheme.primaryContainer.toOpacity(0.36)
+                : null,
+            border: Border(
+              left: BorderSide(
+                color: isSelected
+                    ? context.colorScheme.primary
+                    : Colors.transparent,
+                width: 2,
+              ),
             ),
           ),
-        ),
-        padding: const EdgeInsets.only(left: 16),
-        child: Row(
-          children: [
-            Expanded(
-              child: Text(folderName),
-            ),
-            Container(
-              margin: EdgeInsets.only(right: 8),
-              padding: EdgeInsets.symmetric(
-                horizontal: 8,
-                vertical: 2,
+          padding: const EdgeInsets.only(left: 16),
+          child: Row(
+            children: [
+              if (name == _localReadFolderLabel) ...[
+                Icon(
+                  Icons.done_all,
+                  size: 16,
+                  color: context.colorScheme.onSurfaceVariant.toOpacity(0.8),
+                ),
+                const SizedBox(width: 8),
+              ],
+              Expanded(
+                child: Text(
+                  folderName,
+                  style: name == _localReadFolderLabel
+                      ? TextStyle(color: context.colorScheme.onSurfaceVariant)
+                      : null,
+                ),
               ),
-              decoration: BoxDecoration(
-                color: context.colorScheme.surfaceContainer,
-                borderRadius: BorderRadius.circular(8),
+              Container(
+                margin: EdgeInsets.only(right: 8),
+                padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                decoration: BoxDecoration(
+                  color: context.colorScheme.surfaceContainer,
+                  borderRadius: BorderRadius.circular(8),
+                ),
+                child: Text(count.toString()),
               ),
-              child: Text(count.toString()),
-            ),
-          ],
+            ],
+          ),
         ),
       ),
     );
@@ -283,8 +290,9 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
               : null,
           border: Border(
             left: BorderSide(
-              color:
-                  isSelected ? context.colorScheme.primary : Colors.transparent,
+              color: isSelected
+                  ? context.colorScheme.primary
+                  : Colors.transparent,
               width: 2,
             ),
           ),
