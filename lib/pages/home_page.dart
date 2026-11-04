@@ -16,7 +16,6 @@ import 'package:venera/foundation/home_modules.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
-import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/foundation/image_provider/cached_image.dart';
@@ -54,7 +53,6 @@ class HomePage extends StatelessWidget {
       'sync_data' => const _SyncDataWidget(),
       'history' => const _History(),
       'follow_updates' => const FollowUpdatesWidget(),
-      'comic_source' => const _ComicSourceWidget(),
       'local' => const _Local(),
       'image_favorites' => const ImageFavorites(),
       'random_pick' => const _RandomPick(),
@@ -151,9 +149,7 @@ class _ContinueReadingState extends State<_ContinueReading> {
     }
     final colors = context.colorScheme;
     final maxPage = item.maxPage ?? 0;
-    final progress = maxPage > 0
-        ? (item.page / maxPage).clamp(0.0, 1.0)
-        : null;
+    final progress = maxPage > 0 ? (item.page / maxPage).clamp(0.0, 1.0) : null;
     final epText = item.group != null
         ? "Group ${item.group} · Chapter ${item.ep}"
         : "Chapter ${item.ep}";
@@ -244,8 +240,9 @@ class _ContinueReadingState extends State<_ContinueReading> {
                           child: LinearProgressIndicator(
                             value: progress,
                             minHeight: 3,
-                            backgroundColor:
-                                colors.onSurfaceVariant.withValues(alpha: 0.15),
+                            backgroundColor: colors.onSurfaceVariant.withValues(
+                              alpha: 0.15,
+                            ),
                           ),
                         ),
                       ],
@@ -319,17 +316,15 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
         child: Container(
           margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
           decoration: BoxDecoration(
-            border: Border.all(
-              color: Theme.of(context).colorScheme.primary,
-            ),
+            border: Border.all(color: Theme.of(context).colorScheme.primary),
             borderRadius: BorderRadius.circular(8),
           ),
           child: ListTile(
             leading: const Icon(Icons.sync),
             title: Text('Syncing Data'.tl),
-            trailing: const CircularProgressIndicator(strokeWidth: 2)
-                .fixWidth(18)
-                .fixHeight(18),
+            trailing: const CircularProgressIndicator(
+              strokeWidth: 2,
+            ).fixWidth(18).fixHeight(18),
           ),
         ),
       );
@@ -459,13 +454,13 @@ class _HistoryState extends State<_History> {
             height: 56,
             child: Row(
               children: [
-                Center(
-                  child: Text('History'.tl, style: ts.s18),
-                ),
+                Center(child: Text('History'.tl, style: ts.s18)),
                 Container(
                   margin: const EdgeInsets.symmetric(horizontal: 8),
-                  padding:
-                      const EdgeInsets.symmetric(horizontal: 8, vertical: 2),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 8,
+                    vertical: 2,
+                  ),
                   decoration: BoxDecoration(
                     color: Theme.of(context).colorScheme.secondaryContainer,
                     borderRadius: BorderRadius.circular(8),
@@ -539,9 +534,7 @@ class _LocalState extends State<_Local> {
                 height: 56,
                 child: Row(
                   children: [
-                    Center(
-                      child: Text('Local'.tl, style: ts.s18),
-                    ),
+                    Center(child: Text('Local'.tl, style: ts.s18)),
                     Container(
                       margin: const EdgeInsets.symmetric(horizontal: 8),
                       padding: const EdgeInsets.symmetric(
@@ -596,9 +589,11 @@ class _LocalState extends State<_Local> {
                           else
                             const _AnimatedDownloadingIcon(),
                           const SizedBox(width: 8),
-                          Text("@a Tasks".tlParams({
-                            'a': LocalManager().downloadingTasks.length,
-                          })),
+                          Text(
+                            "@a Tasks".tlParams({
+                              'a': LocalManager().downloadingTasks.length,
+                            }),
+                          ),
                         ],
                       ),
                       onPressed: () {
@@ -606,10 +601,7 @@ class _LocalState extends State<_Local> {
                       },
                     ),
                   const Spacer(),
-                  Button.filled(
-                    onPressed: import,
-                    child: Text("Import".tl),
-                  ),
+                  Button.filled(onPressed: import, child: Text("Import".tl)),
                 ],
               ).paddingHorizontal(16).paddingVertical(8),
             ],
@@ -686,9 +678,7 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
           ? SizedBox(
               width: 600,
               height: height,
-              child: const Center(
-                child: CircularProgressIndicator(),
-              ),
+              child: const Center(child: CircularProgressIndicator()),
             )
           : RadioGroup<int>(
               groupValue: type,
@@ -731,19 +721,20 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
                       type != 3 &&
                       type != 5)
                     CheckboxListTile(
-                        enabled: true,
-                        title: Text("Copy to app local path".tl),
-                        value: copyToLocalFolder,
-                        onChanged: (v) {
-                          setState(() {
-                            copyToLocalFolder = !copyToLocalFolder;
-                          });
-                        }).paddingHorizontal(8),
+                      enabled: true,
+                      title: Text("Copy to app local path".tl),
+                      value: copyToLocalFolder,
+                      onChanged: (v) {
+                        setState(() {
+                          copyToLocalFolder = !copyToLocalFolder;
+                        });
+                      },
+                    ).paddingHorizontal(8),
                   const SizedBox(height: 8),
                   Text(info).paddingHorizontal(24),
                 ],
               ),
-          ),
+            ),
       actions: [
         Button.text(
           child: Row(
@@ -759,14 +750,15 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
           ),
           onPressed: () {
             launchUrlString(
-                "https://github.com/venera-app/venera/blob/master/doc/import_comic.md");
+              "https://github.com/venera-app/venera/blob/master/doc/import_comic.md",
+            );
           },
         ).fixWidth(90).paddingRight(8),
         Button.filled(
           isLoading: loading,
           onPressed: selectAndImport,
           child: Text("Select".tl),
-        )
+        ),
       ],
     );
   }
@@ -778,7 +770,9 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
       loading = true;
     });
     var importer = ImportComic(
-        selectedFolder: selectedFolder, copyToLocal: copyToLocalFolder);
+      selectedFolder: selectedFolder,
+      copyToLocal: copyToLocalFolder,
+    );
     var result = switch (type) {
       0 => await importer.directory(true),
       1 => await importer.directory(false),
@@ -795,132 +789,6 @@ class _ImportComicsWidgetState extends State<_ImportComicsWidget> {
         loading = false;
       });
     }
-  }
-}
-
-class _ComicSourceWidget extends StatefulWidget {
-  const _ComicSourceWidget();
-
-  @override
-  State<_ComicSourceWidget> createState() => _ComicSourceWidgetState();
-}
-
-class _ComicSourceWidgetState extends State<_ComicSourceWidget> {
-  int get _sourceCount => ComicSource.all().length;
-
-  void onComicSourceChange() {
-    if (mounted) {
-      setState(() {});
-    }
-  }
-
-  @override
-  void initState() {
-    ComicSourceManager().addListener(onComicSourceChange);
-    super.initState();
-  }
-
-  @override
-  void dispose() {
-    ComicSourceManager().removeListener(onComicSourceChange);
-    super.dispose();
-  }
-
-  int get _availableUpdates {
-    int c = 0;
-    ComicSourceManager().availableUpdates.forEach((key, version) {
-      var source = ComicSource.find(key);
-      if (source != null) {
-        if (compareSemVer(version, source.version)) {
-          c++;
-        }
-      }
-    });
-    return c;
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    // 首页漫画源模块仅显示入口与数量，不展示明细
-    return SliverToBoxAdapter(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border.all(
-            color: Theme.of(context).colorScheme.outlineVariant,
-            width: 0.6,
-          ),
-          borderRadius: BorderRadius.circular(8),
-        ),
-        child: InkWell(
-          borderRadius: BorderRadius.circular(8),
-          onTap: () {
-            context.to(() => const ComicSourcePage());
-          },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                height: 56,
-                child: Row(
-                  children: [
-                    Center(
-                      child: Text('Comic Source'.tl, style: ts.s18),
-                    ),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      padding: const EdgeInsets.symmetric(
-                          horizontal: 8, vertical: 2),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(_sourceCount.toString(), style: ts.s12),
-                    ),
-                    const Spacer(),
-                    const Icon(Icons.arrow_right),
-                  ],
-                ),
-              ).paddingHorizontal(16),
-              if (_availableUpdates > 0)
-                Container(
-                  padding: const EdgeInsets.symmetric(
-                    horizontal: 8,
-                    vertical: 4,
-                  ),
-                  decoration: BoxDecoration(
-                    border: Border.all(
-                      color: context.colorScheme.outlineVariant,
-                      width: 0.6,
-                    ),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Icon(
-                        Icons.update,
-                        color: context.colorScheme.primary,
-                        size: 20,
-                      ),
-                      const SizedBox(width: 8),
-                      Text(
-                        "@c updates".tlParams({
-                          'c': _availableUpdates,
-                        }),
-                        style: ts.withColor(context.colorScheme.primary),
-                      ),
-                    ],
-                  ),
-                )
-                    .toAlign(Alignment.centerLeft)
-                    .paddingHorizontal(16)
-                    .paddingBottom(8),
-            ],
-          ),
-        ),
-      ),
-    );
   }
 }
 
@@ -1039,9 +907,7 @@ class _ImageFavoritesState extends State<ImageFavorites> {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () {
-            context.to(
-              () => const ImageFavoritesPage()
-            );
+            context.to(() => const ImageFavoritesPage());
           },
           child: Column(
             mainAxisSize: MainAxisSize.min,
@@ -1050,17 +916,18 @@ class _ImageFavoritesState extends State<ImageFavorites> {
                 height: 56,
                 child: Row(
                   children: [
-                    Center(
-                      child: Text('Image Favorites'.tl, style: ts.s18),
-                    ),
+                    Center(child: Text('Image Favorites'.tl, style: ts.s18)),
                     if (hasData)
                       Container(
                         margin: const EdgeInsets.symmetric(horizontal: 8),
                         padding: const EdgeInsets.symmetric(
-                            horizontal: 8, vertical: 2),
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
                         decoration: BoxDecoration(
-                          color:
-                              Theme.of(context).colorScheme.secondaryContainer,
+                          color: Theme.of(
+                            context,
+                          ).colorScheme.secondaryContainer,
                           borderRadius: BorderRadius.circular(8),
                         ),
                         child: Text(
@@ -1083,7 +950,6 @@ class _ImageFavoritesState extends State<ImageFavorites> {
       ),
     );
   }
-
 }
 
 /// 首页「今天读什么」：从收藏和历史里随机抽一本。
@@ -1239,11 +1105,15 @@ class _RandomPickState extends State<_RandomPick> {
                         return FadeTransition(
                           opacity: animation,
                           child: ScaleTransition(
-                            scale: Tween<double>(begin: 0.86, end: 1.0)
-                                .animate(scale),
+                            scale: Tween<double>(
+                              begin: 0.86,
+                              end: 1.0,
+                            ).animate(scale),
                             child: RotationTransition(
-                              turns: Tween<double>(begin: -0.012, end: 0.0)
-                                  .animate(scale),
+                              turns: Tween<double>(
+                                begin: -0.012,
+                                end: 0.0,
+                              ).animate(scale),
                               child: child,
                             ),
                           ),
@@ -1354,35 +1224,35 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
   late final Map<Type, GestureRecognizerFactory> _gestures = {
     TapGestureRecognizer:
         GestureRecognizerFactoryWithHandlers<TapGestureRecognizer>(
-      () => TapGestureRecognizer(),
-      (instance) {
-        instance.onTap = () => _openComic(widget.comics[_index]);
-      },
-    ),
+          () => TapGestureRecognizer(),
+          (instance) {
+            instance.onTap = () => _openComic(widget.comics[_index]);
+          },
+        ),
     LongPressGestureRecognizer:
         GestureRecognizerFactoryWithHandlers<LongPressGestureRecognizer>(
-      () => LongPressGestureRecognizer(
-        duration: const Duration(milliseconds: 300),
-        debugOwner: this,
-      ),
-      (instance) {
-        instance
-          ..onLongPressStart = (_) {
-            HapticFeedback.selectionClick();
-            setState(() {
-              _drag = 0;
-            });
-          }
-          ..onLongPressMoveUpdate = (details) {
-            setState(() {
-              _drag = details.offsetFromOrigin.dy
-                  .clamp(-_cardHeight, _cardHeight)
-                  .toDouble();
-            });
-          }
-          ..onLongPressEnd = (_) => _handleLongPressEnd();
-      },
-    ),
+          () => LongPressGestureRecognizer(
+            duration: const Duration(milliseconds: 300),
+            debugOwner: this,
+          ),
+          (instance) {
+            instance
+              ..onLongPressStart = (_) {
+                HapticFeedback.selectionClick();
+                setState(() {
+                  _drag = 0;
+                });
+              }
+              ..onLongPressMoveUpdate = (details) {
+                setState(() {
+                  _drag = details.offsetFromOrigin.dy
+                      .clamp(-_cardHeight, _cardHeight)
+                      .toDouble();
+                });
+              }
+              ..onLongPressEnd = (_) => _handleLongPressEnd();
+          },
+        ),
   };
 
   void _openComic(ImageFavoritesComic comic) {
@@ -1506,9 +1376,8 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
                         // 前卡被抽走时下一张自己顶上来，而不是突然跳到顶层。
                         child: Transform.scale(
                           alignment: Alignment.topCenter,
-                          scale: 0.94 +
-                              0.06 *
-                                  (offset.abs() / 56).clamp(0.0, 1.0),
+                          scale:
+                              0.94 + 0.06 * (offset.abs() / 56).clamp(0.0, 1.0),
                           child: Align(
                             alignment: Alignment.topCenter,
                             child: _buildCard(behind),
@@ -1538,7 +1407,9 @@ class _ImageFavCardStackState extends State<_ImageFavCardStack>
                     "Hold and swipe up or down to switch".tl,
                     style: TextStyle(
                       fontSize: 10,
-                      color: context.colorScheme.onSurfaceVariant.toOpacity(0.7),
+                      color: context.colorScheme.onSurfaceVariant.toOpacity(
+                        0.7,
+                      ),
                     ),
                   ),
                 ],

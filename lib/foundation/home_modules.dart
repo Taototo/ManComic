@@ -21,15 +21,21 @@ class HomeModules {
   static const String _settingKey = 'homeModules';
 
   static const List<HomeModuleDef> definitions = [
-    HomeModuleDef('continue_reading', 'Continue Reading',
-        Icons.play_circle_outline),
+    HomeModuleDef(
+      'continue_reading',
+      'Continue Reading',
+      Icons.play_circle_outline,
+    ),
     HomeModuleDef('sync_data', 'Data Sync', Icons.sync),
     HomeModuleDef('history', 'History', Icons.history),
     HomeModuleDef('follow_updates', 'Follow Updates', Icons.update),
-    HomeModuleDef('comic_source', 'Comic Sources', Icons.dns_outlined),
+    // 「漫画源」入口已移至 设置 → APP，不再作为首页模块
     HomeModuleDef('local', 'Local Comics', Icons.folder_outlined),
-    HomeModuleDef('image_favorites', 'Image Favorites',
-        Icons.collections_outlined),
+    HomeModuleDef(
+      'image_favorites',
+      'Image Favorites',
+      Icons.collections_outlined,
+    ),
     HomeModuleDef('random_pick', 'Today Picks', Icons.casino_outlined),
   ];
 

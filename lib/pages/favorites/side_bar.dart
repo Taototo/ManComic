@@ -206,6 +206,24 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       _localReadFolderLabel => "Finished Reading".tl,
       _ => getFavoriteDataOrNull(name)?.title ?? name,
     };
+    bool isAll = name == _localAllFolderLabel;
+    bool isRead = name == _localReadFolderLabel;
+    // 自建分类整体缩进一层，与「全部」「已阅」这两个内置项区分开
+    bool isBuiltin = isAll || isRead;
+    var leadingIcon = switch (name) {
+      _localAllFolderLabel => Icons.apps,
+      _localReadFolderLabel => Icons.done_all,
+      _ => Icons.folder_outlined,
+    };
+    // 选中时图标与文字都用主题色；未选中时图标用次要色
+    var fgColor = isSelected
+        ? context.colorScheme.primary
+        : (isRead ? context.colorScheme.onSurfaceVariant : null);
+    var iconColor = isSelected
+        ? context.colorScheme.primary
+        : (isRead
+              ? context.colorScheme.onSurfaceVariant.toOpacity(0.8)
+              : context.colorScheme.onSurfaceVariant);
     return Padding(
       padding: EdgeInsets.only(top: withTopGap ? 4 : 0),
       child: InkWell(
@@ -232,33 +250,37 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
               ),
             ),
           ),
-          padding: const EdgeInsets.only(left: 16),
+          padding: EdgeInsets.only(left: isBuiltin ? 16 : 34),
           child: Row(
             children: [
-              if (name == _localReadFolderLabel) ...[
-                Icon(
-                  Icons.done_all,
-                  size: 16,
-                  color: context.colorScheme.onSurfaceVariant.toOpacity(0.8),
-                ),
-                const SizedBox(width: 8),
-              ],
+              Icon(leadingIcon, size: 16, color: iconColor),
+              const SizedBox(width: 8),
               Expanded(
                 child: Text(
                   folderName,
-                  style: name == _localReadFolderLabel
-                      ? TextStyle(color: context.colorScheme.onSurfaceVariant)
-                      : null,
+                  style: TextStyle(color: fgColor),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
                 ),
               ),
               Container(
                 margin: EdgeInsets.only(right: 8),
                 padding: EdgeInsets.symmetric(horizontal: 8, vertical: 2),
                 decoration: BoxDecoration(
-                  color: context.colorScheme.surfaceContainer,
+                  color: isSelected
+                      ? context.colorScheme.primaryContainer.toOpacity(0.6)
+                      : context.colorScheme.surfaceContainer,
                   borderRadius: BorderRadius.circular(8),
                 ),
-                child: Text(count.toString()),
+                child: Text(
+                  count.toString(),
+                  style: TextStyle(
+                    fontSize: 11,
+                    color: isSelected
+                        ? context.colorScheme.onPrimaryContainer
+                        : context.colorScheme.onSurfaceVariant,
+                  ),
+                ),
               ),
             ],
           ),
