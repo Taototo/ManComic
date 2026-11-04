@@ -1,6 +1,6 @@
 # ManComic
 
-[![flutter](https://img.shields.io/badge/flutter-3.41.4-blue)](https://flutter.dev/)
+[![flutter](https://img.shields.io/badge/flutter-3.47.4-blue)](https://flutter.dev/)
 [![platform](https://img.shields.io/badge/platform-Android-3ddc84)](https://www.android.com/)
 [![License](https://img.shields.io/badge/license-GPL--3.0-blue)](https://github.com/Taototo/ManComic/blob/main/LICENSE)
 [![version](https://img.shields.io/github/v/release/Taototo/ManComic)](https://github.com/Taototo/ManComic/releases)
@@ -122,7 +122,7 @@
 ## 五、从源码构建
 
 1. 克隆本仓库
-2. 安装 Flutter（见 [flutter.dev](https://flutter.dev/docs/get-started/install)），版本 3.41.4
+2. 安装 Flutter（见 [flutter.dev](https://flutter.dev/docs/get-started/install)），版本 3.47.4
 3. 安装 Rust（见 [rustup.rs](https://rustup.rs/)），用于编译 `rhttp` 的 native 库
 4. Android 构建还需：Android SDK、NDK、JDK 17、Visual Studio Build Tools（Windows 下编译 Rust 依赖）
 5. 配置签名：在 `android/` 下放置 `key.properties` 与 keystore（本仓库不包含签名文件）
