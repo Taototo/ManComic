@@ -10,108 +10,111 @@ class AppearanceSettings extends StatefulWidget {
 class _AppearanceSettingsState extends State<AppearanceSettings> {
   @override
   Widget build(BuildContext context) {
-    return SmoothCustomScrollView(
-      slivers: [
-        SliverAppbar(title: Text("Appearance".tl)),
-        SelectSetting(
-          title: "Theme Mode".tl,
-          settingKey: "theme_mode",
-          optionTranslation: {
-            "system": "System".tl,
-            "light": "Light".tl,
-            "dark": "Dark".tl,
-          },
-          onChanged: () async {
-            App.forceRebuild();
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Theme Color".tl,
-          settingKey: "color",
-          optionTranslation: {
-            "system": "System".tl,
-            "red": "Red".tl,
-            "pink": "Pink".tl,
-            "purple": "Purple".tl,
-            "green": "Green".tl,
-            "orange": "Orange".tl,
-            "blue": "Blue".tl,
-          },
-          onChanged: () async {
-            await App.init();
-            App.forceRebuild();
-          },
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Home Modules".tl,
-          subtitle: "Reorder or hide sections on the home page".tl,
-          actionTitle: "Edit".tl,
-          callback: () {
-            context.to(() => const HomeModulesPage());
-          },
-        ).toSliver(),
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "App Icon".tl,
-                style: ts.s16.bold,
-              ).paddingHorizontal(16).paddingTop(16),
-              Text(
-                "Pick the icon shown on your home screen. The change takes effect after the app restarts."
-                    .tl,
-                style: ts.s12,
-              ).paddingHorizontal(16).paddingTop(4).paddingBottom(4),
-              const _AppIconPicker(),
-            ],
+    return SettingIndentScope(
+      indented: false,
+      child: SmoothCustomScrollView(
+        slivers: [
+          SliverAppbar(title: Text("Appearance".tl)),
+          SelectSetting(
+            title: "Theme Mode".tl,
+            settingKey: "theme_mode",
+            optionTranslation: {
+              "system": "System".tl,
+              "light": "Light".tl,
+              "dark": "Dark".tl,
+            },
+            onChanged: () async {
+              App.forceRebuild();
+            },
+          ).toSliver(),
+          SelectSetting(
+            title: "Theme Color".tl,
+            settingKey: "color",
+            optionTranslation: {
+              "system": "System".tl,
+              "red": "Red".tl,
+              "pink": "Pink".tl,
+              "purple": "Purple".tl,
+              "green": "Green".tl,
+              "orange": "Orange".tl,
+              "blue": "Blue".tl,
+            },
+            onChanged: () async {
+              await App.init();
+              App.forceRebuild();
+            },
+          ).toSliver(),
+          _CallbackSetting(
+            title: "Home Modules".tl,
+            subtitle: "Reorder or hide sections on the home page".tl,
+            actionTitle: "Edit".tl,
+            callback: () {
+              context.to(() => const HomeModulesPage());
+            },
+          ).toSliver(),
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "App Icon".tl,
+                  style: ts.s16.bold,
+                ).paddingHorizontal(16).paddingTop(16),
+                Text(
+                  "Pick the icon shown on your home screen. The change takes effect after the app restarts."
+                      .tl,
+                  style: ts.s12,
+                ).paddingHorizontal(16).paddingTop(4).paddingBottom(4),
+                const _AppIconPicker(),
+              ],
+            ),
           ),
-        ),
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Glass Effect".tl,
-                style: ts.s16.bold,
-              ).paddingHorizontal(16).paddingTop(16),
-              Text(
-                "Adjust the frosted glass blur and opacity of app bars and reader toolbars."
-                    .tl,
-                style: ts.s12,
-              ).paddingHorizontal(16).paddingTop(4),
-              const _GlassPreview(),
-            ],
+          SliverToBoxAdapter(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  "Glass Effect".tl,
+                  style: ts.s16.bold,
+                ).paddingHorizontal(16).paddingTop(16),
+                Text(
+                  "Adjust the frosted glass blur and opacity of app bars and reader toolbars."
+                      .tl,
+                  style: ts.s12,
+                ).paddingHorizontal(16).paddingTop(4),
+                const _GlassPreview(),
+              ],
+            ),
           ),
-        ),
-        _SliderSetting(
-          title: "Glass Blur".tl,
-          settingsIndex: "glassBlur",
-          interval: 2,
-          min: 0,
-          max: 40,
-          onChanged: () {
-            App.forceRebuild();
-          },
-        ).toSliver(),
-        _SliderSetting(
-          title: "${"Glass Opacity".tl} (%)",
-          settingsIndex: "glassOpacity",
-          interval: 5,
-          min: 10,
-          max: 95,
-          onChanged: () {
-            App.forceRebuild();
-          },
-        ).toSliver(),
-        SliverToBoxAdapter(
-          child: Text(
-            "Lower opacity makes the glass more transparent. Set blur to 0 to disable the frosted effect."
-                .tl,
-            style: ts.s12,
-          ).paddingHorizontal(16).paddingBottom(16),
-        ),
-      ],
+          _SliderSetting(
+            title: "Glass Blur".tl,
+            settingsIndex: "glassBlur",
+            interval: 2,
+            min: 0,
+            max: 40,
+            onChanged: () {
+              App.forceRebuild();
+            },
+          ).toSliver(),
+          _SliderSetting(
+            title: "${"Glass Opacity".tl} (%)",
+            settingsIndex: "glassOpacity",
+            interval: 5,
+            min: 10,
+            max: 95,
+            onChanged: () {
+              App.forceRebuild();
+            },
+          ).toSliver(),
+          SliverToBoxAdapter(
+            child: Text(
+              "Lower opacity makes the glass more transparent. Set blur to 0 to disable the frosted effect."
+                  .tl,
+              style: ts.s12,
+            ).paddingHorizontal(16).paddingBottom(16),
+          ),
+        ],
+      ),
     );
   }
 }

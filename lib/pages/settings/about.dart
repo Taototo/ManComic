@@ -96,135 +96,138 @@ class _AboutSettingsState extends State<AboutSettings> {
 
   @override
   Widget build(BuildContext context) {
-    return SmoothCustomScrollView(
-      slivers: [
-        SliverAppbar(title: Text("About".tl)),
-        SizedBox(
-          height: 112,
-          width: double.infinity,
-          child: Center(
-            child: Container(
-              width: 112,
-              height: 112,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(136),
-              ),
-              clipBehavior: Clip.antiAlias,
-              child: Image(
-                image: AssetImage(AppIcon.currentAsset),
-                filterQuality: FilterQuality.medium,
+    return SettingIndentScope(
+      indented: false,
+      child: SmoothCustomScrollView(
+        slivers: [
+          SliverAppbar(title: Text("About".tl)),
+          SizedBox(
+            height: 112,
+            width: double.infinity,
+            child: Center(
+              child: Container(
+                width: 112,
+                height: 112,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(136),
+                ),
+                clipBehavior: Clip.antiAlias,
+                child: Image(
+                  image: AssetImage(AppIcon.currentAsset),
+                  filterQuality: FilterQuality.medium,
+                ),
               ),
             ),
-          ),
-        ).paddingTop(16).toSliver(),
-        Column(
-          children: [
-            const SizedBox(height: 8),
-            // 连点 7 次打开调试入口。设置页里不再摆「调试」分类——那不是
-            // 普通用户会去的地方，白白占掉一行导航。
-            GestureDetector(
-              onTap: _onVersionTap,
-              child: Text(
-                "V$appVersionName",
-                style: const TextStyle(fontSize: 16),
+          ).paddingTop(16).toSliver(),
+          Column(
+            children: [
+              const SizedBox(height: 8),
+              // 连点 7 次打开调试入口。设置页里不再摆「调试」分类——那不是
+              // 普通用户会去的地方，白白占掉一行导航。
+              GestureDetector(
+                onTap: _onVersionTap,
+                child: Text(
+                  "V$appVersionName",
+                  style: const TextStyle(fontSize: 16),
+                ),
               ),
-            ),
-            const Text("ManComic 是一款免费开源的漫画阅读应用"),
-            const SizedBox(height: 8),
-          ],
-        ).toSliver(),
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          title: Text("Check for updates".tl),
-          trailing: Button.filled(
-            isLoading: isCheckingUpdate,
-            onPressed: _check,
-            child: Text("Check".tl),
-          ).fixHeight(32),
-        ).toSliver(),
-        // 下载与安装的入口。下载中显示实时进度（点开可以回到大卡片），
-        // 下载完没装则显示「安装」按钮——选过「稍后安装」的用户就是从这里装。
-        ListenableBuilder(
-          listenable: updateDownload,
-          builder: (context, _) {
-            if (updateDownload.isDownloading) {
-              var received = updateDownload.received;
-              var total = updateDownload.total;
-              return ListTile(
-                contentPadding: kSettingTilePadding,
-                title: Text("Downloading update".tl),
-                subtitle: Text(
-                  total > 0
-                      ? "${(updateDownload.progress * 100).toStringAsFixed(0)}%"
-                          " · ${_toMb(received)} / ${_toMb(total)} MB"
-                      : "${_toMb(received)} MB",
-                ),
-                trailing: Icon(
-                  Icons.open_in_full_rounded,
-                  size: 18,
-                  color: Theme.of(
-                    context,
-                  ).colorScheme.onSurface.withValues(alpha: 0.5),
-                ),
-                onTap: updateDownload.expand,
-              );
-            }
-            var pending = updateDownload.pending;
-            if (pending == null) {
-              return const SizedBox.shrink();
-            }
-            return ListTile(
-              contentPadding: kSettingTilePadding,
-              title: Text("Install update".tl),
-              subtitle: Text("V${pending.version} · ${pending.sizeLabel}"),
-              trailing: Button.filled(
-                height: 32,
-                onPressed: () => updateDownload.install(pending),
-                child: Text("Install".tl),
-              ).fixHeight(32),
-              onTap: () => updateDownload.install(pending),
-            );
-          },
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Check for updates on startup".tl,
-          settingKey: "checkUpdateOnStart",
-          subtitle: _lastCheckLabel(),
-          onChanged: () {
-            // 打开开关就立刻跑一次：真有新版本能马上弹出来，没有也会提示，
-            // 用户不必等到下次冷启动才确认这个开关到底生效没有。
-            if (appdata.settings['checkUpdateOnStart'] == true) {
-              _check();
-            }
-          },
-        ).toSliver(),
-        // 日志是反馈问题时的必需入口，普通用户也要够得着，所以留在「关于」。
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          title: Text("Open Log".tl),
-          trailing: const Icon(Icons.arrow_right),
-          onTap: () {
-            context.to(() => const LogsPage());
-          },
-        ).toSliver(),
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          title: Text("GitHub".tl),
-          trailing: const Icon(Icons.open_in_new),
-          onTap: () {
-            launchUrlString(appRepoUrl);
-          },
-        ).toSliver(),
-        if (appdata.implicitData['debugUnlocked'] == true)
+              const Text("ManComic 是一款免费开源的漫画阅读应用"),
+              const SizedBox(height: 8),
+            ],
+          ).toSliver(),
           ListTile(
-            contentPadding: kSettingTilePadding,
-            title: Text("Debug options".tl),
-            trailing: const Icon(Icons.arrow_right),
-            onTap: () {
-              context.to(() => const DebugPage());
+            contentPadding: kSettingTilePaddingOf(context),
+            title: Text("Check for updates".tl),
+            trailing: Button.filled(
+              isLoading: isCheckingUpdate,
+              onPressed: _check,
+              child: Text("Check".tl),
+            ).fixHeight(32),
+          ).toSliver(),
+          // 下载与安装的入口。下载中显示实时进度（点开可以回到大卡片），
+          // 下载完没装则显示「安装」按钮——选过「稍后安装」的用户就是从这里装。
+          ListenableBuilder(
+            listenable: updateDownload,
+            builder: (context, _) {
+              if (updateDownload.isDownloading) {
+                var received = updateDownload.received;
+                var total = updateDownload.total;
+                return ListTile(
+                  contentPadding: kSettingTilePaddingOf(context),
+                  title: Text("Downloading update".tl),
+                  subtitle: Text(
+                    total > 0
+                        ? "${(updateDownload.progress * 100).toStringAsFixed(0)}%"
+                            " · ${_toMb(received)} / ${_toMb(total)} MB"
+                        : "${_toMb(received)} MB",
+                  ),
+                  trailing: Icon(
+                    Icons.open_in_full_rounded,
+                    size: 18,
+                    color: Theme.of(
+                      context,
+                    ).colorScheme.onSurface.withValues(alpha: 0.5),
+                  ),
+                  onTap: updateDownload.expand,
+                );
+              }
+              var pending = updateDownload.pending;
+              if (pending == null) {
+                return const SizedBox.shrink();
+              }
+              return ListTile(
+                contentPadding: kSettingTilePaddingOf(context),
+                title: Text("Install update".tl),
+                subtitle: Text("V${pending.version} · ${pending.sizeLabel}"),
+                trailing: Button.filled(
+                  height: 32,
+                  onPressed: () => updateDownload.install(pending),
+                  child: Text("Install".tl),
+                ).fixHeight(32),
+                onTap: () => updateDownload.install(pending),
+              );
             },
           ).toSliver(),
-      ],
+          _SwitchSetting(
+            title: "Check for updates on startup".tl,
+            settingKey: "checkUpdateOnStart",
+            subtitle: _lastCheckLabel(),
+            onChanged: () {
+              // 打开开关就立刻跑一次：真有新版本能马上弹出来，没有也会提示，
+              // 用户不必等到下次冷启动才确认这个开关到底生效没有。
+              if (appdata.settings['checkUpdateOnStart'] == true) {
+                _check();
+              }
+            },
+          ).toSliver(),
+          // 日志是反馈问题时的必需入口，普通用户也要够得着，所以留在「关于」。
+          ListTile(
+            contentPadding: kSettingTilePaddingOf(context),
+            title: Text("Open Log".tl),
+            trailing: const Icon(Icons.arrow_right),
+            onTap: () {
+              context.to(() => const LogsPage());
+            },
+          ).toSliver(),
+          ListTile(
+            contentPadding: kSettingTilePaddingOf(context),
+            title: Text("GitHub".tl),
+            trailing: const Icon(Icons.open_in_new),
+            onTap: () {
+              launchUrlString(appRepoUrl);
+            },
+          ).toSliver(),
+          if (appdata.implicitData['debugUnlocked'] == true)
+            ListTile(
+              contentPadding: kSettingTilePaddingOf(context),
+              title: Text("Debug options".tl),
+              trailing: const Icon(Icons.arrow_right),
+              onTap: () {
+                context.to(() => const DebugPage());
+              },
+            ).toSliver(),
+        ],
+      ),
     );
   }
 }

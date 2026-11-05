@@ -1,6 +1,6 @@
 part of 'settings_page.dart';
 
-/// 设置明细行的左右留白。
+/// 有分组标题的页面里，设置明细行的左右留白。
 ///
 /// 分组标题是「16 + 图标 24 + 8」从 48 起排字，明细行原来也用默认的 16，
 /// 两者左边界一样，长列表翻起来分不清哪一行属于哪个分组。
@@ -8,8 +8,48 @@ part of 'settings_page.dart';
 /// 明细行给到 48，正好和标题文字对齐：图标独占最左一列，明细整体内收成一个
 /// 块，层级不用靠字号也能看出来。取 40 那种"半缩进"反而会让明细卡在图标和
 /// 标题文字之间，看着像没对齐。
+///
+/// 这个缩进只在**有**分组标题的页面成立。关于、本地收藏这类整页没有一级标题
+/// 的设置页，用 48 就只是平白多出一段左边距，所以改用 [kSettingTilePaddingPlain]。
 const EdgeInsetsDirectional kSettingTilePadding =
     EdgeInsetsDirectional.only(start: 48, end: 16);
+
+/// 没有分组标题的页面里的明细行留白，就是普通列表的 16。
+const EdgeInsetsDirectional kSettingTilePaddingPlain =
+    EdgeInsetsDirectional.only(start: 16, end: 16);
+
+/// 声明「本页有没有分组标题」，决定明细行要不要内收。
+///
+/// 由页面在最外层包一层，明细行自己不去猜——同一批公共组件被有标题和没标题的
+/// 页面共用，只有页面自己知道该不该缩进。
+class SettingIndentScope extends InheritedWidget {
+  const SettingIndentScope({
+    required this.indented,
+    required super.child,
+    super.key,
+  });
+
+  /// 本页是否有「图标 + 标题」的分组行。
+  final bool indented;
+
+  static bool of(BuildContext context) {
+    var scope = context
+        .dependOnInheritedWidgetOfExactType<SettingIndentScope>();
+    // 默认按有标题处理：绝大多数设置页都是分组的，漏包一层时保持原样，
+    // 不会因为忘加 scope 就突然全部顶到最左边。
+    return scope?.indented ?? true;
+  }
+
+  @override
+  bool updateShouldNotify(SettingIndentScope oldWidget) =>
+      oldWidget.indented != indented;
+}
+
+/// 当前页面该用的明细行留白。
+EdgeInsetsDirectional kSettingTilePaddingOf(BuildContext context) =>
+    SettingIndentScope.of(context)
+        ? kSettingTilePadding
+        : kSettingTilePaddingPlain;
 
 class _SwitchSetting extends StatefulWidget {
   const _SwitchSetting({
@@ -56,7 +96,7 @@ class _SwitchSettingState extends State<_SwitchSetting> {
     assert(value is bool);
 
     return ListTile(
-      contentPadding: kSettingTilePadding,
+      contentPadding: kSettingTilePaddingOf(context),
       title: Text(widget.title),
       subtitle: widget.subtitle == null ? null : Text(widget.subtitle!),
       trailing: Switch(
@@ -244,7 +284,7 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
     var value = widget.readValue?.call() ?? _rawValue();
 
     return ListTile(
-      contentPadding: kSettingTilePadding,
+      contentPadding: kSettingTilePaddingOf(context),
       title: Row(
         children: [
           Text(widget.title),
@@ -387,7 +427,7 @@ class _EndSelectorSelectSettingState extends State<_EndSelectorSelectSetting> {
     var options = widget.optionTranslation;
     var value = widget.readValue?.call() ?? _rawValue();
     return ListTile(
-      contentPadding: kSettingTilePadding,
+      contentPadding: kSettingTilePaddingOf(context),
       title: Row(
         children: [
           Text(widget.title),
@@ -480,7 +520,7 @@ class _SliderSettingState extends State<_SliderSetting> {
                 : appdata.settings[widget.settingsIndex])
             .toDouble();
     return ListTile(
-      contentPadding: kSettingTilePadding,
+      contentPadding: kSettingTilePaddingOf(context),
       title: Text(widget.title, softWrap: true, maxLines: 2),
       trailing: Text(value.toString(), style: ts.s12),
       subtitle: Slider(
@@ -545,7 +585,7 @@ class _PopupWindowSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: kSettingTilePadding,
+      contentPadding: kSettingTilePaddingOf(context),
       title: Text(title),
       trailing: const Icon(Icons.arrow_right),
       onTap: () {
@@ -772,7 +812,7 @@ class _CallbackSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: kSettingTilePadding,
+      contentPadding: kSettingTilePaddingOf(context),
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle!),
       trailing: Button.normal(
