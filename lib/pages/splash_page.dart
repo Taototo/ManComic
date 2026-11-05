@@ -153,8 +153,12 @@ class _SplashPageState extends State<SplashPage> with TickerProviderStateMixin {
     if (!mounted) return;
     _progressController.repeat();
 
-    // 等待最小显示时间,确保用户能看到启动页动画
-    await Future.delayed(const Duration(milliseconds: 500));
+    // 等待最小显示时间，确保用户能看到启动页动画。
+    //
+    // 从 500ms 提到 850ms：更新检查的网络请求现在与这段动画并行跑，多留
+    // 出的这 350ms 基本能把「查版本」的往返盖掉，进主页就能直接弹更新提示，
+    // 不用再对着主页干等。
+    await Future.delayed(const Duration(milliseconds: 850));
 
     // 开始淡出动画
     if (!mounted) return;

@@ -25,7 +25,7 @@ const firstChapter = 1;
 ///
 /// 注意：`App.version` 是 Venera 上游的兼容版本号（漫画源 / UA 使用），
 /// 不是本应用的发布版本，不要混用。
-const appVersionName = "1.4.14";
+const appVersionName = "1.4.15";
 
 /// 应用仓库信息（「关于」页面与更新检查使用）。
 const appRepoOwner = "Taototo";

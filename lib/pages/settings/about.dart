@@ -422,6 +422,21 @@ Future<AppUpdateInfo?> _fetchFromPubspec() async {
   return null;
 }
 
+/// 启动预热：把「查最新版本」的请求提前到启动页阶段。
+///
+/// 网络往返（尤其国内连 GitHub）常常要几百毫秒到几秒，原来这段时间完全
+/// 串在「启动 → 等 2 秒 → 请求 → 再等 2 秒 → 弹窗」的链子里。现在请求和
+/// 启动动画同时起跑，结果先存在这里，弹窗前直接取用，等于把网络耗时藏进
+/// 了动画里。
+///
+/// 失败也没关系：[fetchLatestVersion] 内部已吞掉异常返回 null，调用方按
+/// 检查失败处理。
+void prewarmUpdateCheck() {
+  _prewarmedFetch ??= fetchLatestVersion();
+}
+
+Future<AppUpdateInfo?>? _prewarmedFetch;
+
 /// 检查更新并在需要时弹窗引导下载。
 ///
 /// [showMessageIfNoUpdate] 为 false 时，没有更新（或检查失败）不打扰用户，
@@ -429,10 +444,12 @@ Future<AppUpdateInfo?> _fetchFromPubspec() async {
 ///
 /// 返回「是否真正读到了远端版本信息」：网络不通、接口全挂时返回 false，
 /// 调用方据此决定要不要在下次启动重试，避免失败也吃掉一整天的检查额度。
-Future<bool> checkUpdateUi(
-    [bool showMessageIfNoUpdate = true, bool delay = false]) async {
+Future<bool> checkUpdateUi([bool showMessageIfNoUpdate = true]) async {
   try {
-    var info = await fetchLatestVersion();
+    // 启动阶段预热过的请求直接复用，避免再发一遍。
+    var pending = _prewarmedFetch;
+    _prewarmedFetch = null;
+    var info = await (pending ?? fetchLatestVersion());
     if (info == null) {
       _recordCheckFailure();
       if (showMessageIfNoUpdate) {
@@ -469,56 +486,7 @@ Future<bool> checkUpdateUi(
       }
       return true;
     }
-    if (delay) {
-      await Future.delayed(const Duration(seconds: 2));
-    }
-    showDialog(
-        context: App.rootContext,
-        builder: (context) {
-          return ContentDialog(
-            title: "New version available".tl,
-            content: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Found new version @version, current version @current."
-                      .tlParams({
-                    "version": info.version,
-                    "current": appVersionName,
-                  }),
-                ),
-                Text(
-                  "The update will be downloaded and installed automatically."
-                      .tl,
-                  style: TextStyle(
-                    fontSize: 12,
-                    color: Theme.of(context).colorScheme.outline,
-                  ),
-                ),
-              ],
-            ).paddingHorizontal(16),
-            actions: [
-              Button.text(
-                onPressed: () => Navigator.pop(context),
-                child: Text("Cancel".tl),
-              ),
-              Button.text(
-                onPressed: () {
-                  Navigator.pop(context);
-                  launchUrlString(info.url);
-                },
-                child: Text("Open in browser".tl),
-              ),
-              Button.filled(
-                onPressed: () {
-                  Navigator.pop(context);
-                  _downloadAndInstallUpdate(info);
-                },
-                child: Text("Update now".tl),
-              ),
-            ],
-          );
-        });
+    showUpdateAvailableDialog(info);
     return true;
   } catch (e, s) {
     Log.error("Check Update", e.toString(), s);
@@ -527,6 +495,576 @@ Future<bool> checkUpdateUi(
       App.rootContext.showMessage(message: "Check for updates failed".tl);
     }
     return false;
+  }
+}
+
+/// 弹出「发现新版本」卡片。
+///
+/// 根导航器还没就绪时直接放弃：宁可这次不弹，也不要让 `App.rootContext`
+/// 的空断言把检查流程整个打崩。
+void showUpdateAvailableDialog(AppUpdateInfo info) {
+  var navigatorContext = App.rootNavigatorKey.currentContext;
+  if (navigatorContext == null) {
+    return;
+  }
+  showDialog(
+    context: navigatorContext,
+    barrierColor: Colors.black.withValues(alpha: 0.45),
+    builder: (dialogContext) => UpdateAvailableDialog(info: info),
+  );
+}
+
+/// 「发现新版本」的磨砂玻璃卡片。
+///
+/// 原来直接套通用 ContentDialog：一个标题栏、两行说明、三个文字按钮挤在
+/// 右侧，看起来像系统警告而不是「有个新版本可以装」。这里重做：
+/// 渐变徽标 + 版本号「旧 → 新」对照 + 单独一行主操作。
+class UpdateAvailableDialog extends StatefulWidget {
+  const UpdateAvailableDialog({required this.info});
+
+  final AppUpdateInfo info;
+
+  @override
+  State<UpdateAvailableDialog> createState() => UpdateAvailableDialogState();
+}
+
+class UpdateAvailableDialogState extends State<UpdateAvailableDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  )..forward();
+
+  late final Animation<double> _curve = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOutCubic,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final info = widget.info;
+
+    return AnimatedBuilder(
+      animation: _curve,
+      builder: (context, child) {
+        final t = _curve.value;
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, 18 * (1 - t)),
+            child: Transform.scale(scale: 0.94 + 0.06 * t, child: child),
+          ),
+        );
+      },
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: LiquidGlass(
+            borderRadius: BorderRadius.circular(28),
+            opacity: isDark ? 0.9 : 0.86,
+            blur: 38,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 12),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [cs.primary, cs.tertiary],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: cs.primary.withValues(alpha: 0.35),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.rocket_launch_rounded,
+                        size: 26,
+                        color: cs.onPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    "New version available".tl,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  // 版本对照：「当前的」灰、「新的」用主题色放大，一眼看出升级了什么
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      Text(
+                        appVersionName,
+                        style: TextStyle(
+                          fontSize: 13,
+                          fontWeight: FontWeight.w500,
+                          color: cs.onSurface.withValues(alpha: 0.5),
+                        ),
+                      ),
+                      Padding(
+                        padding: const EdgeInsets.symmetric(horizontal: 8),
+                        child: Icon(
+                          Icons.east_rounded,
+                          size: 15,
+                          color: cs.onSurface.withValues(alpha: 0.4),
+                        ),
+                      ),
+                      Text(
+                        info.version,
+                        style: TextStyle(
+                          fontSize: 24,
+                          height: 1.1,
+                          fontWeight: FontWeight.w700,
+                          letterSpacing: -0.5,
+                          color: cs.primary,
+                        ),
+                      ),
+                    ],
+                  ),
+                  if (info.apkSize > 0) ...[
+                    const SizedBox(height: 10),
+                    Center(
+                      child: Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 10,
+                          vertical: 3,
+                        ),
+                        decoration: BoxDecoration(
+                          color: cs.onSurface.withValues(alpha: 0.07),
+                          borderRadius: BorderRadius.circular(20),
+                          border: Border.all(
+                            color: cs.onSurface.withValues(alpha: 0.12),
+                            width: 0.6,
+                          ),
+                        ),
+                        child: Text(
+                          "${_toMb(info.apkSize.toDouble())} MB",
+                          style: TextStyle(
+                            fontSize: 11,
+                            color: cs.onSurface.withValues(alpha: 0.72),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
+                  const SizedBox(height: 12),
+                  Text(
+                    "The update will be downloaded and installed automatically."
+                        .tl,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: cs.onSurface.withValues(alpha: 0.66),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  // 「取消 / 立即更新」并排，主操作给更大的权重。「在浏览器
+                  // 打开」是备用路径，降级成下面一行小字，三个按钮挤一行在
+                  // 窄屏上放不下。
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Button.outlined(
+                          height: 44,
+                          onPressed: () => Navigator.pop(context),
+                          child: Text("Cancel".tl),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: Button.filled(
+                          height: 44,
+                          onPressed: () {
+                            Navigator.pop(context);
+                            _downloadAndInstallUpdate(info);
+                          },
+                          child: Text("Update now".tl),
+                        ),
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 2),
+                  Center(
+                    child: Button.text(
+                      padding: const EdgeInsets.symmetric(horizontal: 10),
+                      onPressed: () {
+                        Navigator.pop(context);
+                        launchUrlString(info.url);
+                      },
+                      child: Text(
+                        "Open in browser".tl,
+                        style: TextStyle(
+                          fontSize: 12,
+                          color: cs.onSurface.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 下载中的磨砂玻璃卡片。
+class UpdateDownloadDialog extends StatelessWidget {
+  const UpdateDownloadDialog({
+    required this.received,
+    required this.total,
+    required this.speed,
+    required this.onCancel,
+  });
+
+  final double received;
+  final double total;
+  final double speed;
+  final VoidCallback onCancel;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    var value = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
+    var waiting = total <= 0 && received <= 0;
+    var moving = speed > 0;
+
+    return Dialog(
+      backgroundColor: Colors.transparent,
+      surfaceTintColor: Colors.transparent,
+      elevation: 0,
+      insetPadding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+      child: ConstrainedBox(
+        constraints: const BoxConstraints(maxWidth: 340),
+        child: LiquidGlass(
+          borderRadius: BorderRadius.circular(28),
+          opacity: isDark ? 0.9 : 0.86,
+          blur: 38,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(20, 22, 20, 10),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              crossAxisAlignment: CrossAxisAlignment.stretch,
+              children: [
+                Text(
+                  "Downloading update".tl.toUpperCase(),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 10.5,
+                    fontWeight: FontWeight.w600,
+                    letterSpacing: 1.4,
+                    color: cs.onSurface.withValues(alpha: 0.55),
+                  ),
+                ),
+                const SizedBox(height: 10),
+                Center(
+                  child: _DownloadRing(
+                    value: value,
+                    indeterminate: waiting,
+                    moving: moving,
+                  ),
+                ),
+                const SizedBox(height: 6),
+                Text(
+                  total > 0
+                      ? "${_toMb(received)} / ${_toMb(total)} MB"
+                      : "${_toMb(received)} MB",
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurface.withValues(alpha: 0.62),
+                  ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  _speedLabel(speed, received, total),
+                  textAlign: TextAlign.center,
+                  style: TextStyle(
+                    fontSize: 12,
+                    color: cs.onSurface.withValues(alpha: 0.45),
+                  ),
+                ),
+                const SizedBox(height: 8),
+                Button.text(
+                  onPressed: onCancel,
+                  child: Text(
+                    "Cancel".tl,
+                    style: TextStyle(
+                      fontSize: 12.5,
+                      color: cs.onSurface.withValues(alpha: 0.55),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 「2.4 MB/s · ≈ 16s」。速度未知时只显示一行占位，不要空白。
+  String _speedLabel(double speed, double received, double total) {
+    if (speed <= 0) {
+      return "······";
+    }
+    var text = "${_toMb(speed)} MB/s";
+    if (total > 0 && total > received) {
+      var seconds = ((total - received) / speed).ceil();
+      text += seconds >= 60 ? " · ≈ ${(seconds / 60).ceil()} min" : " · ≈ ${seconds}s";
+    }
+    return text;
+  }
+}
+
+/// 环形下载进度：渐变进度弧 + 弧头光点 + 呼吸光晕 + 上下浮动的箭头。
+///
+/// 进度回调是一段一段来的（Dio 每几百毫秒推一次），直接画会在弧上留下
+/// 台阶，所以用 [TweenAnimationBuilder] 把每段跳变补成 420ms 的缓动。
+class _DownloadRing extends StatefulWidget {
+  const _DownloadRing({
+    required this.value,
+    required this.indeterminate,
+    required this.moving,
+  });
+
+  final double value;
+  final bool indeterminate;
+
+  /// 是否正在实际传输：速度归零（断流重试中）时箭头停下，视觉上就是「卡住了」
+  final bool moving;
+
+  @override
+  State<_DownloadRing> createState() => _DownloadRingState();
+}
+
+class _DownloadRingState extends State<_DownloadRing>
+    with TickerProviderStateMixin {
+  static const _size = 158.0;
+
+  late final AnimationController _spin = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1500),
+  )..repeat();
+
+  late final AnimationController _pulse = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 2400),
+  )..repeat();
+
+  late final AnimationController _bob = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 1100),
+  )..repeat(reverse: true);
+
+  @override
+  void dispose() {
+    _spin.dispose();
+    _pulse.dispose();
+    _bob.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+
+    return SizedBox(
+      width: _size,
+      height: _size,
+      child: TweenAnimationBuilder<double>(
+        tween: Tween<double>(begin: 0, end: widget.value),
+        duration: const Duration(milliseconds: 420),
+        curve: Curves.easeOutCubic,
+        builder: (context, animatedValue, _) {
+          return Stack(
+            alignment: Alignment.center,
+            children: [
+              AnimatedBuilder(
+                animation: Listenable.merge([_spin, _pulse]),
+                builder: (context, _) {
+                  return CustomPaint(
+                    size: const Size.square(_size),
+                    painter: _DownloadRingPainter(
+                      progress: animatedValue,
+                      indeterminate: widget.indeterminate,
+                      spin: _spin.value,
+                      pulse: _pulse.value,
+                      accent: cs.primary,
+                      accentAlt: cs.tertiary,
+                      track: cs.onSurface.withValues(alpha: 0.09),
+                    ),
+                  );
+                },
+              ),
+              Column(
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  AnimatedBuilder(
+                    animation: _bob,
+                    builder: (context, child) {
+                      var t = Curves.easeInOut.transform(_bob.value);
+                      return Transform.translate(
+                        offset: Offset(0, widget.moving ? -3 + 6 * t : 0),
+                        child: child,
+                      );
+                    },
+                    child: Icon(
+                      Icons.arrow_downward_rounded,
+                      size: 20,
+                      color: cs.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    widget.indeterminate
+                        ? "—"
+                        : "${(animatedValue * 100).toStringAsFixed(0)}%",
+                    style: TextStyle(
+                      fontSize: widget.indeterminate ? 20 : 25,
+                      height: 1.1,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.6,
+                      color: cs.onSurface,
+                    ),
+                  ),
+                ],
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _DownloadRingPainter extends CustomPainter {
+  _DownloadRingPainter({
+    required this.progress,
+    required this.indeterminate,
+    required this.spin,
+    required this.pulse,
+    required this.accent,
+    required this.accentAlt,
+    required this.track,
+  });
+
+  final double progress;
+  final bool indeterminate;
+  final double spin;
+  final double pulse;
+  final Color accent;
+  final Color accentAlt;
+  final Color track;
+
+  @override
+  void paint(Canvas canvas, Size size) {
+    final center = size.center(Offset.zero);
+    final radius = (size.shortestSide - 24) / 2;
+    const stroke = 9.0;
+    final rect = Rect.fromCircle(center: center, radius: radius);
+
+    // 1. 呼吸光晕：每 2.4 秒向外扩一圈再消失，让静态的环也有呼吸感
+    canvas.drawCircle(
+      center,
+      radius + 3 + pulse * 10,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = 1.4
+        ..color = accent.withValues(alpha: 0.28 * (1 - pulse)),
+    );
+
+    // 2. 轨道
+    canvas.drawCircle(
+      center,
+      radius,
+      Paint()
+        ..style = PaintingStyle.stroke
+        ..strokeWidth = stroke
+        ..color = track,
+    );
+
+    // 3. 进度弧：主色到第三色的渐变，圆头收口
+    final arcPaint = Paint()
+      ..style = PaintingStyle.stroke
+      ..strokeWidth = stroke
+      ..strokeCap = StrokeCap.round
+      ..shader = SweepGradient(
+        colors: [accent, accentAlt, accent],
+        stops: const [0.0, 0.6, 1.0],
+        transform: const GradientRotation(-math.pi / 2),
+      ).createShader(rect);
+
+    if (indeterminate) {
+      // 还没收到字节：一段 0.62π 的弧绕圈转，后面拖一小截淡尾
+      final start = -math.pi / 2 + spin * math.pi * 2;
+      canvas.drawArc(rect, start - 0.55, 0.42, false,
+          Paint()
+            ..style = PaintingStyle.stroke
+            ..strokeWidth = stroke
+            ..strokeCap = StrokeCap.round
+            ..color = accent.withValues(alpha: 0.16));
+      canvas.drawArc(rect, start, math.pi * 0.62, false, arcPaint);
+    } else if (progress > 0.001) {
+      final sweep = math.pi * 2 * progress.clamp(0.0, 1.0);
+      canvas.drawArc(rect, -math.pi / 2, sweep, false, arcPaint);
+
+      // 4. 弧头光点：外面一层模糊光晕，里面一颗实心点
+      final angle = -math.pi / 2 + sweep;
+      final head = center + Offset(math.cos(angle), math.sin(angle)) * radius;
+      canvas.drawCircle(
+        head,
+        stroke * 0.95,
+        Paint()
+          ..color = accent.withValues(alpha: 0.45)
+          ..maskFilter = const MaskFilter.blur(BlurStyle.normal, 7),
+      );
+      canvas.drawCircle(head, stroke * 0.4, Paint()..color = accentAlt);
+    }
+  }
+
+  @override
+  bool shouldRepaint(_DownloadRingPainter old) {
+    return old.progress != progress ||
+        old.indeterminate != indeterminate ||
+        old.spin != spin ||
+        old.pulse != pulse ||
+        old.accent != accent ||
+        old.accentAlt != accentAlt ||
+        old.track != track;
   }
 }
 
@@ -715,129 +1253,25 @@ Future<void> _downloadAndInstallUpdate(AppUpdateInfo info) async {
 
     dialogOpen = true;
     showDialog(
-        context: App.rootContext,
-        barrierDismissible: false,
-        builder: (dialogContext) {
-          return StatefulBuilder(builder: (context, setState) {
-            dialogSetState = setState;
-            var received = progress["received"] ?? 0;
-            var total = progress["total"] ?? 0;
-            var speed = progress["speed"] ?? 0;
-            var colorScheme = Theme.of(context).colorScheme;
-
-            // 下载进度弹窗。
-            //
-            // 之前直接复用通用 ContentDialog（顶部一个 X + 标题栏，进度条
-            // 贴着内容边），观感更像一个塞满控件的页面。这里按 Material 3
-            // 的对话框排版重做：居中的图标 + 大号百分比 + 圆角进度条 +
-            // 两端对齐的字节与速度，取消收成整宽按钮。
-            var showProgress = received > 0;
-            var value = total > 0 ? (received / total).clamp(0.0, 1.0) : 0.0;
-            return Dialog(
-              shape: RoundedRectangleBorder(
-                borderRadius: BorderRadius.circular(24),
-              ),
-              backgroundColor: colorScheme.surface,
-              child: Padding(
-                padding:
-                    const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-                child: Column(
-                  mainAxisSize: MainAxisSize.min,
-                  crossAxisAlignment: CrossAxisAlignment.stretch,
-                  children: [
-                    Center(
-                      child: Container(
-                        width: 64,
-                        height: 64,
-                        decoration: BoxDecoration(
-                          color: colorScheme.primaryContainer,
-                          shape: BoxShape.circle,
-                        ),
-                        child: Icon(
-                          Icons.cloud_download_outlined,
-                          size: 30,
-                          color: colorScheme.onPrimaryContainer,
-                        ),
-                      ),
-                    ),
-                    const SizedBox(height: 16),
-                    Text(
-                      "Downloading update".tl,
-                      textAlign: TextAlign.center,
-                      style: const TextStyle(
-                        fontSize: 16,
-                        fontWeight: FontWeight.w600,
-                      ),
-                    ),
-                    const SizedBox(height: 20),
-                    if (!showProgress)
-                      const SizedBox(
-                        height: 40,
-                        child:
-                            Center(child: CircularProgressIndicator(strokeWidth: 4)),
-                      )
-                    else ...[
-                      Text(
-                        total > 0
-                            ? "${(value * 100).toStringAsFixed(1)}%"
-                            : "${_toMb(received)} MB",
-                        textAlign: TextAlign.center,
-                        style: TextStyle(
-                          fontSize: 32,
-                          fontWeight: FontWeight.w700,
-                          color: colorScheme.primary,
-                          letterSpacing: -0.5,
-                        ),
-                      ),
-                      const SizedBox(height: 16),
-                      ClipRRect(
-                        borderRadius: BorderRadius.circular(99),
-                        child: LinearProgressIndicator(
-                          value: total > 0 ? value : null,
-                          minHeight: 10,
-                          backgroundColor:
-                              colorScheme.surfaceContainerHighest,
-                        ),
-                      ),
-                      const SizedBox(height: 12),
-                      Row(
-                        mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                        children: [
-                          Text(
-                            total > 0
-                                ? "${_toMb(received)} / ${_toMb(total)} MB"
-                                : "${_toMb(received)} MB",
-                            style: TextStyle(
-                              fontSize: 12,
-                              color: colorScheme.outline,
-                            ),
-                          ),
-                          if (speed > 0)
-                            Text(
-                              "${_toMb(speed)} MB/s",
-                              style: TextStyle(
-                                fontSize: 12,
-                                color: colorScheme.outline,
-                              ),
-                            ),
-                        ],
-                      ),
-                    ],
-                    const SizedBox(height: 20),
-                    Button.filled(
-                      onPressed: () {
-                        dialogOpen = false;
-                        cancelToken.cancel();
-                        Navigator.pop(dialogContext);
-                      },
-                      child: Text("Cancel".tl),
-                    ),
-                  ],
-                ),
-              ),
-            );
-          });
+      context: App.rootContext,
+      barrierDismissible: false,
+      barrierColor: Colors.black.withValues(alpha: 0.45),
+      builder: (dialogContext) {
+        return StatefulBuilder(builder: (context, setState) {
+          dialogSetState = setState;
+          return UpdateDownloadDialog(
+            received: progress["received"] ?? 0,
+            total: progress["total"] ?? 0,
+            speed: progress["speed"] ?? 0,
+            onCancel: () {
+              dialogOpen = false;
+              cancelToken.cancel();
+              Navigator.pop(dialogContext);
+            },
+          );
         });
+      },
+    );
 
     for (var attempt = 0;; attempt++) {
       try {

@@ -14,6 +14,7 @@ import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/notification_service.dart';
+import 'package:venera/foundation/startup_gate.dart';
 import 'package:venera/network/cookie_jar.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
@@ -142,13 +143,6 @@ const _kComicSourceCheckInterval = Duration(hours: 24);
 Future<void> _checkAppUpdates() async {
   var now = DateTime.now().millisecondsSinceEpoch;
 
-  var lastSourceCheck = appdata.implicitData['lastComicSourceCheck'] ?? 0;
-  if (now - lastSourceCheck >= _kComicSourceCheckInterval.inMilliseconds) {
-    appdata.implicitData['lastComicSourceCheck'] = now;
-    appdata.writeImplicitData();
-    ComicSourcePage.checkComicSourceUpdate();
-  }
-
   // 开关默认关闭，没开就到此为止。
   if (appdata.settings['checkUpdateOnStart'] != true) {
     return;
@@ -167,18 +161,71 @@ Future<void> _checkAppUpdates() async {
   if (now - lastFail < _kUpdateCheckRetryInterval.inMilliseconds) {
     return;
   }
-  await checkUpdateUi(false, true);
+
+  // 请求立刻发出，和启动动画并行跑（约 1.6 秒）；结果先存着，
+  // 等启动页退场后再弹窗，这样用户看到的就是「进主页即有更新提示」。
+  prewarmUpdateCheck();
+  await _waitForStartupUi();
+  await checkUpdateUi(false);
   // 成功与失败的时间点都由 checkUpdateUi 自己记录：手动检查、启动检查
   // 走的是同一条路径，设置页才能统一显示「最近一次尝试的结果」。
 }
 
+/// 等启动页退场、根导航器就绪。
+///
+/// 之前的做法是 `Future.delayed(2s)` 硬等，既可能不够也可能白等。现在由
+/// 启动页在退场时打开闸门，这里只负责「闸门开了 + 导航器有 context」。
+Future<void> _waitForStartupUi() async {
+  if (!isStartupReady) {
+    try {
+      // 兜底 8 秒：启动页万一没走完（异常、被系统打断），更新检查
+      // 也不能永远挂着，宁可弹得晚一点。
+      await startupReady.timeout(const Duration(seconds: 8));
+    } catch (_) {}
+  }
+  for (var i = 0;
+      i < 20 && App.rootNavigatorKey.currentContext == null;
+      i++) {
+    await Future.delayed(const Duration(milliseconds: 50));
+  }
+  // 让主页先完成首帧布局，避免弹窗和首帧渲染抢同一帧。
+  await Future.delayed(const Duration(milliseconds: 160));
+}
+
+/// 漫画源列表更新，与应用更新完全独立。
+///
+/// 单独拎出来是因为它要联网：放在更新检查前面会抢带宽，让「马上检测到
+/// 新版本」这件事被拖慢。现在延后 3 秒再跑。
+void _checkComicSourceUpdates() {
+  var now = DateTime.now().millisecondsSinceEpoch;
+  var lastSourceCheck = appdata.implicitData['lastComicSourceCheck'] ?? 0;
+  if (now - lastSourceCheck >= _kComicSourceCheckInterval.inMilliseconds) {
+    appdata.implicitData['lastComicSourceCheck'] = now;
+    appdata.writeImplicitData();
+    ComicSourcePage.checkComicSourceUpdate();
+  }
+}
+
 void checkUpdates() {
-  // 延迟执行更新检查，避免在应用启动时因网络错误导致白屏
-  Future.delayed(const Duration(seconds: 2), () async {
+  // 应用更新检查：立刻起跑。
+  //
+  // 这里原来是 2 秒延时，加上 checkUpdateUi 里弹窗前又等 2 秒，从点图标
+  // 到看见更新提示要 4 秒以上。现在请求与启动动画并行，启动页一退场
+  // 就能弹窗。
+  unawaited(() async {
     try {
       await _checkAppUpdates();
     } catch (e, s) {
       Log.error("Update Check", "Failed to check for updates: $e\n$s");
+    }
+  }());
+
+  // 漫画源列表放到后面查，别和应用更新抢带宽。
+  Future.delayed(const Duration(seconds: 3), () {
+    try {
+      _checkComicSourceUpdates();
+    } catch (e, s) {
+      Log.error("Update Check", "Failed to check comic sources: $e\n$s");
     }
   });
 

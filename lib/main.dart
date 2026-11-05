@@ -15,6 +15,7 @@ import 'components/components.dart';
 import 'components/window_frame.dart';
 import 'foundation/app.dart';
 import 'foundation/appdata.dart';
+import 'foundation/startup_gate.dart';
 import 'headless.dart';
 import 'init.dart';
 
@@ -69,6 +70,9 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
   bool _showSplash = true;
 
   void _onSplashComplete() {
+    // 启动页退场，主页即将出现：放行所有「等 UI 就绪」的延迟任务
+    // （启动检查更新靠这个信号弹窗，不再用固定延时去猜）。
+    completeStartup();
     setState(() {
       _showSplash = false;
     });
