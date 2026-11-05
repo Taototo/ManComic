@@ -98,6 +98,25 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
     menu?.call();
   }
 
+  /// 以这本书的书名去所有漫画源里找同名作品。
+  ///
+  /// 长按恢复成「预览 + 菜单」之后，这里是换源搜索最短的路径：长按 —
+  /// 面板上直接点「换源」，两次触达，且不用先勾选再翻菜单。
+  void _searchOtherSources() {
+    // 先取出导航器自己的 context：onDismiss 会把这个预览层从 Overlay 里
+    // 摘掉，之后再用 widget 的 context 找 Navigator 会拿到已失活的元素。
+    final navigatorContext = App.mainNavigatorKey?.currentContext;
+    final comic = widget.comic;
+    widget.onDismiss();
+    showSourceMatchSheet(
+      navigatorContext ?? App.rootContext,
+      keyword: comic.title,
+      currentSourceKey: comic.sourceKey,
+      ownerSourceKey: comic.sourceKey,
+      ownerId: comic.id,
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     final cs = Theme.of(context).colorScheme;
@@ -251,8 +270,15 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
                             const SizedBox(width: 8),
                             Expanded(
                               child: Button.normal(
+                                onPressed: _searchOtherSources,
+                                child: Text("Sources".tl),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Button.normal(
                                 onPressed: _openMenu,
-                                child: Text("More Actions".tl),
+                                child: Text("More".tl),
                               ),
                             ),
                           ],

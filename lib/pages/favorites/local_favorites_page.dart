@@ -812,16 +812,12 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                 );
               }
             },
-            onLongPressed: (c, heroID) {
-              // 长按缩略图改为「在其他漫画源搜索该漫画」，选中模式改由顶栏按钮进入
-              showSourceMatchSheet(
-                App.mainNavigatorKey?.currentContext ?? context,
-                keyword: c.title,
-                currentSourceKey: c.sourceKey,
-                ownerSourceKey: c.sourceKey,
-                ownerId: c.id,
-              );
-            },
+            // 长按不覆写：走默认的「预览 + 菜单」。
+            //
+            // 之前这里把长按改成了「在其他源搜索」，结果单本的删除 / 移动分类
+            // / 标记已读 / 下载全部失去入口 —— 那些动作只存在于长按菜单里，
+            // 等于为了一个换源入口牺牲了整张菜单。换源现在放在预览面板的
+            // 「换源」按钮上，长按后一眼就能看到，两步可达。
           ),
       ],
     );
