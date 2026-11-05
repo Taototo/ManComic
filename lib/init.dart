@@ -117,19 +117,45 @@ void _checkOldConfigs() {
 }
 
 /// 自动检查的节流间隔。
-const _kUpdateCheckInterval = Duration(hours: 24);
+///
+/// 语义上「启动时检查更新」就该是每次冷启动都查，这里只拦掉「30 分钟内来回
+/// 切好几次」的重复请求。不用按天节流：这个分支常常一天发两三版，早上装的
+/// 版本下午就过期了，按天算等于当天再也发现不了新版本。
+///
+/// 请求本身很小（Release API 几 KB），未认证限流是 60 次/小时，30 分钟一次
+/// 完全够用。
+const _kUpdateCheckInterval = Duration(minutes: 30);
 
 /// 检查失败后的重试间隔。
 ///
-/// 失败（断网、GitHub 被墙）不能占用 24 小时的额度，否则一次开机时的网络
-/// 抖动就会让「启动时检查更新」整天失效；但也不能每次启动都去撞墙，
-/// 所以失败后隔半小时再试。
+/// 失败（断网、GitHub 被墙）不能占用成功的额度，否则一次开机时的网络抖动
+/// 就会让「启动时检查更新」在接下来的整段时间里失效；但也不能每次启动都去
+/// 撞墙，所以失败后隔半小时再试。
 const _kUpdateCheckRetryInterval = Duration(minutes: 30);
+
+/// 漫画源列表的更新节流。
+///
+/// 与「应用更新」完全独立：漫画源列表变动慢，没必要跟着应用更新的节奏
+/// 频繁请求；反过来，应用更新的节流也不该把漫画源检查按在门外。
+const _kComicSourceCheckInterval = Duration(hours: 24);
 
 Future<void> _checkAppUpdates() async {
   var now = DateTime.now().millisecondsSinceEpoch;
+
+  var lastSourceCheck = appdata.implicitData['lastComicSourceCheck'] ?? 0;
+  if (now - lastSourceCheck >= _kComicSourceCheckInterval.inMilliseconds) {
+    appdata.implicitData['lastComicSourceCheck'] = now;
+    appdata.writeImplicitData();
+    ComicSourcePage.checkComicSourceUpdate();
+  }
+
+  // 开关默认关闭，没开就到此为止。
+  if (appdata.settings['checkUpdateOnStart'] != true) {
+    return;
+  }
+
   // 刚升级完一定查一次：新版本里可能带了「更新检查」本身的修复，
-  // 若还被上一版写下的 24 小时节流挡住，用户只会觉得开关依然没用。
+  // 若还被上一版写下的节流挡住，用户只会觉得开关依然没用。
   var versionChanged =
       appdata.implicitData['lastCheckUpdateVersion'] != appVersionName;
   var lastSuccess = appdata.implicitData['lastCheckUpdate'] ?? 0;
@@ -141,21 +167,9 @@ Future<void> _checkAppUpdates() async {
   if (now - lastFail < _kUpdateCheckRetryInterval.inMilliseconds) {
     return;
   }
-  ComicSourcePage.checkComicSourceUpdate();
-  if (!appdata.settings['checkUpdateOnStart']) {
-    // 没开自动更新时，这次只用于漫画源更新检查，仍然记一个时间点做节流。
-    appdata.implicitData['lastCheckUpdate'] = now;
-    appdata.implicitData['lastCheckUpdateVersion'] = appVersionName;
-    appdata.writeImplicitData();
-    return;
-  }
-  var ok = await checkUpdateUi(false, true);
-  // 成功时 checkUpdateUi 会自己记下时间点；失败只记一个短节流，
-  // 让下次启动早一点再试，而不是把一整天的额度用掉。
-  if (!ok) {
-    appdata.implicitData['lastCheckUpdateFailed'] = now;
-    appdata.writeImplicitData();
-  }
+  await checkUpdateUi(false, true);
+  // 成功与失败的时间点都由 checkUpdateUi 自己记录：手动检查、启动检查
+  // 走的是同一条路径，设置页才能统一显示「最近一次尝试的结果」。
 }
 
 void checkUpdates() {

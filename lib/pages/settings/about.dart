@@ -26,28 +26,42 @@ class _AboutSettingsState extends State<AboutSettings> {
     }
   }
 
-  /// 「上次自动检查」的说明文字。
+  /// 「上次检查」的说明文字。
   ///
   /// 启动检查是静默的（没更新不弹窗），用户没法确认开关是否真的在工作，
-  /// 所以把时间点摆在这里。
+  /// 所以把最近一次尝试摆在这里——**成功和失败都算**。如果只显示成功时间，
+  /// 网络一直连不上时这里会停在一周前，看起来就是「开关没生效」。
   String _lastCheckLabel() {
-    var ts = appdata.implicitData['lastCheckUpdate'];
-    if (ts is! int || ts <= 0) {
+    var okTs = appdata.implicitData['lastCheckUpdate'];
+    var failTs = appdata.implicitData['lastCheckUpdateFailed'];
+    var hasOk = okTs is int && okTs > 0;
+    var hasFail = failTs is int && failTs > 0;
+    if (!hasOk && !hasFail) {
       return "Checks for a new version when the app starts.".tl;
     }
-    var diff = DateTime.now().difference(DateTime.fromMillisecondsSinceEpoch(ts));
+    // 哪次更近就看哪次：手动检查成功会盖掉之前的失败，反之亦然。
+    var failed = hasFail && (!hasOk || failTs > okTs);
+    var ts = (failed ? failTs : okTs) as int;
+    var ago = _agoLabel(DateTime.now().difference(
+      DateTime.fromMillisecondsSinceEpoch(ts),
+    ));
+    return failed
+        ? "Update check failed @time".tlParams({"time": ago})
+        : "Last checked @time".tlParams({"time": ago});
+  }
+
+  /// 把时间差写成人话（「刚刚」「12 分钟前」…）。
+  String _agoLabel(Duration diff) {
     if (diff.inMinutes < 1) {
-      return "Last checked just now".tl;
+      return "just now".tl;
     }
     if (diff.inMinutes < 60) {
-      return "Last checked @n minutes ago"
-          .tlParams({"n": diff.inMinutes.toString()});
+      return "@n minutes ago".tlParams({"n": diff.inMinutes.toString()});
     }
     if (diff.inHours < 24) {
-      return "Last checked @n hours ago"
-          .tlParams({"n": diff.inHours.toString()});
+      return "@n hours ago".tlParams({"n": diff.inHours.toString()});
     }
-    return "Last checked @n days ago".tlParams({"n": diff.inDays.toString()});
+    return "@n days ago".tlParams({"n": diff.inDays.toString()});
   }
 
   @override
@@ -373,6 +387,7 @@ Future<bool> checkUpdateUi(
   try {
     var info = await fetchLatestVersion();
     if (info == null) {
+      _recordCheckFailure();
       if (showMessageIfNoUpdate) {
         App.rootContext.showMessage(message: "Check for updates failed".tl);
       }
@@ -460,11 +475,23 @@ Future<bool> checkUpdateUi(
     return true;
   } catch (e, s) {
     Log.error("Check Update", e.toString(), s);
+    _recordCheckFailure();
     if (showMessageIfNoUpdate) {
       App.rootContext.showMessage(message: "Check for updates failed".tl);
     }
     return false;
   }
+}
+
+/// 记录一次「没能读到远端版本」的尝试。
+///
+/// 只写失败时间，不动 [lastCheckUpdate]：那个字段表示「上次成功读到版本」，
+/// 是 4 小时节流的基准。两者分开存，设置页才能说清「最近一次尝试是什么
+/// 时候、结果是成功还是失败」。
+void _recordCheckFailure() {
+  appdata.implicitData['lastCheckUpdateFailed'] =
+      DateTime.now().millisecondsSinceEpoch;
+  appdata.writeImplicitData();
 }
 
 /// 应用内更新包的存放目录：`<dataPath>/updates/`，
