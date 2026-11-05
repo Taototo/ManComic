@@ -78,7 +78,7 @@ Future<void> init() async {
     await BackgroundTasks.syncSchedule();
     try {
       await FlutterDisplayMode.setHighRefreshRate();
-    } catch(e) {
+    } catch (e) {
       Log.error("Display Mode", "Failed to set high refresh rate: $e");
     }
   }
@@ -183,9 +183,7 @@ Future<void> _waitForStartupUi() async {
       await startupReady.timeout(const Duration(seconds: 8));
     } catch (_) {}
   }
-  for (var i = 0;
-      i < 20 && App.rootNavigatorKey.currentContext == null;
-      i++) {
+  for (var i = 0; i < 20 && App.rootNavigatorKey.currentContext == null; i++) {
     await Future.delayed(const Duration(milliseconds: 50));
   }
   // 让主页先完成首帧布局，避免弹窗和首帧渲染抢同一帧。
@@ -214,6 +212,14 @@ void checkUpdates() {
   // 就能弹窗。
   unawaited(() async {
     try {
+      // 已下载但没安装的包优先提示：用户上次可能点了「稍后安装」，这次
+      // 进来先给他一次安装机会。弹过就直接结束，不再叠一个「发现新版本」。
+      // 没有待安装包时 resolvePendingUpdate 几乎立刻返回，不影响预热。
+      if (await updateDownload.resolvePendingUpdate() != null) {
+        await _waitForStartupUi();
+        updateDownload.promptPendingInstall();
+        return;
+      }
       await _checkAppUpdates();
     } catch (e, s) {
       Log.error("Update Check", "Failed to check for updates: $e\n$s");

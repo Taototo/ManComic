@@ -8,6 +8,7 @@ import 'package:flutter_localizations/flutter_localizations.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/auth_page.dart';
 import 'package:venera/pages/main_page.dart';
+import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/pages/splash_page.dart';
 import 'package:venera/utils/io.dart';
 import 'package:window_manager/window_manager.dart';
@@ -281,6 +282,12 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
             }
 
             widget = OverlayWidget(widget);
+            // 更新下载收起后的顶部悬浮条：放在导航器外层，切到任何页面
+            // 都能看到，点一下就能展开回进度卡片。
+            widget = Stack(
+              fit: StackFit.expand,
+              children: [widget, const UpdateDownloadBanner()],
+            );
             if (App.isDesktop) {
               widget = Shortcuts(
                 shortcuts: {

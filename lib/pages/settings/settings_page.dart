@@ -37,6 +37,7 @@ part 'appearance.dart';
 part 'local_favorites.dart';
 part 'app.dart';
 part 'about.dart';
+part 'update_download.dart';
 part 'network.dart';
 part 'debug.dart';
 

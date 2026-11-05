@@ -15,7 +15,7 @@ void main() {
         as Map<String, dynamic>;
     translations = {
       for (var e in json.entries)
-        e.key: Map<String, String>.from(e.value as Map)
+        e.key: Map<String, String>.from(e.value as Map),
     };
   });
 
@@ -48,6 +48,15 @@ void main() {
       "Cancel",
       "Download",
       "GitHub",
+      // 下载可收起 + 完成后再问安装
+      "Download in background",
+      "Install update",
+      "Install",
+      "Install now",
+      "Install later",
+      "Install now, or later from Settings - About.",
+      "You can install it later in Settings - About",
+      "The update package is missing, please download again",
     ];
     for (var key in keys) {
       expect(translations['zh_CN']![key], isNotNull, reason: '缺少中文: $key');

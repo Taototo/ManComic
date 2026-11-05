@@ -15,6 +15,14 @@ class _AboutSettingsState extends State<AboutSettings> {
 
   DateTime _lastVersionTap = DateTime.fromMillisecondsSinceEpoch(0);
 
+  @override
+  void initState() {
+    super.initState();
+    // 进页面时核对一次「已下载待安装」：文件被清掉、版本已经装上了，
+    // 都要及时反映出来，不能让这一行一直挂着。
+    updateDownload.resolvePendingUpdate();
+  }
+
   void _onVersionTap() {
     final now = DateTime.now();
     if (now.difference(_lastVersionTap) > const Duration(seconds: 3)) {
@@ -133,6 +141,50 @@ class _AboutSettingsState extends State<AboutSettings> {
             onPressed: _check,
             child: Text("Check".tl),
           ).fixHeight(32),
+        ).toSliver(),
+        // 下载与安装的入口。下载中显示实时进度（点开可以回到大卡片），
+        // 下载完没装则显示「安装」按钮——选过「稍后安装」的用户就是从这里装。
+        ListenableBuilder(
+          listenable: updateDownload,
+          builder: (context, _) {
+            if (updateDownload.isDownloading) {
+              var received = updateDownload.received;
+              var total = updateDownload.total;
+              return ListTile(
+                contentPadding: kSettingTilePadding,
+                title: Text("Downloading update".tl),
+                subtitle: Text(
+                  total > 0
+                      ? "${(updateDownload.progress * 100).toStringAsFixed(0)}%"
+                          " · ${_toMb(received)} / ${_toMb(total)} MB"
+                      : "${_toMb(received)} MB",
+                ),
+                trailing: Icon(
+                  Icons.open_in_full_rounded,
+                  size: 18,
+                  color: Theme.of(
+                    context,
+                  ).colorScheme.onSurface.withValues(alpha: 0.5),
+                ),
+                onTap: updateDownload.expand,
+              );
+            }
+            var pending = updateDownload.pending;
+            if (pending == null) {
+              return const SizedBox.shrink();
+            }
+            return ListTile(
+              contentPadding: kSettingTilePadding,
+              title: Text("Install update".tl),
+              subtitle: Text("V${pending.version} · ${pending.sizeLabel}"),
+              trailing: Button.filled(
+                height: 32,
+                onPressed: () => updateDownload.install(pending),
+                child: Text("Install".tl),
+              ).fixHeight(32),
+              onTap: () => updateDownload.install(pending),
+            );
+          },
         ).toSliver(),
         _SwitchSetting(
           title: "Check for updates on startup".tl,
@@ -486,6 +538,12 @@ Future<bool> checkUpdateUi([bool showMessageIfNoUpdate = true]) async {
       }
       return true;
     }
+    // 手上已经有下载好的包：先问要不要装。否则一次启动会叠两个弹窗，
+    // 用户点了「立即更新」才发现其实早就下好了。
+    if (updateDownload.pending != null) {
+      updateDownload.promptPendingInstall();
+      return true;
+    }
     showUpdateAvailableDialog(info);
     return true;
   } catch (e, s) {
@@ -740,19 +798,211 @@ class UpdateAvailableDialogState extends State<UpdateAvailableDialog>
   }
 }
 
+/// 「下载完成，是否立即安装」的磨砂玻璃卡片。
+///
+/// 下载和安装分成两步：装不装、什么时候装由用户决定。选「稍后安装」后
+/// 安装包会留在 `updates/` 目录，关于页有安装入口，下次启动也会再问一次。
+class UpdateReadyDialog extends StatefulWidget {
+  const UpdateReadyDialog({
+    required this.pending,
+    required this.onInstall,
+    required this.onLater,
+  });
+
+  final PendingUpdate pending;
+
+  final VoidCallback onInstall;
+
+  final VoidCallback onLater;
+
+  @override
+  State<UpdateReadyDialog> createState() => _UpdateReadyDialogState();
+}
+
+class _UpdateReadyDialogState extends State<UpdateReadyDialog>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 260),
+  )..forward();
+
+  late final Animation<double> _curve = CurvedAnimation(
+    parent: _controller,
+    curve: Curves.easeOutCubic,
+  );
+
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final pending = widget.pending;
+
+    return AnimatedBuilder(
+      animation: _curve,
+      builder: (context, child) {
+        final t = _curve.value;
+        return Opacity(
+          opacity: t,
+          child: Transform.translate(
+            offset: Offset(0, 18 * (1 - t)),
+            child: Transform.scale(scale: 0.94 + 0.06 * t, child: child),
+          ),
+        );
+      },
+      child: Dialog(
+        backgroundColor: Colors.transparent,
+        surfaceTintColor: Colors.transparent,
+        elevation: 0,
+        insetPadding: const EdgeInsets.symmetric(horizontal: 26, vertical: 24),
+        child: ConstrainedBox(
+          constraints: const BoxConstraints(maxWidth: 360),
+          child: LiquidGlass(
+            borderRadius: BorderRadius.circular(28),
+            opacity: isDark ? 0.9 : 0.86,
+            blur: 38,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(20, 22, 20, 14),
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Center(
+                    child: Container(
+                      width: 56,
+                      height: 56,
+                      decoration: BoxDecoration(
+                        shape: BoxShape.circle,
+                        gradient: LinearGradient(
+                          begin: Alignment.topLeft,
+                          end: Alignment.bottomRight,
+                          colors: [cs.tertiary, cs.primary],
+                        ),
+                        boxShadow: [
+                          BoxShadow(
+                            color: cs.tertiary.withValues(alpha: 0.32),
+                            blurRadius: 20,
+                            offset: const Offset(0, 8),
+                          ),
+                        ],
+                      ),
+                      child: Icon(
+                        Icons.download_done_rounded,
+                        size: 27,
+                        color: cs.onPrimary,
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 14),
+                  Text(
+                    "Update downloaded".tl,
+                    textAlign: TextAlign.center,
+                    style: const TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    pending.version,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 24,
+                      height: 1.1,
+                      fontWeight: FontWeight.w700,
+                      letterSpacing: -0.5,
+                      color: cs.primary,
+                    ),
+                  ),
+                  const SizedBox(height: 10),
+                  Center(
+                    child: Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 10,
+                        vertical: 3,
+                      ),
+                      decoration: BoxDecoration(
+                        color: cs.onSurface.withValues(alpha: 0.07),
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(
+                          color: cs.onSurface.withValues(alpha: 0.12),
+                          width: 0.6,
+                        ),
+                      ),
+                      child: Text(
+                        pending.sizeLabel,
+                        style: TextStyle(
+                          fontSize: 11,
+                          color: cs.onSurface.withValues(alpha: 0.72),
+                        ),
+                      ),
+                    ),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    "Install now, or later from Settings - About.".tl,
+                    textAlign: TextAlign.center,
+                    style: TextStyle(
+                      fontSize: 12,
+                      height: 1.5,
+                      color: cs.onSurface.withValues(alpha: 0.66),
+                    ),
+                  ),
+                  const SizedBox(height: 18),
+                  Row(
+                    children: [
+                      Expanded(
+                        child: Button.outlined(
+                          height: 44,
+                          onPressed: widget.onLater,
+                          child: Text("Install later".tl),
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        flex: 2,
+                        child: Button.filled(
+                          height: 44,
+                          onPressed: widget.onInstall,
+                          child: Text("Install now".tl),
+                        ),
+                      ),
+                    ],
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 /// 下载中的磨砂玻璃卡片。
+///
+/// 只是一个订阅者：数据来自 [updateDownload]，收起卡片不会打断下载。
 class UpdateDownloadDialog extends StatelessWidget {
   const UpdateDownloadDialog({
     required this.received,
     required this.total,
     required this.speed,
     required this.onCancel,
+    required this.onMinimize,
   });
 
   final double received;
   final double total;
   final double speed;
   final VoidCallback onCancel;
+
+  /// 收起成顶部悬浮条，下载继续。
+  final VoidCallback onMinimize;
 
   @override
   Widget build(BuildContext context) {
@@ -779,15 +1029,38 @@ class UpdateDownloadDialog extends StatelessWidget {
               mainAxisSize: MainAxisSize.min,
               crossAxisAlignment: CrossAxisAlignment.stretch,
               children: [
-                Text(
-                  "Downloading update".tl.toUpperCase(),
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 10.5,
-                    fontWeight: FontWeight.w600,
-                    letterSpacing: 1.4,
-                    color: cs.onSurface.withValues(alpha: 0.55),
-                  ),
+                Stack(
+                  alignment: Alignment.center,
+                  children: [
+                    Text(
+                      "Downloading update".tl.toUpperCase(),
+                      textAlign: TextAlign.center,
+                      style: TextStyle(
+                        fontSize: 10.5,
+                        fontWeight: FontWeight.w600,
+                        letterSpacing: 1.4,
+                        color: cs.onSurface.withValues(alpha: 0.55),
+                      ),
+                    ),
+                    Align(
+                      alignment: Alignment.centerRight,
+                      child: Tooltip(
+                        message: "Download in background".tl,
+                        child: IconButton(
+                          onPressed: onMinimize,
+                          icon: const Icon(Icons.keyboard_arrow_down_rounded),
+                          iconSize: 20,
+                          padding: EdgeInsets.zero,
+                          visualDensity: VisualDensity.compact,
+                          constraints: const BoxConstraints.tightFor(
+                            width: 30,
+                            height: 30,
+                          ),
+                          color: cs.onSurface.withValues(alpha: 0.55),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
                 const SizedBox(height: 10),
                 Center(
@@ -818,15 +1091,35 @@ class UpdateDownloadDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                Button.text(
-                  onPressed: onCancel,
-                  child: Text(
-                    "Cancel".tl,
-                    style: TextStyle(
-                      fontSize: 12.5,
-                      color: cs.onSurface.withValues(alpha: 0.55),
+                // 「后台下载」放在左边：收起不是中断，用户往往只是想边看
+                // 漫画边等；「取消」放右边且用更淡的颜色，避免误触。
+                Row(
+                  children: [
+                    Expanded(
+                      child: Button.text(
+                        onPressed: onMinimize,
+                        child: Text(
+                          "Download in background".tl,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: cs.primary.withValues(alpha: 0.85),
+                          ),
+                        ),
+                      ),
                     ),
-                  ),
+                    Expanded(
+                      child: Button.text(
+                        onPressed: onCancel,
+                        child: Text(
+                          "Cancel".tl,
+                          style: TextStyle(
+                            fontSize: 12.5,
+                            color: cs.onSurface.withValues(alpha: 0.5),
+                          ),
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
               ],
             ),
@@ -1209,130 +1502,10 @@ Future<void> _downloadApk(
   }
 }
 
-/// 下载并安装新版本。
+/// 下载并提示安装新版本。
 ///
-/// 流程：清理历史包 -> 复用已完成的包 -> 断点续传下载（最多重试 2 次）
-/// -> 校验大小与 SHA-256 -> 改名并拉起系统安装器。
+/// 真正的下载搬进了 [updateDownload]：卡片可以收起、可以切页面，
+/// 下载都不会断。这里只负责把任务交给它。
 Future<void> _downloadAndInstallUpdate(AppUpdateInfo info) async {
-  var dir = Directory(_updateDirPath());
-  var apkName = _apkFileName(info.version);
-  var savePath = FilePath.join(dir.path, apkName);
-  var partPath = "$savePath.part";
-  var apkFile = File(savePath);
-  var cancelToken = CancelToken();
-  var dialogOpen = false;
-  var progress = <String, double>{};
-  void Function(void Function())? dialogSetState;
-
-  Future<void> closeDialog() async {
-    if (!dialogOpen) {
-      return;
-    }
-    dialogOpen = false;
-    if (App.rootContext.mounted) {
-      Navigator.of(App.rootContext, rootNavigator: true).pop();
-    }
-  }
-
-  try {
-    if (!await dir.exists()) {
-      await dir.create(recursive: true);
-    }
-    await _cleanOldUpdateFiles(dir, apkName);
-
-    if (await _isApkUsable(apkFile, info)) {
-      // 之前已下载完整（且校验通过），直接拉起安装器
-      if (!await _installApk(savePath)) {
-        launchUrlString(info.url);
-      }
-      return;
-    }
-    if (await apkFile.exists()) {
-      await apkFile.delete();
-    }
-
-    dialogOpen = true;
-    showDialog(
-      context: App.rootContext,
-      barrierDismissible: false,
-      barrierColor: Colors.black.withValues(alpha: 0.45),
-      builder: (dialogContext) {
-        return StatefulBuilder(builder: (context, setState) {
-          dialogSetState = setState;
-          return UpdateDownloadDialog(
-            received: progress["received"] ?? 0,
-            total: progress["total"] ?? 0,
-            speed: progress["speed"] ?? 0,
-            onCancel: () {
-              dialogOpen = false;
-              cancelToken.cancel();
-              Navigator.pop(dialogContext);
-            },
-          );
-        });
-      },
-    );
-
-    for (var attempt = 0;; attempt++) {
-      try {
-        await _downloadApk(
-          info,
-          partPath,
-          (received, total, speed) {
-            dialogSetState?.call(() {
-              progress["received"] = received.toDouble();
-              progress["total"] = total.toDouble();
-              progress["speed"] = speed;
-            });
-          },
-          cancelToken,
-        );
-        break;
-      } on DioException catch (e) {
-        if (cancelToken.isCancelled || e.type == DioExceptionType.cancel) {
-          return; // 用户取消：弹窗已关闭，part 文件保留供下次续传
-        }
-        if (attempt >= 2) {
-          rethrow;
-        }
-        // 断流后保留已下载部分，退避后从断点续传
-        await Future.delayed(Duration(seconds: 2 * (attempt + 1)));
-        dialogSetState?.call(() {
-          progress["speed"] = 0;
-        });
-      }
-    }
-
-    var partFile = File(partPath);
-    var length = await partFile.length();
-    if (info.apkSize > 0 && length != info.apkSize) {
-      throw Exception("APK size mismatch: $length != ${info.apkSize}");
-    }
-    var sha = info.apkSha256;
-    if (sha != null && await _sha256Of(partFile) != sha) {
-      await partFile.delete();
-      throw Exception("APK sha256 mismatch");
-    }
-    await partFile.rename(savePath);
-    await closeDialog();
-
-    App.rootContext.showMessage(message: "Update downloaded".tl);
-    if (!await _installApk(savePath)) {
-      App.rootContext.showMessage(
-        message: "Unable to start the installer".tl,
-      );
-      launchUrlString(info.url);
-    }
-  } catch (e, s) {
-    Log.error("Check Update", "Failed to download update: $e", s);
-    await closeDialog();
-    // 校验失败说明数据不可信，直接丢弃；网络错误则保留 part 以便续传
-    try {
-      var partFile = File(partPath);
-      if (await partFile.exists() && e.toString().contains("mismatch")) {
-        await partFile.delete();
-      }
-    } catch (_) {}
-    App.rootContext.showMessage(message: "Download failed".tl);
-  }
+  await updateDownload.start(info);
 }
