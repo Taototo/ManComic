@@ -13,6 +13,10 @@ class _ExploreSettingsState extends State<ExploreSettings> {
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("Explore".tl)),
+        _SettingPartTitle(
+          title: "Layout".tl,
+          icon: Icons.dashboard_outlined,
+        ),
         SelectSetting(
           title: "Display mode of comic tile".tl,
           settingKey: "comicDisplayMode",
@@ -36,6 +40,10 @@ class _ExploreSettingsState extends State<ExploreSettings> {
           min: 0.5,
           max: 1.5,
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Pages & sources".tl,
+          icon: Icons.tune,
+        ),
         _PopupWindowSetting(
           title: "Explore Pages".tl,
           builder: setExplorePagesWidget,
@@ -52,6 +60,10 @@ class _ExploreSettingsState extends State<ExploreSettings> {
           title: "Search Sources".tl,
           builder: setSearchSourcesWidget,
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Tiles".tl,
+          icon: Icons.grid_view_rounded,
+        ),
         _SwitchSetting(
           title: "Show favorite status on comic tile".tl,
           settingKey: "showFavoriteStatusOnTile",
@@ -64,6 +76,10 @@ class _ExploreSettingsState extends State<ExploreSettings> {
           title: "Reverse default chapter order".tl,
           settingKey: "reverseChapterOrder",
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Filters & search".tl,
+          icon: Icons.filter_alt_outlined,
+        ),
         _PopupWindowSetting(
           title: "Keyword blocking".tl,
           builder: () => const _ManageBlockingWordView(),
@@ -97,6 +113,18 @@ class _ExploreSettingsState extends State<ExploreSettings> {
           },
         ).toSliver(),
         SelectSetting(
+          title: "Display mode of comic list".tl,
+          settingKey: "comicListDisplayMode",
+          optionTranslation: {
+            "paging": "Paging".tl,
+            "Continuous": "Continuous".tl,
+          },
+        ).toSliver(),
+        _SettingPartTitle(
+          title: "Startup".tl,
+          icon: Icons.play_circle_outline,
+        ),
+        SelectSetting(
           title: "Initial Page".tl,
           settingKey: "initialPage",
           optionTranslation: {
@@ -104,14 +132,6 @@ class _ExploreSettingsState extends State<ExploreSettings> {
             '1': "Explore Page".tl,
             '2': "Categories Page".tl,
             '3': "Favorites Page".tl,
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Display mode of comic list".tl,
-          settingKey: "comicListDisplayMode",
-          optionTranslation: {
-            "paging": "Paging".tl,
-            "Continuous": "Continuous".tl,
           },
         ).toSliver(),
       ],

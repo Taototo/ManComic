@@ -96,6 +96,37 @@ class _ReaderSettingsState extends State<ReaderSettings> {
         !isEnabledSpecificSettings &&
         appdata.settings.isDeviceSpecificSettingsEnabled();
 
+    // 读写走同一套优先级：漫画专属 > 设备专属 > 全局。
+    // 合并型设置项（底层是多个键）用它们把读写落到正确的那一层。
+    Object? read(String settingKey) {
+      if (isEnabledSpecificSettings) {
+        return appdata.settings.getReaderSetting(comicId, sourceKey!, settingKey);
+      }
+      if (useDeviceSpecificSettings) {
+        return appdata.settings.getDeviceReaderSetting(settingKey);
+      }
+      return appdata.settings[settingKey];
+    }
+
+    void write(String settingKey, Object? value) {
+      if (isEnabledSpecificSettings) {
+        appdata.settings.setReaderSetting(
+          comicId,
+          sourceKey!,
+          settingKey,
+          value,
+        );
+      } else if (useDeviceSpecificSettings) {
+        appdata.settings.setDeviceReaderSetting(settingKey, value);
+      } else {
+        appdata.settings[settingKey] = value;
+      }
+    }
+
+    final specificComicId = isEnabledSpecificSettings ? widget.comicId : null;
+    final specificComicSource =
+        isEnabledSpecificSettings ? widget.comicSource : null;
+
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("Reading".tl)),
@@ -161,24 +192,37 @@ class _ReaderSettingsState extends State<ReaderSettings> {
               Divider().toSliver(),
             ],
           ),
-        _SwitchSetting(
-          title: "Tap to turn Pages".tl,
+        _SettingPartTitle(
+          title: "Page turning".tl,
+          icon: Icons.swap_horiz_rounded,
+        ),
+        // 原来是「点击翻页」+「反向点击翻页」两个开关：关掉第一个，
+        // 第二个就成了不起作用的孤儿项。合并成一项三选一。
+        SelectSetting(
+          title: "Tap to turn pages".tl,
           settingKey: "enableTapToTurnPages",
+          help: "Tap the left or right edge of the page to turn it. "
+                  "Reversed swaps the two sides."
+              .tl,
+          optionTranslation: {
+            "off": "Off".tl,
+            "normal": "Normal".tl,
+            "reversed": "Reversed".tl,
+          },
+          readValue: () => tapTurnOptionOf(
+            read("enableTapToTurnPages"),
+            read("reverseTapToTurnPages"),
+          ),
+          writeValue: (value) {
+            write("enableTapToTurnPages", value != "off");
+            write("reverseTapToTurnPages", value == "reversed");
+          },
           onChanged: () {
             widget.onChanged?.call("enableTapToTurnPages");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Reverse tap to turn Pages".tl,
-          settingKey: "reverseTapToTurnPages",
-          onChanged: () {
             widget.onChanged?.call("reverseTapToTurnPages");
           },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+          comicId: specificComicId,
+          comicSource: specificComicSource,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
         _SwitchSetting(
@@ -284,21 +328,29 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             useDeviceSettings: useDeviceSpecificSettings,
           ),
         ),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['readerMode']!.startsWith('continuous'),
-          child: _SliderSetting(
-            title: "Mouse scroll speed".tl,
-            settingsIndex: "readerScrollSpeed",
-            interval: 0.1,
-            min: 0.5,
-            max: 3,
-            onChanged: () {
-              widget.onChanged?.call("readerScrollSpeed");
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
+        // 滚轮加速只对鼠标有意义，手机上露出来只是噪声。
+        if (App.isDesktop)
+          SliverAnimatedVisibility(
+            visible: appdata.settings['readerMode']!.startsWith('continuous'),
+            child: _SliderSetting(
+              title: "Mouse scroll speed".tl,
+              settingsIndex: "readerScrollSpeed",
+              interval: 0.1,
+              min: 0.5,
+              max: 3,
+              onChanged: () {
+                widget.onChanged?.call("readerScrollSpeed");
+              },
+              comicId: isEnabledSpecificSettings ? widget.comicId : null,
+              comicSource: isEnabledSpecificSettings
+                  ? widget.comicSource
+                  : null,
+              useDeviceSettings: useDeviceSpecificSettings,
+            ),
           ),
+        _SettingPartTitle(
+          title: "Display".tl,
+          icon: Icons.visibility_outlined,
         ),
         SelectSetting(
           title: "Auto trim blank margins".tl,
@@ -347,58 +399,6 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           ),
         ),
         _SwitchSetting(
-          title: 'Double tap to zoom'.tl,
-          settingKey: 'enableDoubleTapToZoom',
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call('enableDoubleTapToZoom');
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SelectSetting(
-          title: "Long press in reader".tl,
-          settingKey: "longPressAction",
-          optionTranslation: {
-            "hud": "Quick panel".tl,
-            "zoom": "Zoom image".tl,
-          },
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call("longPressAction");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        _SwitchSetting(
-          title: 'Long press to zoom'.tl,
-          settingKey: 'enableLongPressToZoom',
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call('enableLongPressToZoom');
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SliverAnimatedVisibility(
-          visible: appdata.settings['enableLongPressToZoom'] == true &&
-              appdata.settings['longPressAction'] == 'zoom',
-          child: SelectSetting(
-            title: "Long press zoom position".tl,
-            settingKey: "longPressZoomPosition",
-            optionTranslation: {
-              "press": "Press position".tl,
-              "center": "Screen center".tl,
-            },
-            comicId: isEnabledSpecificSettings ? widget.comicId : null,
-            comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-            useDeviceSettings: useDeviceSpecificSettings,
-          ),
-        ),
-        _SwitchSetting(
           title: 'Limit image width'.tl,
           subtitle: 'When using Continuous(Top to Bottom) mode'.tl,
           settingKey: 'limitImageWidth',
@@ -420,24 +420,92 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
             useDeviceSettings: useDeviceSpecificSettings,
           ).toSliver(),
-        _SwitchSetting(
-          title: "Display time & battery info in reader".tl,
+        // 原来是「在阅读器显示时间电量」和「显示系统状态栏」两个开关：
+        // 两个都开会出现两套时间，两个都关又什么都没有。本质是同一处
+        // 显示什么，合成一个三选一。
+        SelectSetting(
+          title: "Reader top bar".tl,
           settingKey: "enableClockAndBatteryInfoInReader",
+          optionTranslation: {
+            "off": "Off".tl,
+            "clock": "Time & battery".tl,
+            "statusBar": "System status bar".tl,
+          },
+          readValue: () => readerTopBarOptionOf(
+            read("enableClockAndBatteryInfoInReader"),
+            read("showSystemStatusBar"),
+          ),
+          writeValue: (value) {
+            write("enableClockAndBatteryInfoInReader", value == "clock");
+            write("showSystemStatusBar", value == "statusBar");
+          },
           onChanged: () {
             widget.onChanged?.call("enableClockAndBatteryInfoInReader");
+            widget.onChanged?.call("showSystemStatusBar");
+          },
+          comicId: specificComicId,
+          comicSource: specificComicSource,
+          useDeviceSettings: useDeviceSpecificSettings,
+        ).toSliver(),
+        _SwitchSetting(
+          title: "Show Page Number".tl,
+          settingKey: "showPageNumberInReader",
+          onChanged: () {
+            widget.onChanged?.call("showPageNumberInReader");
           },
           comicId: isEnabledSpecificSettings ? widget.comicId : null,
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Gestures".tl,
+          icon: Icons.gesture,
+        ),
         _SwitchSetting(
-          title: "Show system status bar".tl,
-          settingKey: "showSystemStatusBar",
+          title: 'Double tap to zoom'.tl,
+          settingKey: 'enableDoubleTapToZoom',
           onChanged: () {
-            widget.onChanged?.call("showSystemStatusBar");
+            setState(() {});
+            widget.onChanged?.call('enableDoubleTapToZoom');
           },
           comicId: isEnabledSpecificSettings ? widget.comicId : null,
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+          useDeviceSettings: useDeviceSpecificSettings,
+        ).toSliver(),
+        // 原来是三项：长按动作（快捷面板/缩放）、是否允许长按缩放、
+        // 缩放位置。三者共同决定一件事，用户很容易配成「动作选了缩放、
+        // 开关却是关的」这种长按完全没反应的状态。合并成一项三选一。
+        SelectSetting(
+          title: "Long press in reader".tl,
+          settingKey: "longPressAction",
+          optionTranslation: {
+            "hud": "Quick panel".tl,
+            "zoomPress": "Zoom at press position".tl,
+            "zoomCenter": "Zoom at screen center".tl,
+          },
+          readValue: () => longPressOptionOf(
+            read("longPressAction"),
+            read("enableLongPressToZoom"),
+            read("longPressZoomPosition"),
+          ),
+          writeValue: (value) {
+            final keys = longPressKeysOf(value);
+            write("longPressAction", keys.action);
+            if (keys.zoomEnabled != null) {
+              write("enableLongPressToZoom", keys.zoomEnabled);
+            }
+            if (keys.position != null) {
+              write("longPressZoomPosition", keys.position);
+            }
+          },
+          onChanged: () {
+            setState(() {});
+            widget.onChanged?.call("longPressAction");
+            widget.onChanged?.call("enableLongPressToZoom");
+            widget.onChanged?.call("longPressZoomPosition");
+          },
+          comicId: specificComicId,
+          comicSource: specificComicSource,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
         SelectSetting(
@@ -458,6 +526,10 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Image & performance".tl,
+          icon: Icons.image_outlined,
+        ),
         _CallbackSetting(
           title: "Custom Image Processing".tl,
           callback: () => context.to(() => _CustomImageProcessing()),
@@ -473,16 +545,10 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
-        _SwitchSetting(
-          title: "Show Page Number".tl,
-          settingKey: "showPageNumberInReader",
-          onChanged: () {
-            widget.onChanged?.call("showPageNumberInReader");
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
+        _SettingPartTitle(
+          title: "Comments".tl,
+          icon: Icons.comment_outlined,
+        ),
         _SwitchSetting(
           title: "Show Chapter Comments".tl,
           settingKey: "showChapterComments",

@@ -10,6 +10,28 @@ class AboutSettings extends StatefulWidget {
 class _AboutSettingsState extends State<AboutSettings> {
   bool isCheckingUpdate = false;
 
+  /// 连点版本号的计数。7 次打开调试入口，间隔超过 3 秒重新计数。
+  int _versionTaps = 0;
+
+  DateTime _lastVersionTap = DateTime.fromMillisecondsSinceEpoch(0);
+
+  void _onVersionTap() {
+    final now = DateTime.now();
+    if (now.difference(_lastVersionTap) > const Duration(seconds: 3)) {
+      _versionTaps = 0;
+    }
+    _lastVersionTap = now;
+    _versionTaps += 1;
+    if (_versionTaps < 7) {
+      return;
+    }
+    _versionTaps = 0;
+    appdata.implicitData['debugUnlocked'] = true;
+    appdata.writeImplicitData();
+    setState(() {});
+    context.showMessage(message: "Debug options enabled".tl);
+  }
+
   /// 检查更新的统一入口：手动按钮和「启动时检查」开关共用。
   Future<void> _check([bool interactive = true]) async {
     if (isCheckingUpdate) {
@@ -90,9 +112,14 @@ class _AboutSettingsState extends State<AboutSettings> {
         Column(
           children: [
             const SizedBox(height: 8),
-            Text(
-              "V$appVersionName",
-              style: const TextStyle(fontSize: 16),
+            // 连点 7 次打开调试入口。设置页里不再摆「调试」分类——那不是
+            // 普通用户会去的地方，白白占掉一行导航。
+            GestureDetector(
+              onTap: _onVersionTap,
+              child: Text(
+                "V$appVersionName",
+                style: const TextStyle(fontSize: 16),
+              ),
             ),
             const Text("ManComic 是一款免费开源的漫画阅读应用"),
             const SizedBox(height: 8),
@@ -102,8 +129,8 @@ class _AboutSettingsState extends State<AboutSettings> {
           title: Text("Check for updates".tl),
           trailing: Button.filled(
             isLoading: isCheckingUpdate,
-            child: Text("Check".tl),
             onPressed: _check,
+            child: Text("Check".tl),
           ).fixHeight(32),
         ).toSliver(),
         _SwitchSetting(
@@ -118,6 +145,14 @@ class _AboutSettingsState extends State<AboutSettings> {
             }
           },
         ).toSliver(),
+        // 日志是反馈问题时的必需入口，普通用户也要够得着，所以留在「关于」。
+        ListTile(
+          title: Text("Open Log".tl),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const LogsPage());
+          },
+        ).toSliver(),
         ListTile(
           title: Text("GitHub".tl),
           trailing: const Icon(Icons.open_in_new),
@@ -125,6 +160,14 @@ class _AboutSettingsState extends State<AboutSettings> {
             launchUrlString(appRepoUrl);
           },
         ).toSliver(),
+        if (appdata.implicitData['debugUnlocked'] == true)
+          ListTile(
+            title: Text("Debug options".tl),
+            trailing: const Icon(Icons.arrow_right),
+            onTap: () {
+              context.to(() => const DebugPage());
+            },
+          ).toSliver(),
       ],
     );
   }

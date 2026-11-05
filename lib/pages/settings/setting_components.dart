@@ -84,6 +84,8 @@ class SelectSetting extends StatelessWidget {
     this.comicId,
     this.comicSource,
     this.useDeviceSettings = false,
+    this.readValue,
+    this.writeValue,
   });
 
   final String title;
@@ -102,6 +104,19 @@ class SelectSetting extends StatelessWidget {
 
   final bool useDeviceSettings;
 
+  /// 覆盖「一个 settingKey 存一个值」的默认读法。
+  ///
+  /// 有些概念在存储层是由两三个键共同表示的（长按动作 = 动作 + 是否启用 +
+  /// 放大位置；点击翻页 = 开关 + 是否反向）。设置页只该露一项，否则用户会
+  /// 看到一个开了另一个没开、行为还不确定的组合。调用方给出「读成哪个虚拟
+  /// 选项」，[writeValue] 负责把选择拆回那几个键。
+  final String? Function()? readValue;
+
+  /// 与 [readValue] 配套：用户选了某个虚拟选项时怎么写回底层的键。
+  ///
+  /// 只做内存赋值即可，保存与刷新由选择器统一处理。
+  final void Function(String value)? writeValue;
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -118,6 +133,8 @@ class SelectSetting extends StatelessWidget {
               comicId: comicId,
               comicSource: comicSource,
               useDeviceSettings: useDeviceSettings,
+              readValue: readValue,
+              writeValue: writeValue,
             );
           } else {
             return _EndSelectorSelectSetting(
@@ -129,6 +146,8 @@ class SelectSetting extends StatelessWidget {
               comicId: comicId,
               comicSource: comicSource,
               useDeviceSettings: useDeviceSettings,
+              readValue: readValue,
+              writeValue: writeValue,
             );
           }
         },
@@ -147,6 +166,8 @@ class _DoubleLineSelectSettings extends StatefulWidget {
     this.comicId,
     this.comicSource,
     this.useDeviceSettings = false,
+    this.readValue,
+    this.writeValue,
   });
 
   final String title;
@@ -165,23 +186,50 @@ class _DoubleLineSelectSettings extends StatefulWidget {
 
   final bool useDeviceSettings;
 
+  final String? Function()? readValue;
+
+  final void Function(String value)? writeValue;
+
   @override
   State<_DoubleLineSelectSettings> createState() =>
       _DoubleLineSelectSettingsState();
 }
 
 class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
+  Object? _rawValue() => widget.comicId != null
+      ? appdata.settings.getReaderSetting(
+          widget.comicId!,
+          widget.comicSource!,
+          widget.settingKey,
+        )
+      : widget.useDeviceSettings
+      ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
+      : appdata.settings[widget.settingKey];
+
+  void _apply(String value) {
+    final custom = widget.writeValue;
+    if (custom != null) {
+      custom(value);
+    } else if (widget.comicId != null) {
+      appdata.settings.setReaderSetting(
+        widget.comicId!,
+        widget.comicSource!,
+        widget.settingKey,
+        value,
+      );
+    } else if (widget.useDeviceSettings) {
+      appdata.settings.setDeviceReaderSetting(widget.settingKey, value);
+    } else {
+      appdata.settings[widget.settingKey] = value;
+    }
+    setState(() {});
+    appdata.saveData();
+    widget.onChanged?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
-    var value = widget.comicId != null
-        ? appdata.settings.getReaderSetting(
-            widget.comicId!,
-            widget.comicSource!,
-            widget.settingKey,
-          )
-        : widget.useDeviceSettings
-        ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
-        : appdata.settings[widget.settingKey];
+    var value = widget.readValue?.call() ?? _rawValue();
 
     return ListTile(
       title: Row(
@@ -242,25 +290,7 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
               .toList(),
         ).then((value) {
           if (value != null) {
-            setState(() {
-              if (widget.comicId != null) {
-                appdata.settings.setReaderSetting(
-                  widget.comicId!,
-                  widget.comicSource!,
-                  widget.settingKey,
-                  value,
-                );
-              } else if (widget.useDeviceSettings) {
-                appdata.settings.setDeviceReaderSetting(
-                  widget.settingKey,
-                  value,
-                );
-              } else {
-                appdata.settings[widget.settingKey] = value;
-              }
-            });
-            appdata.saveData();
-            widget.onChanged?.call();
+            _apply(value);
           }
         });
       },
@@ -278,6 +308,8 @@ class _EndSelectorSelectSetting extends StatefulWidget {
     this.comicId,
     this.comicSource,
     this.useDeviceSettings = false,
+    this.readValue,
+    this.writeValue,
   });
 
   final String title;
@@ -296,24 +328,51 @@ class _EndSelectorSelectSetting extends StatefulWidget {
 
   final bool useDeviceSettings;
 
+  final String? Function()? readValue;
+
+  final void Function(String value)? writeValue;
+
   @override
   State<_EndSelectorSelectSetting> createState() =>
       _EndSelectorSelectSettingState();
 }
 
 class _EndSelectorSelectSettingState extends State<_EndSelectorSelectSetting> {
+  Object? _rawValue() => widget.comicId != null
+      ? appdata.settings.getReaderSetting(
+          widget.comicId!,
+          widget.comicSource!,
+          widget.settingKey,
+        )
+      : widget.useDeviceSettings
+      ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
+      : appdata.settings[widget.settingKey];
+
+  void _apply(String value) {
+    final custom = widget.writeValue;
+    if (custom != null) {
+      custom(value);
+    } else if (widget.comicId != null) {
+      appdata.settings.setReaderSetting(
+        widget.comicId!,
+        widget.comicSource!,
+        widget.settingKey,
+        value,
+      );
+    } else if (widget.useDeviceSettings) {
+      appdata.settings.setDeviceReaderSetting(widget.settingKey, value);
+    } else {
+      appdata.settings[widget.settingKey] = value;
+    }
+    setState(() {});
+    appdata.saveData();
+    widget.onChanged?.call();
+  }
+
   @override
   Widget build(BuildContext context) {
     var options = widget.optionTranslation;
-    var value = widget.comicId != null
-        ? appdata.settings.getReaderSetting(
-            widget.comicId!,
-            widget.comicSource!,
-            widget.settingKey,
-          )
-        : widget.useDeviceSettings
-        ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
-        : appdata.settings[widget.settingKey];
+    var value = widget.readValue?.call() ?? _rawValue();
     return ListTile(
       title: Row(
         children: [
@@ -350,23 +409,7 @@ class _EndSelectorSelectSettingState extends State<_EndSelectorSelectSetting> {
         values: options.values.toList(),
         minWidth: 64,
         onTap: (index) {
-          setState(() {
-            var value = options.keys.elementAt(index);
-            if (widget.comicId != null) {
-              appdata.settings.setReaderSetting(
-                widget.comicId!,
-                widget.comicSource!,
-                widget.settingKey,
-                value,
-              );
-            } else if (widget.useDeviceSettings) {
-              appdata.settings.setDeviceReaderSetting(widget.settingKey, value);
-            } else {
-              appdata.settings[widget.settingKey] = value;
-            }
-          });
-          appdata.saveData();
-          widget.onChanged?.call();
+          _apply(options.keys.elementAt(index));
         },
       ),
     );
@@ -753,4 +796,59 @@ class _SettingPartTitle extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 长按动作在设置页里是一个三选一，但底层由三个键共同表示。
+///
+/// 抽成纯函数是为了能单独测：这层映射一旦写反，用户在设置里选的和阅读器里
+/// 真正发生的事就对不上，而且很难从界面上看出来。
+String longPressOptionOf(
+  Object? action,
+  Object? zoomEnabled,
+  Object? position,
+) {
+  // 旧配置里可能「动作是缩放、开关却是关的」，实际长按没有任何反应，
+  // 按快捷面板显示才和用户看到的一致。
+  if (action != "zoom" || zoomEnabled != true) {
+    return "hud";
+  }
+  return position == "center" ? "zoomCenter" : "zoomPress";
+}
+
+/// [longPressOptionOf] 的反向映射：选中某个选项时要写哪几个键。
+///
+/// 选「快捷面板」时不返回放大位置（null = 不用写），这样用户从「居中放大」
+/// 切到「快捷面板」再切回来，位置还在，不会被顺手重置成默认值。
+({String action, bool? zoomEnabled, String? position}) longPressKeysOf(
+  String option,
+) {
+  if (option == "hud") {
+    return (action: "hud", zoomEnabled: null, position: null);
+  }
+  return (
+    action: "zoom",
+    zoomEnabled: true,
+    position: option == "zoomCenter" ? "center" : "press",
+  );
+}
+
+/// 点击翻页：开关 + 是否反向，两项合成「关闭 / 正常 / 反向」。
+String tapTurnOptionOf(Object? enabled, Object? reversed) {
+  if (enabled != true) {
+    return "off";
+  }
+  return reversed == true ? "reversed" : "normal";
+}
+
+/// 阅读器顶部的信息显示：App 自绘的时间电量、系统状态栏，或者都关掉。
+///
+/// 两者同时打开会出现两套时间，所以合成一个三选一。
+String readerTopBarOptionOf(Object? clock, Object? statusBar) {
+  if (statusBar == true) {
+    return "statusBar";
+  }
+  if (clock == true) {
+    return "clock";
+  }
+  return "off";
 }

@@ -8,90 +8,115 @@ class AppSettings extends StatefulWidget {
 }
 
 class _AppSettingsState extends State<AppSettings> {
+  Future<void> _setNewStoragePath() async {
+    String? result;
+    if (App.isAndroid) {
+      var picker = DirectoryPicker();
+      result = (await picker.pickDirectory())?.path;
+    } else if (App.isIOS) {
+      result = await selectDirectoryIOS();
+    } else {
+      result = await selectDirectory();
+    }
+    if (result == null || !mounted) return;
+    var loadingDialog = showLoadingDialog(
+      App.rootContext,
+      barrierDismissible: false,
+      allowCancel: false,
+    );
+    var res = await LocalManager().setNewPath(result);
+    loadingDialog.close();
+    if (!mounted) return;
+    if (res != null) {
+      context.showMessage(message: res);
+    } else {
+      context.showMessage(message: "Path set successfully".tl);
+      setState(() {});
+    }
+  }
+
+  Future<void> _clearCache() async {
+    var loadingDialog = showLoadingDialog(
+      App.rootContext,
+      barrierDismissible: false,
+      allowCancel: false,
+    );
+    await CacheManager().clear();
+    loadingDialog.close();
+    if (!mounted) return;
+    context.showMessage(message: "Cache cleared".tl);
+    setState(() {});
+  }
+
+  void _setCacheLimit() {
+    showInputDialog(
+      context: context,
+      title: "Set Cache Limit".tl,
+      hintText: "Size in MB".tl,
+      inputValidator: RegExp(r"^\d+$"),
+      onConfirm: (value) {
+        appdata.settings['cacheSize'] = int.parse(value);
+        appdata.saveData();
+        setState(() {});
+        CacheManager().setLimitSize(appdata.settings['cacheSize']);
+        return null;
+      },
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("App".tl)),
         _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
+        // 原来是「显示路径」+「设置新路径」两行，说的其实是同一件事。
         ListTile(
           title: Text("Storage Path for local comics".tl),
           subtitle: Text(LocalManager().path, softWrap: false),
-          trailing: IconButton(
-            icon: const Icon(Icons.copy),
-            onPressed: () {
-              Clipboard.setData(ClipboardData(text: LocalManager().path));
-              context.showMessage(message: "Path copied to clipboard".tl);
-            },
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: "Copy".tl,
+                icon: const Icon(Icons.copy),
+                onPressed: () {
+                  Clipboard.setData(ClipboardData(text: LocalManager().path));
+                  context.showMessage(message: "Path copied to clipboard".tl);
+                },
+              ),
+              IconButton(
+                tooltip: "Set New Storage Path".tl,
+                icon: const Icon(Icons.drive_file_move_outline),
+                onPressed: _setNewStoragePath,
+              ),
+            ],
           ),
+          onTap: _setNewStoragePath,
         ).toSliver(),
-        _CallbackSetting(
-          title: "Set New Storage Path".tl,
-          actionTitle: "Set".tl,
-          callback: () async {
-            String? result;
-            if (App.isAndroid) {
-              var picker = DirectoryPicker();
-              result = (await picker.pickDirectory())?.path;
-            } else if (App.isIOS) {
-              result = await selectDirectoryIOS();
-            } else {
-              result = await selectDirectory();
-            }
-            if (result == null) return;
-            var loadingDialog = showLoadingDialog(
-              App.rootContext,
-              barrierDismissible: false,
-              allowCancel: false,
-            );
-            var res = await LocalManager().setNewPath(result);
-            loadingDialog.close();
-            if (res != null) {
-              context.showMessage(message: res);
-            } else {
-              context.showMessage(message: "Path set successfully".tl);
-              setState(() {});
-            }
-          },
-        ).toSliver(),
+        // 「缓存大小」「清除缓存」「缓存上限」三行合并成一行，两件事用两个
+        // 图标按钮表达：清空、改上限。占用从三行变一行。
         ListTile(
-          title: Text("Cache Size".tl),
-          subtitle: Text(bytesToReadableString(CacheManager().currentSize)),
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Clear Cache".tl,
-          actionTitle: "Clear".tl,
-          callback: () async {
-            var loadingDialog = showLoadingDialog(
-              App.rootContext,
-              barrierDismissible: false,
-              allowCancel: false,
-            );
-            await CacheManager().clear();
-            loadingDialog.close();
-            context.showMessage(message: "Cache cleared".tl);
-            setState(() {});
-          },
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Cache Limit".tl,
-          subtitle: "${appdata.settings['cacheSize']} MB",
-          callback: () {
-            showInputDialog(
-              context: context,
-              title: "Set Cache Limit".tl,
-              hintText: "Size in MB".tl,
-              inputValidator: RegExp(r"^\d+$"),
-              onConfirm: (value) {
-                appdata.settings['cacheSize'] = int.parse(value);
-                appdata.saveData();
-                setState(() {});
-                CacheManager().setLimitSize(appdata.settings['cacheSize']);
-                return null;
-              },
-            );
-          },
-          actionTitle: 'Set'.tl,
+          title: Text("Cache".tl),
+          subtitle: Text(
+            "${bytesToReadableString(CacheManager().currentSize)} / "
+            "${appdata.settings['cacheSize']} MB",
+          ),
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              IconButton(
+                tooltip: "Clear Cache".tl,
+                icon: const Icon(Icons.delete_outline),
+                onPressed: _clearCache,
+              ),
+              IconButton(
+                tooltip: "Cache Limit".tl,
+                icon: const Icon(Icons.tune),
+                onPressed: _setCacheLimit,
+              ),
+            ],
+          ),
         ).toSliver(),
         _CallbackSetting(
           title: "Export App Data".tl,

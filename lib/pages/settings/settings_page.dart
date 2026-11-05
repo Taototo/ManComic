@@ -55,6 +55,9 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool get enableTwoViews => context.width > 720;
 
+  /// 普通用户需要的分类。调试相关的东西不在这里——「重载配置 / JS 求值器」
+  /// 对绝大多数人没有意义，放在列表里只会增加噪声。需要时在「关于」页连点
+  /// 版本号 7 次打开。
   final categories = <String>[
     "Explore",
     "Reading",
@@ -64,7 +67,6 @@ class _SettingsPageState extends State<SettingsPage> {
     "APP",
     "Network",
     "About",
-    "Debug",
   ];
 
   final icons = <IconData>[
@@ -76,7 +78,6 @@ class _SettingsPageState extends State<SettingsPage> {
     Icons.apps,
     Icons.public,
     Icons.info,
-    Icons.bug_report,
   ];
 
   @override
@@ -256,7 +257,6 @@ class _SettingsPageState extends State<SettingsPage> {
       5 => const AppSettings(),
       6 => const NetworkSettings(),
       7 => const AboutSettings(),
-      8 => const DebugPage(),
       _ => throw UnimplementedError(),
     };
   }
@@ -282,7 +282,6 @@ class _SettingsDetailPage extends StatelessWidget {
       5 => const AppSettings(),
       6 => const NetworkSettings(),
       7 => const AboutSettings(),
-      8 => const DebugPage(),
       _ => throw UnimplementedError(),
     };
   }
