@@ -492,6 +492,12 @@ void prewarmUpdateCheck() {
 
 Future<AppUpdateInfo?>? _prewarmedFetch;
 
+/// 自动检查已经弹过提示的版本号。
+///
+/// 只在进程内有效：冷启动会清空，所以「关掉提示、退出 App、下次打开再问一次」
+/// 仍然成立；但过完节流窗口再切回前台，不会对着同一个版本反复弹。
+String? _autoPromptedVersion;
+
 /// 检查更新并在需要时弹窗引导下载。
 ///
 /// [showMessageIfNoUpdate] 为 false 时，没有更新（或检查失败）不打扰用户，
@@ -546,6 +552,15 @@ Future<bool> checkUpdateUi([bool showMessageIfNoUpdate = true]) async {
     if (updateDownload.pending != null) {
       updateDownload.promptPendingInstall();
       return true;
+    }
+    // 自动检查（冷启动、回到前台）同一个版本只弹一次：过了节流窗口再切回来
+    // 不该又弹一遍，用户已经在考虑要不要更新了。手动点「检查」仍旧每次都弹。
+    var isAutoCheck = !showMessageIfNoUpdate;
+    if (isAutoCheck) {
+      if (_autoPromptedVersion == info.version) {
+        return true;
+      }
+      _autoPromptedVersion = info.version;
     }
     showUpdateAvailableDialog(info);
     return true;

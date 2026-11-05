@@ -15,6 +15,7 @@ import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/notification_service.dart';
 import 'package:venera/foundation/startup_gate.dart';
+import 'package:venera/foundation/update_check_policy.dart';
 import 'package:venera/network/cookie_jar.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
@@ -45,7 +46,30 @@ class _LifecycleObserver with WidgetsBindingObserver {
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
     NotificationService.isForeground = state == AppLifecycleState.resumed;
+    if (state == AppLifecycleState.resumed) {
+      // 冷启动只查一次，可很多人根本不杀进程：App 一直躺在后台，切回来
+      // 时 init() 不会重跑。少这一步，「启动时检查更新」就等于「开机时
+      // 检查更新」，新版本发布后不手动点就永远发现不了。
+      _checkAppUpdatesOnResume();
+    }
   }
+}
+
+/// 回到前台时的静默检查。
+///
+/// 与冷启动共用 [_checkAppUpdates] 的节流，所以短时间内反复切换不会连发
+/// 请求；仍在启动动画里时直接跳过——启动路径自己会查，别叠两次。
+void _checkAppUpdatesOnResume() {
+  if (!isStartupReady) {
+    return;
+  }
+  unawaited(() async {
+    try {
+      await _checkAppUpdates();
+    } catch (e, s) {
+      Log.error("Update Check", "Failed to check for updates on resume: $e\n$s");
+    }
+  }());
 }
 
 Future<void> init() async {
@@ -117,23 +141,6 @@ void _checkOldConfigs() {
   }
 }
 
-/// 自动检查的节流间隔。
-///
-/// 语义上「启动时检查更新」就该是每次冷启动都查，这里只拦掉「30 分钟内来回
-/// 切好几次」的重复请求。不用按天节流：这个分支常常一天发两三版，早上装的
-/// 版本下午就过期了，按天算等于当天再也发现不了新版本。
-///
-/// 请求本身很小（Release API 几 KB），未认证限流是 60 次/小时，30 分钟一次
-/// 完全够用。
-const _kUpdateCheckInterval = Duration(minutes: 30);
-
-/// 检查失败后的重试间隔。
-///
-/// 失败（断网、GitHub 被墙）不能占用成功的额度，否则一次开机时的网络抖动
-/// 就会让「启动时检查更新」在接下来的整段时间里失效；但也不能每次启动都去
-/// 撞墙，所以失败后隔半小时再试。
-const _kUpdateCheckRetryInterval = Duration(minutes: 30);
-
 /// 漫画源列表的更新节流。
 ///
 /// 与「应用更新」完全独立：漫画源列表变动慢，没必要跟着应用更新的节奏
@@ -141,24 +148,22 @@ const _kUpdateCheckRetryInterval = Duration(minutes: 30);
 const _kComicSourceCheckInterval = Duration(hours: 24);
 
 Future<void> _checkAppUpdates() async {
-  var now = DateTime.now().millisecondsSinceEpoch;
-
-  // 开关默认关闭，没开就到此为止。
-  if (appdata.settings['checkUpdateOnStart'] != true) {
-    return;
-  }
-
-  // 刚升级完一定查一次：新版本里可能带了「更新检查」本身的修复，
-  // 若还被上一版写下的节流挡住，用户只会觉得开关依然没用。
-  var versionChanged =
-      appdata.implicitData['lastCheckUpdateVersion'] != appVersionName;
-  var lastSuccess = appdata.implicitData['lastCheckUpdate'] ?? 0;
-  if (!versionChanged &&
-      now - lastSuccess < _kUpdateCheckInterval.inMilliseconds) {
-    return;
-  }
-  var lastFail = appdata.implicitData['lastCheckUpdateFailed'] ?? 0;
-  if (now - lastFail < _kUpdateCheckRetryInterval.inMilliseconds) {
+  // 开关、刚升级、刚查过、刚失败过，全交给这个纯函数判，规则写在一处。
+  var skip = updateCheckSkipReason(
+    enabled: appdata.settings['checkUpdateOnStart'] == true,
+    // 刚升级完一定查一次：新版本里可能带了「更新检查」本身的修复，
+    // 若还被上一版写下的节流挡住，用户只会觉得开关依然没用。
+    versionChanged:
+        appdata.implicitData['lastCheckUpdateVersion'] != appVersionName,
+    now: DateTime.now(),
+    lastSuccessMs: appdata.implicitData['lastCheckUpdate'] ?? 0,
+    lastFailureMs: appdata.implicitData['lastCheckUpdateFailed'] ?? 0,
+  );
+  if (skip != UpdateCheckSkip.none) {
+    Log.info(
+      "Update Check",
+      "Skipped automatic check: ${skip.name}",
+    );
     return;
   }
 
