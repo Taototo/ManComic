@@ -130,7 +130,9 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
 
   @override
   Widget build(BuildContext context) {
-    final cs = Theme.of(context).colorScheme;
+    final theme = Theme.of(context);
+    final cs = theme.colorScheme;
+    final isDark = theme.brightness == Brightness.dark;
     final comic = widget.comic;
     final image = _findImageProvider(comic);
     final tags = <String>[];
@@ -169,9 +171,9 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
           behavior: HitTestBehavior.opaque,
           onTap: widget.onDismiss,
           child: ColoredBox(
-            // 遮罩比纯弹窗那版浅得多：液态玻璃要靠背后的列表成像，
-            // 压太黑就只剩一块灰板，玻璃感全没了。
-            color: Colors.black.withValues(alpha: 0.28),
+            // 遮罩要压得住背后的封面墙：太浅时列表里的亮色块会透过玻璃
+            // 顶到标题上，文字被「洗」得看不清。
+            color: Colors.black.withValues(alpha: 0.36),
             child: Center(
               child: GestureDetector(
                 onTap: () {},
@@ -180,8 +182,12 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
                   margin: const EdgeInsets.symmetric(horizontal: 20),
                   child: LiquidGlass(
                     borderRadius: BorderRadius.circular(28),
-                    opacity: 0.72,
-                    blur: 34,
+                    // 不透明度从 0.72 提上来：玻璃再透，标题和简介就会和
+                    // 背后糊成一片的封面抢对比度。浅色主题的 surface 本来
+                    // 接近纯白，给到 0.9 就成了一块死白板，所以留一点缝让
+                    // 底下的颜色透上来；深色主题不透明一点反而更像磨砂。
+                    opacity: isDark ? 0.9 : 0.86,
+                    blur: 38,
                     child: Padding(
                       padding: const EdgeInsets.all(14),
                       child: Column(
@@ -254,9 +260,12 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
                                         meta,
                                         maxLines: 1,
                                         overflow: TextOverflow.ellipsis,
-                                        style: ts.s10.copyWith(fontSize: 11).withColor(
-                                          cs.onSurfaceVariant,
-                                        ),
+                                        style: ts.s10.copyWith(fontSize: 11.5)
+                                            .withColor(
+                                              cs.onSurface.withValues(
+                                                alpha: 0.72,
+                                              ),
+                                            ),
                                       ),
                                     ],
                                     if (tags.isNotEmpty) ...[
@@ -280,9 +289,14 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
                               description,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: ts.s10.copyWith(fontSize: 11, height: 1.5).withColor(
-                                cs.onSurfaceVariant.withValues(alpha: 0.9),
-                              ),
+                              // 简介原先用 onSurfaceVariant + 11 号，压在
+                              // 玻璃上是最先糊掉的一处：提亮到 0.8 的正文色
+                              // 并放大一号。
+                              style: ts.s10
+                                  .copyWith(fontSize: 12, height: 1.45)
+                                  .withColor(
+                                    cs.onSurface.withValues(alpha: 0.8),
+                                  ),
                             ),
                           ],
                           const SizedBox(height: 14),
@@ -340,10 +354,10 @@ class _PeekTag extends StatelessWidget {
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
       decoration: BoxDecoration(
-        color: cs.onSurface.withValues(alpha: 0.10),
+        color: cs.onSurface.withValues(alpha: 0.12),
         borderRadius: BorderRadius.circular(20),
         border: Border.all(
-          color: cs.onSurface.withValues(alpha: 0.14),
+          color: cs.onSurface.withValues(alpha: 0.18),
           width: 0.6,
         ),
       ),
@@ -351,7 +365,7 @@ class _PeekTag extends StatelessWidget {
         text,
         style: ts.s10.copyWith(
           fontSize: 10.5,
-          color: cs.onSurface.withValues(alpha: 0.78),
+          color: cs.onSurface.withValues(alpha: 0.9),
         ),
       ),
     );
@@ -379,10 +393,10 @@ class _PeekAction extends StatelessWidget {
         child: Ink(
           height: 40,
           decoration: BoxDecoration(
-            color: cs.onSurface.withValues(alpha: 0.06),
+            color: cs.onSurface.withValues(alpha: 0.10),
             borderRadius: BorderRadius.circular(14),
             border: Border.all(
-              color: cs.onSurface.withValues(alpha: 0.10),
+              color: cs.onSurface.withValues(alpha: 0.16),
               width: 0.7,
             ),
           ),
