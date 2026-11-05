@@ -126,6 +126,7 @@ class _AboutSettingsState extends State<AboutSettings> {
           ],
         ).toSliver(),
         ListTile(
+          contentPadding: kSettingTilePadding,
           title: Text("Check for updates".tl),
           trailing: Button.filled(
             isLoading: isCheckingUpdate,
@@ -147,6 +148,7 @@ class _AboutSettingsState extends State<AboutSettings> {
         ).toSliver(),
         // 日志是反馈问题时的必需入口，普通用户也要够得着，所以留在「关于」。
         ListTile(
+          contentPadding: kSettingTilePadding,
           title: Text("Open Log".tl),
           trailing: const Icon(Icons.arrow_right),
           onTap: () {
@@ -154,6 +156,7 @@ class _AboutSettingsState extends State<AboutSettings> {
           },
         ).toSliver(),
         ListTile(
+          contentPadding: kSettingTilePadding,
           title: Text("GitHub".tl),
           trailing: const Icon(Icons.open_in_new),
           onTap: () {
@@ -162,6 +165,7 @@ class _AboutSettingsState extends State<AboutSettings> {
         ).toSliver(),
         if (appdata.implicitData['debugUnlocked'] == true)
           ListTile(
+            contentPadding: kSettingTilePadding,
             title: Text("Debug options".tl),
             trailing: const Icon(Icons.arrow_right),
             onTap: () {

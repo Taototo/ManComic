@@ -107,6 +107,8 @@ class _CenterHintOverlayState extends State<_CenterHintOverlay>
 
   @override
   Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
     final curve = CurvedAnimation(
       parent: _controller,
       curve: Curves.easeOutCubic,
@@ -126,14 +128,29 @@ class _CenterHintOverlayState extends State<_CenterHintOverlay>
                   vertical: 11,
                 ),
                 decoration: BoxDecoration(
-                  color: Colors.black.withValues(alpha: 0.74),
+                  // 原来写死半透明黑：深色模式下整个界面本来就接近纯黑，
+                  // 黑胶囊贴在黑底上边界直接消失，只剩一行白字浮着，看着
+                  // 像没渲染完。改成跟随主题的反色底 —— 深色主题给浅色
+                  // 胶囊配深字，浅色主题维持深色胶囊配白字。
+                  color: cs.inverseSurface.withValues(alpha: isDark ? 0.94 : 0.86),
                   borderRadius: BorderRadius.circular(12),
+                  border: Border.all(
+                    color: cs.onInverseSurface.withValues(alpha: 0.14),
+                    width: 0.7,
+                  ),
+                  boxShadow: [
+                    BoxShadow(
+                      color: Colors.black.withValues(alpha: isDark ? 0.45 : 0.22),
+                      blurRadius: 18,
+                      offset: const Offset(0, 6),
+                    ),
+                  ],
                 ),
                 child: Text(
                   widget.message,
                   textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    color: Colors.white,
+                  style: TextStyle(
+                    color: cs.onInverseSurface,
                     fontSize: 13.5,
                     height: 1.35,
                   ),

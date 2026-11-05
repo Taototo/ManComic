@@ -47,6 +47,36 @@ class FavoritesPage extends StatefulWidget {
   State<FavoritesPage> createState() => _FavoritesPageState();
 }
 
+/// 从 implicitData 里恢复上次选中的收藏夹，返回 (folder, isNetwork)。
+///
+/// 「全部」「已阅」不是磁盘上的真实目录，而是两个哨兵名（定义见
+/// `local_favorites_page.dart`）。它们必须原样保留：早先的写法只放行了
+/// 「已阅」，「全部」每次都会被当成「文件夹已被删除」重置成 null（未选择），
+/// 于是切到别的 tab 再回来、页面重建一次，筛选就丢了。
+///
+/// 抽成纯函数是为了能单独测 —— 这类 bug 的表现是"偶尔没记住"，在界面上
+/// 很难稳定复现。
+(String?, bool) resolveFavoriteFolder(
+  Object? data, {
+  required bool Function(String folder) existsFolder,
+}) {
+  if (data is! Map) {
+    return (null, false);
+  }
+  final name = data['name'];
+  final isNetwork = data['isNetwork'] == true;
+  if (name is! String) {
+    return (null, isNetwork);
+  }
+  if (isNetwork) {
+    return (name, true);
+  }
+  if (name == _localAllFolderLabel || name == _localReadFolderLabel) {
+    return (name, false);
+  }
+  return (existsFolder(name) ? name : null, false);
+}
+
 class _FavoritesPageState extends State<FavoritesPage> {
   String? folder;
 
@@ -91,17 +121,12 @@ class _FavoritesPageState extends State<FavoritesPage> {
 
   @override
   void initState() {
-    var data = appdata.implicitData['favoriteFolder'];
-    if (data != null) {
-      folder = data['name'];
-      isNetwork = data['isNetwork'] ?? false;
-    }
-    if (folder != null
-        && !isNetwork
-        && folder != _localReadFolderLabel
-        && !LocalFavoritesManager().existsFolder(folder!)) {
-      folder = null;
-    }
+    final restored = resolveFavoriteFolder(
+      appdata.implicitData['favoriteFolder'],
+      existsFolder: (name) => LocalFavoritesManager().existsFolder(name),
+    );
+    folder = restored.$1;
+    isNetwork = restored.$2;
     locked = Privacy.isFavoritesLocked;
     appdata.settings.addListener(onSettingsChanged);
     super.initState();

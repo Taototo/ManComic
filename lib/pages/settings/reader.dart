@@ -134,6 +134,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           SliverMainAxisGroup(
             slivers: [
               SwitchListTile(
+                contentPadding: kSettingTilePadding,
                 title: Text("Enable comic specific settings".tl),
                 value: isEnabledSpecificSettings,
                 onChanged: (b) {
@@ -166,6 +167,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           SliverMainAxisGroup(
             slivers: [
               SwitchListTile(
+                contentPadding: kSettingTilePadding,
                 title: Text("Enable device specific settings".tl),
                 value: useDeviceSpecificSettings,
                 onChanged: (b) {

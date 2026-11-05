@@ -1,5 +1,16 @@
 part of 'settings_page.dart';
 
+/// 设置明细行的左右留白。
+///
+/// 分组标题是「16 + 图标 24 + 8」从 48 起排字，明细行原来也用默认的 16，
+/// 两者左边界一样，长列表翻起来分不清哪一行属于哪个分组。
+///
+/// 明细行给到 48，正好和标题文字对齐：图标独占最左一列，明细整体内收成一个
+/// 块，层级不用靠字号也能看出来。取 40 那种"半缩进"反而会让明细卡在图标和
+/// 标题文字之间，看着像没对齐。
+const EdgeInsetsDirectional kSettingTilePadding =
+    EdgeInsetsDirectional.only(start: 48, end: 16);
+
 class _SwitchSetting extends StatefulWidget {
   const _SwitchSetting({
     required this.title,
@@ -45,6 +56,7 @@ class _SwitchSettingState extends State<_SwitchSetting> {
     assert(value is bool);
 
     return ListTile(
+      contentPadding: kSettingTilePadding,
       title: Text(widget.title),
       subtitle: widget.subtitle == null ? null : Text(widget.subtitle!),
       trailing: Switch(
@@ -232,6 +244,7 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
     var value = widget.readValue?.call() ?? _rawValue();
 
     return ListTile(
+      contentPadding: kSettingTilePadding,
       title: Row(
         children: [
           Text(widget.title),
@@ -374,6 +387,7 @@ class _EndSelectorSelectSettingState extends State<_EndSelectorSelectSetting> {
     var options = widget.optionTranslation;
     var value = widget.readValue?.call() ?? _rawValue();
     return ListTile(
+      contentPadding: kSettingTilePadding,
       title: Row(
         children: [
           Text(widget.title),
@@ -466,6 +480,7 @@ class _SliderSettingState extends State<_SliderSetting> {
                 : appdata.settings[widget.settingsIndex])
             .toDouble();
     return ListTile(
+      contentPadding: kSettingTilePadding,
       title: Text(widget.title, softWrap: true, maxLines: 2),
       trailing: Text(value.toString(), style: ts.s12),
       subtitle: Slider(
@@ -530,6 +545,7 @@ class _PopupWindowSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      contentPadding: kSettingTilePadding,
       title: Text(title),
       trailing: const Icon(Icons.arrow_right),
       onTap: () {
@@ -756,6 +772,7 @@ class _CallbackSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
+      contentPadding: kSettingTilePadding,
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle!),
       trailing: Button.normal(
