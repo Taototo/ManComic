@@ -28,6 +28,22 @@ class PaneActionEntry {
   });
 }
 
+/// 判断这次返回是不是「再按一次」的那一次。
+///
+/// 拆成纯函数是因为它直接决定 App 退不退出，写错方向很难察觉：
+/// 太宽松会在提示消失后仍然一滑就退，太严格则永远退不出去。
+bool isSecondExitAttempt(
+  DateTime? lastAttempt,
+  DateTime now,
+  Duration window,
+) {
+  if (lastAttempt == null) return false;
+  final delta = now.difference(lastAttempt);
+  // 系统时间被调整时会算出负数，按「不退出」处理更安全。
+  if (delta.isNegative) return false;
+  return delta <= window;
+}
+
 class NaviPane extends StatefulWidget {
   const NaviPane({
     required this.paneItems,
@@ -142,105 +158,39 @@ class NaviPaneState extends State<NaviPane>
     super.dispose();
   }
 
-  /// 退出确认弹窗是否正在显示，避免连续侧滑叠出好几个。
-  bool _exitConfirming = false;
-
-  /// 已经在最底层了还返回：先确认一次再退出。
+  /// 上一次弹出「再按一次退出」的时间戳。
   ///
   /// 侧滑返回在根页面上会直接结束进程，手滑一下就关掉整个 App 太重了，
-  /// 统一拦一层确认。
-  Future<void> _confirmExit() async {
+  /// 所以第一次返回只提示、不退出；提示还亮着的时候再返回一次才真的退出。
+  ///
+  /// 这里记时间戳而不是「提示是否在显示」：提示由 Overlay 自己管生命周期
+  /// （淡出还要 160ms），手势判断只需要一个干净的时间窗口。
+  DateTime? _lastExitAttempt;
+
+  static const Duration _kExitConfirmWindow = Duration(seconds: 2);
+
+  void _confirmExit() {
     // 只有 Android 有系统返回手势和返回键，其它平台不会走到这里。
-    if (_exitConfirming || !App.isAndroid) {
+    if (!App.isAndroid) {
       return;
     }
+    final now = DateTime.now();
+    if (isSecondExitAttempt(_lastExitAttempt, now, _kExitConfirmWindow)) {
+      _lastExitAttempt = null;
+      SystemNavigator.pop();
+      return;
+    }
+    _lastExitAttempt = now;
     final rootContext = App.rootContext;
     if (!rootContext.mounted) {
       return;
     }
-    _exitConfirming = true;
-    final confirmed = await showDialog<bool>(
-      context: rootContext,
-      builder: (dialogContext) {
-        // 退出确认弹窗。
-        //
-        // 之前直接套通用 ContentDialog，只有一行字加两个文字按钮，看起来
-        // 像个半成品。按 Material 3 的确认对话框排版重做：图标 + 标题 +
-        // 说明文字，两个按钮等宽并排，退出用警示色（error）突出分量。
-        var colorScheme = Theme.of(dialogContext).colorScheme;
-        return Dialog(
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(24),
-          ),
-          backgroundColor: colorScheme.surface,
-          child: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 28),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                Center(
-                  child: Container(
-                    width: 64,
-                    height: 64,
-                    decoration: BoxDecoration(
-                      color: colorScheme.errorContainer,
-                      shape: BoxShape.circle,
-                    ),
-                    child: Icon(
-                      Icons.exit_to_app_rounded,
-                      size: 28,
-                      color: colorScheme.onErrorContainer,
-                    ),
-                  ),
-                ),
-                const SizedBox(height: 16),
-                Text(
-                  "Exit".tl,
-                  textAlign: TextAlign.center,
-                  style: const TextStyle(
-                    fontSize: 16,
-                    fontWeight: FontWeight.w600,
-                  ),
-                ),
-                const SizedBox(height: 8),
-                Text(
-                  "Are you sure you want to exit?".tl,
-                  textAlign: TextAlign.center,
-                  style: TextStyle(
-                    fontSize: 13,
-                    color: colorScheme.outline,
-                  ),
-                ),
-                const SizedBox(height: 24),
-                Row(
-                  children: [
-                    Expanded(
-                      child: Button.outlined(
-                        onPressed: () => Navigator.pop(dialogContext, false),
-                        child: Text("Cancel".tl),
-                      ),
-                    ),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Button.filled(
-                        color: colorScheme.error,
-                        onPressed: () => Navigator.pop(dialogContext, true),
-                        child: Text("Exit".tl),
-                      ),
-                    ),
-                  ],
-                ),
-              ],
-            ),
-          ),
-        );
-      },
+    // 小红书那种：屏幕中间一行字，不铺遮罩、不要按钮。
+    showCenterHint(
+      rootContext,
+      "Press back again to exit".tl,
+      duration: _kExitConfirmWindow,
     );
-    _exitConfirming = false;
-    if (confirmed == true) {
-      SystemNavigator.pop();
-    }
   }
 
   double targetFormContext(BuildContext context) {

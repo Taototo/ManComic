@@ -141,9 +141,15 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
       }
       if (text.trim().isEmpty) continue;
       tags.add(text);
-      if (tags.length == 4) break;
+      if (tags.length == 3) break;
     }
     final source = ComicSource.find(comic.sourceKey)?.name;
+    final meta = [
+      if (comic.subtitle != null && comic.subtitle!.trim().isNotEmpty)
+        comic.subtitle!,
+      if (source != null) source,
+    ].join(' · ');
+    final description = comic.description.trim();
 
     return Material(
       type: MaterialType.transparency,
@@ -163,144 +169,230 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
           behavior: HitTestBehavior.opaque,
           onTap: widget.onDismiss,
           child: ColoredBox(
-            color: Colors.black.withValues(alpha: 0.38),
+            // 遮罩比纯弹窗那版浅得多：液态玻璃要靠背后的列表成像，
+            // 压太黑就只剩一块灰板，玻璃感全没了。
+            color: Colors.black.withValues(alpha: 0.28),
             child: Center(
               child: GestureDetector(
                 onTap: () {},
                 child: Container(
-                  width: math.min(MediaQuery.sizeOf(context).width * 0.84, 340),
-                  margin: const EdgeInsets.symmetric(horizontal: 24),
-                  decoration: BoxDecoration(
-                    color: cs.surface,
-                    borderRadius: BorderRadius.circular(20),
-                    boxShadow: [
-                      BoxShadow(
-                        color: Colors.black.withValues(alpha: 0.22),
-                        blurRadius: 28,
-                        offset: const Offset(0, 12),
-                      ),
-                    ],
-                  ),
-                  clipBehavior: Clip.antiAlias,
-                  child: Column(
-                    mainAxisSize: MainAxisSize.min,
-                    crossAxisAlignment: CrossAxisAlignment.stretch,
-                    children: [
-                      SizedBox(
-                        height: 200,
-                        child: image == null
-                            ? ColoredBox(color: cs.surfaceContainerHighest)
-                            // 注意不要加 cacheWidth：列表里的封面就是用
-                            // 同一个 provider 全尺寸解码进缓存的，加
-                            // cacheWidth 会换成 ResizeImage 的新缓存键，
-                            // 首帧要重新解码，闪一下灰底。
-                            : AnimatedImage(
-                                image: image,
-                                cacheWidth: kCoverDecodeWidth,
-                                fit: BoxFit.cover,
-                                filterQuality: FilterQuality.medium,
+                  width: math.min(MediaQuery.sizeOf(context).width * 0.86, 344),
+                  margin: const EdgeInsets.symmetric(horizontal: 20),
+                  child: LiquidGlass(
+                    borderRadius: BorderRadius.circular(28),
+                    opacity: 0.72,
+                    blur: 34,
+                    child: Padding(
+                      padding: const EdgeInsets.all(14),
+                      child: Column(
+                        mainAxisSize: MainAxisSize.min,
+                        crossAxisAlignment: CrossAxisAlignment.stretch,
+                        children: [
+                          Row(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // 封面回到 3:4 竖版。之前是固定 200 高、铺满整个
+                              // 卡片宽度，等于把竖版封面裁成 1.7:1 的横条，
+                              // 画面主体经常被切掉。
+                              SizedBox(
+                                width: 104,
+                                child: AspectRatio(
+                                  aspectRatio: 3 / 4,
+                                  child: DecoratedBox(
+                                    decoration: BoxDecoration(
+                                      borderRadius: BorderRadius.circular(16),
+                                      boxShadow: [
+                                        BoxShadow(
+                                          color: Colors.black.withValues(
+                                            alpha: 0.26,
+                                          ),
+                                          blurRadius: 16,
+                                          offset: const Offset(0, 6),
+                                        ),
+                                      ],
+                                    ),
+                                    child: ClipRRect(
+                                      borderRadius: BorderRadius.circular(16),
+                                      child: image == null
+                                          ? ColoredBox(
+                                              color:
+                                                  cs.surfaceContainerHighest,
+                                            )
+                                          // 注意不要加 cacheWidth：列表里的封面就是用
+                                          // 同一个 provider 全尺寸解码进缓存的，加
+                                          // cacheWidth 会换成 ResizeImage 的新缓存键，
+                                          // 首帧要重新解码，闪一下灰底。
+                                          : AnimatedImage(
+                                              image: image,
+                                              cacheWidth: kCoverDecodeWidth,
+                                              fit: BoxFit.cover,
+                                              filterQuality:
+                                                  FilterQuality.medium,
+                                            ),
+                                    ),
+                                  ),
+                                ),
                               ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(16, 12, 16, 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
+                              const SizedBox(width: 14),
+                              Expanded(
+                                child: Column(
+                                  crossAxisAlignment: CrossAxisAlignment.start,
+                                  mainAxisSize: MainAxisSize.min,
+                                  children: [
+                                    Text(
+                                      comic.title,
+                                      maxLines: 2,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: ts.s16.copyWith(
+                                        fontWeight: FontWeight.w600,
+                                        height: 1.25,
+                                      ),
+                                    ),
+                                    if (meta.isNotEmpty) ...[
+                                      const SizedBox(height: 6),
+                                      Text(
+                                        meta,
+                                        maxLines: 1,
+                                        overflow: TextOverflow.ellipsis,
+                                        style: ts.s10.copyWith(fontSize: 11).withColor(
+                                          cs.onSurfaceVariant,
+                                        ),
+                                      ),
+                                    ],
+                                    if (tags.isNotEmpty) ...[
+                                      const SizedBox(height: 10),
+                                      Wrap(
+                                        spacing: 6,
+                                        runSpacing: 6,
+                                        children: tags
+                                            .map((t) => _PeekTag(text: t))
+                                            .toList(),
+                                      ),
+                                    ],
+                                  ],
+                                ),
+                              ),
+                            ],
+                          ),
+                          if (description.isNotEmpty) ...[
+                            const SizedBox(height: 12),
                             Text(
-                              comic.title,
+                              description,
                               maxLines: 2,
                               overflow: TextOverflow.ellipsis,
-                              style: ts.s16.copyWith(
-                                fontWeight: FontWeight.w600,
-                              ),
-                            ),
-                            if (source != null || comic.subtitle != null) ...[
-                              const SizedBox(height: 4),
-                              Text(
-                                [
-                                  if (comic.subtitle != null &&
-                                      comic.subtitle!.trim().isNotEmpty)
-                                    comic.subtitle!,
-                                  if (source != null) source,
-                                ].join(' · '),
-                                maxLines: 1,
-                                overflow: TextOverflow.ellipsis,
-                                style:
-                                    ts.s10.copyWith(fontSize: 11).withColor(cs.onSurfaceVariant),
-                              ),
-                            ],
-                            if (tags.isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Wrap(
-                                spacing: 6,
-                                runSpacing: 6,
-                                children: tags
-                                    .map(
-                                      (t) => Container(
-                                        padding: const EdgeInsets.symmetric(
-                                          horizontal: 8,
-                                          vertical: 2,
-                                        ),
-                                        decoration: BoxDecoration(
-                                          color: cs.secondaryContainer
-                                              .withValues(alpha: 0.7),
-                                          borderRadius:
-                                              BorderRadius.circular(20),
-                                        ),
-                                        child: Text(t, style: ts.s10),
-                                      ),
-                                    )
-                                    .toList(),
-                              ),
-                            ],
-                            if (comic.description.trim().isNotEmpty) ...[
-                              const SizedBox(height: 8),
-                              Text(
-                                comic.description,
-                                maxLines: 3,
-                                overflow: TextOverflow.ellipsis,
-                                style: ts.s10.copyWith(fontSize: 11).withColor(
-                                  cs.onSurfaceVariant.withValues(alpha: 0.85),
-                                ),
-                              ),
-                            ],
-                          ],
-                        ),
-                      ),
-                      Padding(
-                        padding: const EdgeInsets.fromLTRB(12, 0, 12, 12),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Button.normal(
-                                onPressed: _openDetails,
-                                child: Text("Details".tl),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: Button.normal(
-                                onPressed: _searchOtherSources,
-                                child: Text("Sources".tl),
-                              ),
-                            ),
-                            const SizedBox(width: 8),
-                            Expanded(
-                              child: KeyedSubtree(
-                                key: _moreKey,
-                                child: Button.normal(
-                                  onPressed: _openMenu,
-                                  child: Text("More".tl),
-                                ),
+                              style: ts.s10.copyWith(fontSize: 11, height: 1.5).withColor(
+                                cs.onSurfaceVariant.withValues(alpha: 0.9),
                               ),
                             ),
                           ],
-                        ),
+                          const SizedBox(height: 14),
+                          Row(
+                            children: [
+                              Expanded(
+                                child: _PeekAction(
+                                  label: "Details".tl,
+                                  onPressed: _openDetails,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _PeekAction(
+                                  label: "Sources".tl,
+                                  onPressed: _searchOtherSources,
+                                ),
+                              ),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: KeyedSubtree(
+                                  key: _moreKey,
+                                  child: _PeekAction(
+                                    label: "More".tl,
+                                    onPressed: _openMenu,
+                                  ),
+                                ),
+                              ),
+                            ],
+                          ),
+                        ],
                       ),
-                    ],
+                    ),
                   ),
                 ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+/// 玻璃卡片上的小标签：不用实色 secondaryContainer，
+/// 半透明 + 细描边才和玻璃底融得进去。
+class _PeekTag extends StatelessWidget {
+  const _PeekTag({required this.text});
+
+  final String text;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 3),
+      decoration: BoxDecoration(
+        color: cs.onSurface.withValues(alpha: 0.10),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(
+          color: cs.onSurface.withValues(alpha: 0.14),
+          width: 0.6,
+        ),
+      ),
+      child: Text(
+        text,
+        style: ts.s10.copyWith(
+          fontSize: 10.5,
+          color: cs.onSurface.withValues(alpha: 0.78),
+        ),
+      ),
+    );
+  }
+}
+
+/// 玻璃卡片上的动作按钮：透明底 + 细描边，替换原来实色的 Button.normal。
+class _PeekAction extends StatelessWidget {
+  const _PeekAction({required this.label, required this.onPressed});
+
+  final String label;
+
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    final cs = Theme.of(context).colorScheme;
+    return Material(
+      type: MaterialType.transparency,
+      child: InkWell(
+        borderRadius: BorderRadius.circular(14),
+        splashColor: cs.onSurface.withValues(alpha: 0.06),
+        highlightColor: cs.onSurface.withValues(alpha: 0.04),
+        onTap: onPressed,
+        child: Ink(
+          height: 40,
+          decoration: BoxDecoration(
+            color: cs.onSurface.withValues(alpha: 0.06),
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: cs.onSurface.withValues(alpha: 0.10),
+              width: 0.7,
+            ),
+          ),
+          child: Center(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 13,
+                fontWeight: FontWeight.w500,
+                color: cs.onSurface,
               ),
             ),
           ),

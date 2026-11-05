@@ -21,6 +21,132 @@ void showToast({
   Timer(Duration(seconds: seconds ?? 2), () => state?.remove(newEntry));
 }
 
+/// 屏幕中间的一行短提示，用于「再按一次退出」这类不打断操作的告知。
+///
+/// 特意用 OverlayEntry 而不是 Dialog：不铺遮罩、不拦截手势，
+/// 提示还亮着的时候，下一次侧滑照样能传到 PopScope 上去。
+OverlayEntry? _centerHintEntry;
+
+void showCenterHint(
+  BuildContext context,
+  String message, {
+  Duration duration = const Duration(seconds: 2),
+}) {
+  final overlay = Overlay.of(context, rootOverlay: true);
+  final old = _centerHintEntry;
+  if (old != null) {
+    if (old.mounted) {
+      old.remove();
+    }
+    _centerHintEntry = null;
+  }
+  late final OverlayEntry entry;
+  entry = OverlayEntry(
+    builder: (_) => _CenterHintOverlay(
+      message: message,
+      duration: duration,
+      onDone: () {
+        if (identical(_centerHintEntry, entry)) {
+          _centerHintEntry = null;
+        }
+        if (entry.mounted) {
+          entry.remove();
+        }
+      },
+    ),
+  );
+  _centerHintEntry = entry;
+  overlay.insert(entry);
+}
+
+class _CenterHintOverlay extends StatefulWidget {
+  const _CenterHintOverlay({
+    required this.message,
+    required this.duration,
+    required this.onDone,
+  });
+
+  final String message;
+
+  final Duration duration;
+
+  final VoidCallback onDone;
+
+  @override
+  State<_CenterHintOverlay> createState() => _CenterHintOverlayState();
+}
+
+class _CenterHintOverlayState extends State<_CenterHintOverlay>
+    with SingleTickerProviderStateMixin {
+  late final AnimationController _controller = AnimationController(
+    vsync: this,
+    duration: const Duration(milliseconds: 180),
+    reverseDuration: const Duration(milliseconds: 160),
+  )..forward();
+
+  Timer? _timer;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer(widget.duration, () async {
+      if (!mounted) return;
+      await _controller.reverse();
+      if (mounted) {
+        widget.onDone();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    _controller.dispose();
+    super.dispose();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final curve = CurvedAnimation(
+      parent: _controller,
+      curve: Curves.easeOutCubic,
+      reverseCurve: Curves.easeInCubic,
+    );
+    return Positioned.fill(
+      child: IgnorePointer(
+        child: Center(
+          child: FadeTransition(
+            opacity: curve,
+            child: ScaleTransition(
+              scale: Tween<double>(begin: 0.94, end: 1).animate(curve),
+              child: Container(
+                margin: const EdgeInsets.symmetric(horizontal: 32),
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 18,
+                  vertical: 11,
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.black.withValues(alpha: 0.74),
+                  borderRadius: BorderRadius.circular(12),
+                ),
+                child: Text(
+                  widget.message,
+                  textAlign: TextAlign.center,
+                  style: const TextStyle(
+                    color: Colors.white,
+                    fontSize: 13.5,
+                    height: 1.35,
+                  ),
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
 class _ToastOverlay extends StatelessWidget {
   const _ToastOverlay({required this.message, this.icon, this.trailing});
 
