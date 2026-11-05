@@ -158,22 +158,15 @@ class _NormalFavoritePageState extends State<_NormalFavoritePage> {
       loadNext: widget.data.loadNext == null
           ? null
           : (next) => widget.data.loadNext!(next),
+      builtInMenuActions: kComicMenuActionsNetworkFavorite,
       menuBuilder: (comic) {
         return [
-          MenuEntry(
-            icon: Icons.travel_explore,
-            text: "Search in other sources".tl,
-            onClick: () {
-              showSourceMatchSheet(
-                App.mainNavigatorKey?.currentContext ?? context,
-                keyword: comic.title,
-                currentSourceKey: comic.sourceKey,
-              );
-            },
-          ),
+          // 「换源」不再重复列出：长按预览卡上已有该按钮。
           MenuEntry(
             icon: Icons.delete_outline,
             text: "Remove".tl,
+            color: context.colorScheme.error,
+            isDanger: true,
             onClick: () async {
               var res = await _deleteComic(
                 comic.id,
@@ -584,22 +577,15 @@ class _FavoriteFolder extends StatelessWidget {
       loadNext: data.loadNext == null
           ? null
           : (next) => data.loadNext!(next, folderID),
+      builtInMenuActions: kComicMenuActionsNetworkFavorite,
       menuBuilder: (comic) {
         return [
-          MenuEntry(
-            icon: Icons.travel_explore,
-            text: "Search in other sources".tl,
-            onClick: () {
-              showSourceMatchSheet(
-                App.mainNavigatorKey?.currentContext ?? context,
-                keyword: comic.title,
-                currentSourceKey: comic.sourceKey,
-              );
-            },
-          ),
+          // 「换源」已在长按预览卡上，这里只留移除。
           MenuEntry(
             icon: Icons.delete_outline,
             text: "Remove".tl,
+            color: context.colorScheme.error,
+            isDanger: true,
             onClick: () async {
               var res = await _deleteComic(
                 comic.id,

@@ -23,7 +23,6 @@ import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/pages/smart_shelf_page.dart';
-import 'package:venera/pages/source_match_sheet.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/opencc.dart';

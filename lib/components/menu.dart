@@ -41,9 +41,15 @@ class _MenuRoute<T> extends PopupRoute<T> {
       left = size.width - width - 10;
     }
     var top = location.dy;
-    var height = 16 + entryHeight * entries.length;
+    // 危险动作（删除等）之前插入一条淡分隔线，把它和常规动作隔开，
+    // 顺带让长菜单有分组感。
+    final dividerCount = _dividerCount();
+    var height = 16 + entryHeight * entries.length + dividerCount * 11;
     if (top + height > size.height - 15) {
       top = size.height - height - 15;
+    }
+    if (top < 15) {
+      top = 15;
     }
     return Stack(
       children: [
@@ -64,7 +70,7 @@ class _MenuRoute<T> extends PopupRoute<T> {
                 ),
                 child: Column(
                   mainAxisSize: MainAxisSize.min,
-                  children: entries.map((e) => buildEntry(e, context)).toList(),
+                  children: _buildEntries(context),
                 ),
               ),
             ),
@@ -72,6 +78,37 @@ class _MenuRoute<T> extends PopupRoute<T> {
         ),
       ],
     );
+  }
+
+  int _dividerCount() {
+    var count = 0;
+    for (var i = 1; i < entries.length; i++) {
+      if (entries[i].isDanger && !entries[i - 1].isDanger) {
+        count++;
+      }
+    }
+    return count;
+  }
+
+  List<Widget> _buildEntries(BuildContext context) {
+    final children = <Widget>[];
+    for (var i = 0; i < entries.length; i++) {
+      final entry = entries[i];
+      if (entry.isDanger && i > 0 && !entries[i - 1].isDanger) {
+        children.add(
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+            child: Divider(
+              height: 1,
+              thickness: 0.5,
+              color: Theme.of(context).colorScheme.outlineVariant,
+            ),
+          ),
+        );
+      }
+      children.add(buildEntry(entry, context));
+    }
+    return children;
   }
 
   Widget buildEntry(MenuEntry entry, BuildContext context) {
@@ -134,5 +171,14 @@ class MenuEntry {
   final Color? color;
   final void Function() onClick;
 
-  MenuEntry({required this.text, this.icon, this.color, required this.onClick});
+  /// 破坏性动作（删除之类）：在菜单里单独成组，与常规动作之间加分隔线
+  final bool isDanger;
+
+  MenuEntry({
+    required this.text,
+    this.icon,
+    this.color,
+    this.isDanger = false,
+    required this.onClick,
+  });
 }

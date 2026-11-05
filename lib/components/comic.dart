@@ -23,6 +23,34 @@ ImageProvider? _findImageProvider(Comic comic) {
   return image;
 }
 
+/// [ComicTile] 长按菜单里由组件自己提供的通用动作。
+///
+/// 各页面需要的项并不相同：收藏页的书本来就在收藏夹里，「加入收藏」是死项；
+/// 「详情」在长按预览卡上已经是一个按钮，菜单里再出现一次就是同义重复。
+/// 调用方可以按需裁剪，避免同一个动作在一屏里出现两次。
+enum ComicMenuAction { details, copyTitle, addToFavorites, block }
+
+const Set<ComicMenuAction> kComicMenuActionsAll = {
+  ComicMenuAction.details,
+  ComicMenuAction.copyTitle,
+  ComicMenuAction.addToFavorites,
+  ComicMenuAction.block,
+};
+
+/// 收藏类页面用：书已在收藏夹，「详情 / 加收藏」由预览卡与列表承担。
+const Set<ComicMenuAction> kComicMenuActionsFavorite = {
+  ComicMenuAction.copyTitle,
+  ComicMenuAction.block,
+};
+
+/// 网络收藏夹用：详情与换源已由预览卡承担，但「加入收藏」仍有意义
+/// （源站收藏夹里的书未必已经收进本地收藏）。
+const Set<ComicMenuAction> kComicMenuActionsNetworkFavorite = {
+  ComicMenuAction.copyTitle,
+  ComicMenuAction.addToFavorites,
+  ComicMenuAction.block,
+};
+
 class ComicTile extends StatelessWidget {
   const ComicTile({
     super.key,
@@ -30,6 +58,7 @@ class ComicTile extends StatelessWidget {
     this.enableLongPressed = true,
     this.badge,
     this.menuOptions,
+    this.builtInMenuActions = kComicMenuActionsAll,
     this.onTap,
     this.onLongPressed,
     this.heroID,
@@ -39,6 +68,9 @@ class ComicTile extends StatelessWidget {
   final Comic comic;
 
   final bool enableLongPressed;
+
+  /// 长按菜单里保留哪些通用动作，默认全部保留
+  final Set<ComicMenuAction> builtInMenuActions;
 
   /// 在缩略图左上角显示最近更新时间（数据不可知时不显示）
   final bool showUpdateTime;
@@ -78,7 +110,8 @@ class ComicTile extends StatelessWidget {
     ComicPeek.show(
       context,
       comic,
-      onMenu: () => onLongPress(context),
+      // 菜单锚点由预览卡上的「更多」按钮给出：面板收起、菜单在原地展开。
+      onMenu: (anchor) => showMenu(anchor, context, fromPeek: true),
     );
   }
 
@@ -88,52 +121,61 @@ class ComicTile extends StatelessWidget {
     var location = renderBox.localToGlobal(
       Offset((size.width - 242) / 2, size.height / 2),
     );
-    showMenu(location, context);
+    showMenu(location, context, fromPeek: true);
   }
 
   void onSecondaryTap(TapDownDetails details, BuildContext context) {
     showMenu(details.globalPosition, context);
   }
 
-  void showMenu(Offset location, BuildContext context) {
+  void showMenu(Offset location, BuildContext context, {bool fromPeek = false}) {
+    final actions = builtInMenuActions;
+    // 桌面右键不经过预览卡，「详情」在那里是唯一入口，必须保留；
+    // 只有从预览卡进来时才允许按调用方的裁剪规则去掉它。
+    final showDetails =
+        actions.contains(ComicMenuAction.details) || !fromPeek;
     showMenuX(
       App.rootContext,
       location,
       [
-        MenuEntry(
-          icon: Icons.chrome_reader_mode_outlined,
-          text: 'Details'.tl,
-          onClick: () {
-            App.mainNavigatorKey?.currentContext?.to(
-              () => ComicPage(
-                id: comic.id,
-                sourceKey: comic.sourceKey,
-                cover: comic.cover,
-                title: comic.title,
-              ),
-            );
-          },
-        ),
-        MenuEntry(
-          icon: Icons.copy,
-          text: 'Copy Title'.tl,
-          onClick: () {
-            Clipboard.setData(ClipboardData(text: comic.title));
-            App.rootContext.showMessage(message: 'Title copied'.tl);
-          },
-        ),
-        MenuEntry(
-          icon: Icons.stars_outlined,
-          text: 'Add to favorites'.tl,
-          onClick: () {
-            addFavorite([comic]);
-          },
-        ),
-        MenuEntry(
-          icon: Icons.block,
-          text: 'Block'.tl,
-          onClick: () => block(context),
-        ),
+        if (showDetails)
+          MenuEntry(
+            icon: Icons.chrome_reader_mode_outlined,
+            text: 'Details'.tl,
+            onClick: () {
+              App.mainNavigatorKey?.currentContext?.to(
+                () => ComicPage(
+                  id: comic.id,
+                  sourceKey: comic.sourceKey,
+                  cover: comic.cover,
+                  title: comic.title,
+                ),
+              );
+            },
+          ),
+        if (actions.contains(ComicMenuAction.copyTitle))
+          MenuEntry(
+            icon: Icons.copy,
+            text: 'Copy Title'.tl,
+            onClick: () {
+              Clipboard.setData(ClipboardData(text: comic.title));
+              App.rootContext.showMessage(message: 'Title copied'.tl);
+            },
+          ),
+        if (actions.contains(ComicMenuAction.addToFavorites))
+          MenuEntry(
+            icon: Icons.stars_outlined,
+            text: 'Add to favorites'.tl,
+            onClick: () {
+              addFavorite([comic]);
+            },
+          ),
+        if (actions.contains(ComicMenuAction.block))
+          MenuEntry(
+            icon: Icons.block,
+            text: 'Block'.tl,
+            onClick: () => block(context),
+          ),
         ...?menuOptions,
       ],
     );
@@ -864,6 +906,7 @@ class SliverGridComics extends StatefulWidget {
       this.onLastItemBuild,
       this.badgeBuilder,
       this.menuBuilder,
+      this.builtInMenuActions = kComicMenuActionsAll,
       this.onTap,
       this.onLongPressed,
       this.showUpdateTime = false,
@@ -874,6 +917,9 @@ class SliverGridComics extends StatefulWidget {
   final bool showUpdateTime;
 
   final Map<Comic, bool>? selections;
+
+  /// 长按菜单里保留哪些通用动作
+  final Set<ComicMenuAction> builtInMenuActions;
 
   final void Function()? onLastItemBuild;
 
@@ -960,6 +1006,7 @@ class _SliverGridComicsState extends State<SliverGridComics> {
       onLastItemBuild: widget.onLastItemBuild,
       badgeBuilder: widget.badgeBuilder,
       menuBuilder: widget.menuBuilder,
+      builtInMenuActions: widget.builtInMenuActions,
       onTap: widget.onTap,
       onLongPressed: widget.onLongPressed,
       showUpdateTime: widget.showUpdateTime,
@@ -975,6 +1022,7 @@ class _SliverGridComics extends StatelessWidget {
     this.onLastItemBuild,
     this.badgeBuilder,
     this.menuBuilder,
+    this.builtInMenuActions = kComicMenuActionsAll,
     this.onTap,
     this.onLongPressed,
     this.showUpdateTime = false,
@@ -989,6 +1037,8 @@ class _SliverGridComics extends StatelessWidget {
   final DateTime epoch;
 
   final bool showUpdateTime;
+
+  final Set<ComicMenuAction> builtInMenuActions;
 
   final Map<Comic, bool>? selection;
 
@@ -1017,6 +1067,7 @@ class _SliverGridComics extends StatelessWidget {
           comic: comics[index],
           badge: badge,
           menuOptions: menuBuilder?.call(comics[index]),
+          builtInMenuActions: builtInMenuActions,
           onTap: onTap != null
               ? () => onTap!(comics[index], heroIDs[index])
               : null,
@@ -1098,6 +1149,7 @@ class ComicList extends StatefulWidget {
     this.trailingSliver,
     this.errorLeading,
     this.menuBuilder,
+    this.builtInMenuActions = kComicMenuActionsAll,
     this.controller,
     this.refreshHandlerCallback,
     this.enablePageStorage = false,
@@ -1117,6 +1169,9 @@ class ComicList extends StatefulWidget {
   final Widget? errorLeading;
 
   final List<MenuEntry> Function(Comic)? menuBuilder;
+
+  /// 长按菜单里保留哪些通用动作
+  final Set<ComicMenuAction> builtInMenuActions;
 
   final ScrollController? controller;
 
@@ -1412,6 +1467,7 @@ class ComicListState extends State<ComicList> {
         SliverGridComics(
           comics: _data[_page] ?? const [],
           menuBuilder: widget.menuBuilder,
+          builtInMenuActions: widget.builtInMenuActions,
           showUpdateTime: widget.showUpdateTime,
         ),
         if (_data[_page]!.length > 6 && _maxPage != 1)
@@ -1462,6 +1518,7 @@ class ComicListState extends State<ComicList> {
         SliverGridComics(
           comics: _data.values.expand((element) => element).toList(),
           menuBuilder: widget.menuBuilder,
+          builtInMenuActions: widget.builtInMenuActions,
           showUpdateTime: widget.showUpdateTime,
           onLastItemBuild: () {
             if (_error == null && (_maxPage == null || _data.length < _maxPage!)) {

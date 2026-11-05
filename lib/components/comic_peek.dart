@@ -13,7 +13,7 @@ class ComicPeek {
   static void show(
     BuildContext context,
     Comic comic, {
-    VoidCallback? onMenu,
+    void Function(Offset anchor)? onMenu,
   }) {
     dismiss();
     // 提前把封面送进图像缓存：封面多半刚在列表里显示过、已在内存，
@@ -61,7 +61,7 @@ class _ComicPeekLayer extends StatefulWidget {
 
   final VoidCallback onDismiss;
 
-  final VoidCallback? onMenu;
+  final void Function(Offset anchor)? onMenu;
 
   @override
   State<_ComicPeekLayer> createState() => _ComicPeekLayerState();
@@ -73,6 +73,9 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
     vsync: this,
     duration: const Duration(milliseconds: 190),
   )..forward();
+
+  /// 「更多」按钮的位置，用来把菜单锚在它下面
+  final GlobalKey _moreKey = GlobalKey();
 
   @override
   void dispose() {
@@ -94,8 +97,16 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
 
   void _openMenu() {
     final menu = widget.onMenu;
+    // 菜单锚在「更多」按钮正下方：面板收起后菜单在原地展开，
+    // 不会跳回被长按的缩略图那一侧。
+    var anchor = MediaQuery.of(context).size.center(Offset.zero);
+    final box = _moreKey.currentContext?.findRenderObject();
+    if (box is RenderBox && box.hasSize) {
+      final topLeft = box.localToGlobal(Offset.zero);
+      anchor = Offset(topLeft.dx, topLeft.dy + box.size.height + 4);
+    }
     widget.onDismiss();
-    menu?.call();
+    menu?.call(anchor);
   }
 
   /// 以这本书的书名去所有漫画源里找同名作品。
@@ -276,9 +287,12 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
                             ),
                             const SizedBox(width: 8),
                             Expanded(
-                              child: Button.normal(
-                                onPressed: _openMenu,
-                                child: Text("More".tl),
+                              child: KeyedSubtree(
+                                key: _moreKey,
+                                child: Button.normal(
+                                  onPressed: _openMenu,
+                                  child: Text("More".tl),
+                                ),
                               ),
                             ),
                           ],

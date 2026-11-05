@@ -183,6 +183,7 @@ class _SmartShelfPageState extends State<SmartShelfPage> {
                   icon: Icons.delete_outline,
                   text: "Delete".tl,
                   color: colors.error,
+                  isDanger: true,
                   onClick: () => _delete(shelves[_selected]),
                 ),
               ],

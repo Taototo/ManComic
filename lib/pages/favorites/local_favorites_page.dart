@@ -515,6 +515,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       icon: Icons.delete_outline,
                       text: "Delete Folder".tl,
                       color: context.colorScheme.error,
+                      isDanger: true,
                       onClick: () {
                         showConfirmDialog(
                           context: App.rootContext,
@@ -620,6 +621,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       icon: Icons.delete_outline,
                       text: "Delete Comic".tl,
                       color: context.colorScheme.error,
+                      isDanger: true,
                       onClick: () {
                         showConfirmDialog(
                           context: context,
@@ -682,32 +684,49 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
               searchMode ? searchResults : filterComics(comics),
             ),
             selections: selectedComics,
+            builtInMenuActions: kComicMenuActionsFavorite,
             menuBuilder: (c) {
+              // 菜单顺序按使用频率排：读 → 下载 → 选择 → 归类 → 删除。
+              // 这里不再重复「详情」「换源」——长按预览卡上已经是按钮；
+              // 也不再有「加入收藏」——书本来就在收藏夹里。删除单独成组。
               return [
-                if (!isAllFolder && !isReadFolder)
+                if (appdata.settings["onClickFavorite"] == "viewDetail")
                   MenuEntry(
-                    icon: Icons.delete,
-                    text: "Delete".tl,
+                    icon: Icons.menu_book_outlined,
+                    text: "Read".tl,
                     onClick: () {
-                      LocalFavoritesManager().deleteComicWithId(
-                        widget.folder,
-                        c.id,
-                        (c as FavoriteItem).type,
+                      App.mainNavigatorKey?.currentContext?.to(
+                        () =>
+                            ReaderWithLoading(id: c.id, sourceKey: c.sourceKey),
                       );
                     },
                   ),
-                if (isReadFolder)
-                  MenuEntry(
-                    icon: Icons.delete,
-                    text: "Delete".tl,
-                    onClick: () {
-                      LocalFavoritesManager().deleteComicWithId(
-                        LocalFavoritesManager.readFolderName,
-                        c.id,
-                        (c as FavoriteItem).type,
-                      );
-                    },
-                  ),
+                MenuEntry(
+                  icon: Icons.download,
+                  text: "Download".tl,
+                  onClick: () {
+                    downloadComic(c as FavoriteItem);
+                    context.showMessage(message: "Download started".tl);
+                  },
+                ),
+                MenuEntry(
+                  icon: Icons.check,
+                  text: "Select".tl,
+                  onClick: () {
+                    setState(() {
+                      if (!multiSelectMode) {
+                        multiSelectMode = true;
+                      }
+                      if (selectedComics.containsKey(c as FavoriteItem)) {
+                        selectedComics.remove(c);
+                        _checkExitSelectMode();
+                      } else {
+                        selectedComics[c] = true;
+                      }
+                      lastSelectedIndex = comics.indexOf(c);
+                    });
+                  },
+                ),
                 if (!isAllFolder && !isReadFolder)
                   MenuEntry(
                     icon: Icons.done_all,
@@ -733,53 +752,19 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       favoriteOption('moveFromRead');
                     },
                   ),
-                MenuEntry(
-                  icon: Icons.check,
-                  text: "Select".tl,
-                  onClick: () {
-                    setState(() {
-                      if (!multiSelectMode) {
-                        multiSelectMode = true;
-                      }
-                      if (selectedComics.containsKey(c as FavoriteItem)) {
-                        selectedComics.remove(c);
-                        _checkExitSelectMode();
-                      } else {
-                        selectedComics[c] = true;
-                      }
-                      lastSelectedIndex = comics.indexOf(c);
-                    });
-                  },
-                ),
-                MenuEntry(
-                  icon: Icons.travel_explore,
-                  text: "Search in other sources".tl,
-                  onClick: () {
-                    showSourceMatchSheet(
-                      App.mainNavigatorKey?.currentContext ?? context,
-                      keyword: c.title,
-                      currentSourceKey: c.sourceKey,
-                      ownerSourceKey: c.sourceKey,
-                      ownerId: c.id,
-                    );
-                  },
-                ),
-                MenuEntry(
-                  icon: Icons.download,
-                  text: "Download".tl,
-                  onClick: () {
-                    downloadComic(c as FavoriteItem);
-                    context.showMessage(message: "Download started".tl);
-                  },
-                ),
-                if (appdata.settings["onClickFavorite"] == "viewDetail")
+                if (!isAllFolder)
                   MenuEntry(
-                    icon: Icons.menu_book_outlined,
-                    text: "Read".tl,
+                    icon: Icons.delete_outline,
+                    text: "Delete".tl,
+                    color: context.colorScheme.error,
+                    isDanger: true,
                     onClick: () {
-                      App.mainNavigatorKey?.currentContext?.to(
-                        () =>
-                            ReaderWithLoading(id: c.id, sourceKey: c.sourceKey),
+                      LocalFavoritesManager().deleteComicWithId(
+                        isReadFolder
+                            ? LocalFavoritesManager.readFolderName
+                            : widget.folder,
+                        c.id,
+                        (c as FavoriteItem).type,
                       );
                     },
                   ),
