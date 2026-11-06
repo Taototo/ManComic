@@ -56,7 +56,6 @@ class DirectionalIndexedStack extends StatelessWidget {
   }
 }
 
-
 ///
 /// 只在该页首次拿到数据后的 [window] 时间内播放。这样刷新/首次进入有
 /// 层次感，而滚动回来重建的格子（尤其是长列表深处）不会再放一遍，
@@ -97,8 +96,7 @@ class StaggerIn extends StatefulWidget {
 
 class _StaggerInState extends State<StaggerIn>
     with SingleTickerProviderStateMixin {
-  late final bool _animate =
-      widget.enabled && widget.index < widget.maxIndex;
+  late final bool _animate = widget.enabled && widget.index < widget.maxIndex;
 
   late final Duration _delay = widget.step * widget.index;
 
@@ -444,6 +442,83 @@ class LiquidGlass extends StatelessWidget {
   }
 }
 
+/// 页面级的背景光斑，给液态玻璃提供「后面有东西」的环境。
+///
+/// 玻璃的本质是模糊它下面的内容。如果页面底色是一块纯色，模糊完还是纯色，
+/// 卡片就只剩描边和高光，看着像一片塑料。这里铺两三个大范围的低饱和色斑，
+/// 玻璃从色斑上方经过时才有折射感，卡片之间也会因为底色不同而分出层次。
+///
+/// 只该放在 `Stack` 的最底层，且必须 `Positioned.fill`。
+class GlassPageBackdrop extends StatelessWidget {
+  const GlassPageBackdrop({super.key, this.intensity = 1.0});
+
+  /// 整体浓淡，1.0 为默认。背景本身很花（比如漫画封面墙）时调低。
+  final double intensity;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final base = isDark ? 1.6 : 1.0;
+    return IgnorePointer(
+      child: RepaintBoundary(
+        child: Stack(
+          children: [
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  color: colors.surface,
+                  gradient: RadialGradient(
+                    center: const Alignment(-1.05, -1.15),
+                    radius: 1.35,
+                    colors: [
+                      colors.primary.withValues(
+                        alpha: (isDark ? 0.30 : 0.28) * intensity * base,
+                      ),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: const Alignment(1.15, 1.05),
+                    radius: 1.2,
+                    colors: [
+                      colors.tertiary.withValues(
+                        alpha: (isDark ? 0.23 : 0.21) * intensity * base,
+                      ),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  gradient: RadialGradient(
+                    center: const Alignment(0.9, -0.75),
+                    radius: 0.85,
+                    colors: [
+                      colors.secondary.withValues(
+                        alpha: (isDark ? 0.17 : 0.15) * intensity * base,
+                      ),
+                      Colors.transparent,
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
 
 /// 全局毛玻璃（玻璃拟态）外观配置。
 ///
