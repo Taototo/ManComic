@@ -39,6 +39,96 @@ bool shouldOfferPendingUpdate({
   return compareVersion(version, currentVersion);
 }
 
+/// 下载期间的原生前台服务。
+///
+/// 只做两件事：把进程提到前台优先级、在通知栏挂一条进度。真正收字节的还是这里
+/// 的 Dio 循环，所以断点续传、校验、重试都不受影响。
+///
+/// 没有它的话，切回桌面一段时间后进程可能被系统冻结甚至回收，下载就停在那儿；
+/// 有了前台服务，切桌面、锁屏都继续下，通知栏能实时看到百分比。用户从最近任务
+/// 里划掉应用等于关掉 App，服务随任务结束（manifest 里 stopWithTask）。
+class _ForegroundDownload {
+  static const _channel = MethodChannel("venera/method_channel");
+
+  bool _running = false;
+
+  String _version = "";
+
+  int _lastPercent = -1;
+
+  int _lastPushMs = 0;
+
+  /// 启动前台服务。非 Android 平台（桌面端、widget 测试）直接跳过。
+  void start(String version) {
+    if (!Platform.isAndroid || _running) {
+      return;
+    }
+    _running = true;
+    _version = version;
+    _lastPercent = -1;
+    _lastPushMs = 0;
+    unawaited(_begin());
+  }
+
+  Future<void> _begin() async {
+    // 通知权限没给的话服务照样在跑，但用户看不到进度，所以顺手问一次。
+    // 被拒绝也继续下载，不让权限挡住更新。
+    try {
+      if (!await NotificationService.hasPermission()) {
+        await NotificationService.requestPermission();
+      }
+    } catch (_) {}
+    await _invoke("startUpdateDownloadService", {
+      "title": "Downloading update".tl,
+      "text": "V$_version",
+      "progress": -1,
+    });
+  }
+
+  /// 刷新通知栏进度。一秒一次足够，刷太快既费电也会被系统限流。
+  void update(double received, double total, double speed) {
+    if (!_running) {
+      return;
+    }
+    var percent = total > 0 ? (received / total * 100).floor() : -1;
+    var now = DateTime.now().millisecondsSinceEpoch;
+    if (now - _lastPushMs < 1000 || percent == _lastPercent) {
+      return;
+    }
+    _lastPercent = percent;
+    _lastPushMs = now;
+    var detail = <String>[
+      "V$_version",
+      percent >= 0 ? "$percent%" : "${_toMb(received)} MB",
+      if (speed > 0) "${_toMb(speed)} MB/s",
+    ].join(" · ");
+    unawaited(
+      _invoke("updateUpdateDownloadService", {
+        "title": "Downloading update".tl,
+        "text": detail,
+        "progress": percent,
+      }),
+    );
+  }
+
+  Future<void> stop() async {
+    if (!_running) {
+      return;
+    }
+    _running = false;
+    _lastPercent = -1;
+    await _invoke("stopUpdateDownloadService", const {});
+  }
+
+  Future<void> _invoke(String method, Map<String, Object?> args) async {
+    try {
+      await _channel.invokeMethod<bool>(method, args);
+    } catch (e, s) {
+      Log.error("Check Update", "Background service $method failed: $e", s);
+    }
+  }
+}
+
 /// 应用更新的下载任务，全局唯一。
 ///
 /// 关键点是**下载不挂在弹窗上**：进度、取消令牌、目标路径都在这里，
@@ -68,6 +158,12 @@ class UpdateDownloadController extends ChangeNotifier {
   CancelToken? _cancelToken;
 
   bool _cancelled = false;
+
+  /// 收到「立即安装」后可能同时被按钮和整行的点击各触发一次，
+  /// 真连点两下会拉起两个系统安装框，用这个标记挡住。
+  bool _installing = false;
+
+  final _background = _ForegroundDownload();
 
   DialogRoute<void>? _dialogRoute;
 
@@ -143,6 +239,9 @@ class UpdateDownloadController extends ChangeNotifier {
         await apkFile.delete();
       }
 
+      // 从这里开始才真正收字节：挂前台服务，切到桌面、锁屏都不中断
+      _background.start(info.version);
+
       for (var attempt = 0;; attempt++) {
         try {
           await _downloadApk(info, partPath, _onProgress, cancelToken);
@@ -217,6 +316,9 @@ class UpdateDownloadController extends ChangeNotifier {
       minimized = false;
       notifyListeners();
       _toast("Download failed".tl);
+    } finally {
+      // 成功、失败、取消都要撤掉前台服务，通知栏不能留一条僵尸进度
+      await _background.stop();
     }
   }
 
@@ -256,13 +358,21 @@ class UpdateDownloadController extends ChangeNotifier {
 
   /// 拉起系统安装器安装已下载的包。
   Future<void> install(PendingUpdate p) async {
-    if (!await File(p.path).exists()) {
-      await _discardPending();
-      _toast("The update package is missing, please download again".tl);
+    if (_installing) {
       return;
     }
-    if (!await _installApk(p.path)) {
-      _toast("Unable to start the installer".tl);
+    _installing = true;
+    try {
+      if (!await File(p.path).exists()) {
+        await _discardPending();
+        _toast("The update package is missing, please download again".tl);
+        return;
+      }
+      if (!await _installApk(p.path)) {
+        _toast("Unable to start the installer".tl);
+      }
+    } finally {
+      _installing = false;
     }
   }
 
@@ -367,6 +477,7 @@ class UpdateDownloadController extends ChangeNotifier {
     this.total = total.toDouble();
     this.speed = speed;
     notifyListeners();
+    _background.update(this.received, this.total, speed);
   }
 
   void _openProgressDialog() {

@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
+import 'package:venera/components/components.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/translations.dart';
 
@@ -95,5 +96,28 @@ void main() {
     );
     await tester.pump(const Duration(milliseconds: 300));
     expect(tester.takeException(), isNull);
+  });
+
+  testWidgets('关于页安装入口：按钮不侵占标题宽度', (tester) async {
+    await tester.binding.setSurfaceSize(const Size(360, 720));
+    var previous = updateDownload.pending;
+    updateDownload.pending = const PendingUpdate(
+      version: "1.4.18",
+      path: "/tmp/ManComic-1.4.18.apk",
+      size: 51850225,
+    );
+    addTearDown(() => updateDownload.pending = previous);
+
+    await tester.pumpWidget(wrap(const UpdateEntryTile()));
+    await tester.pumpAndSettle();
+    expect(tester.takeException(), isNull);
+    expect(find.text("Install update"), findsOneWidget);
+    expect(find.text("Install"), findsOneWidget);
+
+    // 标题必须是一整行：被 trailing 挤没宽度时 Text 会退化成「一字一行」，
+    // 渲染出来的宽度只剩一个字的宽度（测试字体里等于字号）。
+    expect(tester.getSize(find.text("Install update")).width, greaterThan(100));
+    // 按钮按内容宽度收缩，不能撑满整行
+    expect(tester.getSize(find.byType(Button)).width, lessThan(180));
   });
 }

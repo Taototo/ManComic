@@ -146,48 +146,7 @@ class _AboutSettingsState extends State<AboutSettings> {
           ).toSliver(),
           // 下载与安装的入口。下载中显示实时进度（点开可以回到大卡片），
           // 下载完没装则显示「安装」按钮——选过「稍后安装」的用户就是从这里装。
-          ListenableBuilder(
-            listenable: updateDownload,
-            builder: (context, _) {
-              if (updateDownload.isDownloading) {
-                var received = updateDownload.received;
-                var total = updateDownload.total;
-                return ListTile(
-                  contentPadding: kSettingTilePaddingOf(context),
-                  title: Text("Downloading update".tl),
-                  subtitle: Text(
-                    total > 0
-                        ? "${(updateDownload.progress * 100).toStringAsFixed(0)}%"
-                            " · ${_toMb(received)} / ${_toMb(total)} MB"
-                        : "${_toMb(received)} MB",
-                  ),
-                  trailing: Icon(
-                    Icons.open_in_full_rounded,
-                    size: 18,
-                    color: Theme.of(
-                      context,
-                    ).colorScheme.onSurface.withValues(alpha: 0.5),
-                  ),
-                  onTap: updateDownload.expand,
-                );
-              }
-              var pending = updateDownload.pending;
-              if (pending == null) {
-                return const SizedBox.shrink();
-              }
-              return ListTile(
-                contentPadding: kSettingTilePaddingOf(context),
-                title: Text("Install update".tl),
-                subtitle: Text("V${pending.version} · ${pending.sizeLabel}"),
-                trailing: Button.filled(
-                  height: 32,
-                  onPressed: () => updateDownload.install(pending),
-                  child: Text("Install".tl),
-                ).fixHeight(32),
-                onTap: () => updateDownload.install(pending),
-              );
-            },
-          ).toSliver(),
+          const UpdateEntryTile().toSliver(),
           _SwitchSetting(
             title: "Check for updates on startup".tl,
             settingKey: "checkUpdateOnStart",
@@ -228,6 +187,64 @@ class _AboutSettingsState extends State<AboutSettings> {
             ).toSliver(),
         ],
       ),
+    );
+  }
+}
+
+/// 关于页里的下载/安装入口。
+///
+/// 下载中显示实时进度（点一下回到大卡片）；下载完还没装则显示「安装」按钮。
+/// 没有下载任务时整行不占位，也不会多出一条空行。
+class UpdateEntryTile extends StatelessWidget {
+  const UpdateEntryTile({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    var padding = kSettingTilePaddingOf(context);
+    return ListenableBuilder(
+      listenable: updateDownload,
+      builder: (context, _) {
+        if (updateDownload.isDownloading) {
+          var received = updateDownload.received;
+          var total = updateDownload.total;
+          return ListTile(
+            contentPadding: padding,
+            title: Text("Downloading update".tl),
+            subtitle: Text(
+              total > 0
+                  ? "${(updateDownload.progress * 100).toStringAsFixed(0)}%"
+                      " · ${_toMb(received)} / ${_toMb(total)} MB"
+                  : "${_toMb(received)} MB",
+            ),
+            trailing: Icon(
+              Icons.open_in_full_rounded,
+              size: 18,
+              color: Theme.of(
+                context,
+              ).colorScheme.onSurface.withValues(alpha: 0.5),
+            ),
+            onTap: updateDownload.expand,
+          );
+        }
+        var pending = updateDownload.pending;
+        if (pending == null) {
+          return const SizedBox.shrink();
+        }
+        return ListTile(
+          contentPadding: padding,
+          title: Text("Install update".tl),
+          subtitle: Text("V${pending.version} · ${pending.sizeLabel}"),
+          // 关键：不要给 Button 传 height/width。Button 内部遇到这两个参数会把
+          // 内容包一层 Center，而 Center 在松约束下会撑满可用宽度，trailing
+          // 就吃掉整行，标题被挤成一字一行。高度交给外层 fixHeight 控制，
+          // Button 自己按内容宽度收缩。
+          trailing: Button.filled(
+            onPressed: () => updateDownload.install(pending),
+            child: Text("Install".tl),
+          ).fixHeight(32),
+          onTap: () => updateDownload.install(pending),
+        );
+      },
     );
   }
 }

@@ -192,6 +192,32 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
 
+                "startUpdateDownloadService" -> {
+                    // 应用内更新：下载期间挂前台服务，回到桌面也不会被系统冻结
+                    UpdateDownloadService.start(
+                        this,
+                        call.argument<String>("title") ?: "Downloading update",
+                        call.argument<String>("text") ?: "",
+                        call.argument<Int>("progress") ?: -1
+                    )
+                    res.success(true)
+                }
+
+                "updateUpdateDownloadService" -> {
+                    UpdateDownloadService.update(
+                        this,
+                        call.argument<String>("title") ?: "Downloading update",
+                        call.argument<String>("text") ?: "",
+                        call.argument<Int>("progress") ?: -1
+                    )
+                    res.success(true)
+                }
+
+                "stopUpdateDownloadService" -> {
+                    UpdateDownloadService.stop(this)
+                    res.success(true)
+                }
+
                 "getDirectoryPath" -> {
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)

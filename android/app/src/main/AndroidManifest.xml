@@ -7,6 +7,9 @@
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <!-- 应用内更新：允许拉起系统安装器安装下载好的 APK -->
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES"/>
+    <!-- 应用内更新：下载期间挂前台服务，回到桌面/锁屏也不被系统冻结 -->
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_DATA_SYNC"/>
     <application
         android:label="ManComic"
         android:name="${applicationName}"
@@ -21,6 +24,13 @@
                 android:name="android.support.FILE_PROVIDER_PATHS"
                 android:resource="@xml/file_paths"/>
         </provider>
+        <!-- 应用内更新：下载期间的前台服务。stopWithTask 让「从最近任务划掉」
+             等同于关闭 App——服务和下载都停，半成品保留供下次续传。 -->
+        <service
+            android:name=".UpdateDownloadService"
+            android:exported="false"
+            android:foregroundServiceType="dataSync"
+            android:stopWithTask="true"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"
