@@ -316,10 +316,16 @@ class ComicTile extends StatelessWidget {
               ),
             ),
           ),
+        // 更新时间放在左下角。
+        //
+        // 它原来在左上角（left 4 / top 4），而「已收藏」和「阅读进度」那组
+        // 角标画在 left 6 / top 8 的另一层 Stack 里——两块都是描左上角，
+        // 进度角标一出现就把更新时间整块盖住，等于有阅读记录的漫画永远看不
+        // 到更新时间。挪到底部、压在进度条上方，两边的角标各占一个角。
         if (updateText != null)
           Positioned(
             left: 4,
-            top: 4,
+            bottom: 7,
             child: Container(
               padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
               decoration: BoxDecoration(

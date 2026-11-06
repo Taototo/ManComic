@@ -39,6 +39,18 @@ class _MainPageState extends State<MainPage> {
   /// 这里做一次性的索引迁移，避免老用户启动后落到错误的页面。
   static const _kNavMergedCategoriesKey = "navMergedCategories";
 
+  /// 底栏顺序：推荐 / 主页 / 收藏。
+  ///
+  /// 注意 [appdata.settings] 里的 `initialPage` 存的是「哪一页」而不是下标
+  /// （0 主页、1 推荐、2 收藏），设置页的文案也是按这个编号写的。底栏换了
+  /// 顺序以后两者不再相等，所以这里必须显式映射一次，不能直接把存下来的
+  /// 数字当索引用——否则老用户开机会落到隔壁那一页。
+  static const _tabExplore = 0;
+
+  static const _tabHome = 1;
+
+  static const _tabFavorites = 2;
+
   int resolveInitialPage() {
     var saved = int.tryParse(appdata.settings['initialPage'].toString()) ?? 0;
     if (appdata.settings[_kNavMergedCategoriesKey] != "1") {
@@ -51,7 +63,11 @@ class _MainPageState extends State<MainPage> {
       appdata.settings[_kNavMergedCategoriesKey] = "1";
       appdata.saveData();
     }
-    return saved.clamp(0, 2);
+    return switch (saved) {
+      1 => _tabExplore,
+      2 => _tabFavorites,
+      _ => _tabHome,
+    };
   }
 
   @override
@@ -64,10 +80,10 @@ class _MainPageState extends State<MainPage> {
   }
 
   final _pages = [
-    const HomePage(),
     const ExplorePage(
       key: PageStorageKey('explore'),
     ),
+    const HomePage(),
     const FavoritesPage(
       key: PageStorageKey('favorites'),
     ),
@@ -83,14 +99,14 @@ class _MainPageState extends State<MainPage> {
       navigatorKey: _navigatorKey!,
       paneItems: [
         PaneItemEntry(
-          label: 'Home'.tl,
-          icon: Icons.home_outlined,
-          activeIcon: Icons.home,
-        ),
-        PaneItemEntry(
           label: 'Explore'.tl,
           icon: Icons.explore_outlined,
           activeIcon: Icons.explore,
+        ),
+        PaneItemEntry(
+          label: 'Home'.tl,
+          icon: Icons.home_outlined,
+          activeIcon: Icons.home,
         ),
         PaneItemEntry(
           label: 'Favorites'.tl,
@@ -104,7 +120,7 @@ class _MainPageState extends State<MainPage> {
         });
       },
       paneActions: [
-        if (index != 0)
+        if (index != _tabHome)
           PaneActionEntry(
             icon: Icons.search,
             label: "Search".tl,
@@ -118,7 +134,7 @@ class _MainPageState extends State<MainPage> {
         // 基本就不再动了；而「详细 / 简洁」是「一张卡显示多少信息」，翻两页
         // 就想换一次——后者才是高频操作，放到顶栏才合理。布局本身仍在
         // 设置 - 界面 里。
-        if (index == 1)
+        if (index == _tabExplore)
           PaneActionEntry(
             icon: (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
                     'detailed'
@@ -150,7 +166,7 @@ class _MainPageState extends State<MainPage> {
             },
           ),
         // 年度阅读报告入口 - 仅首页显示，放在设置按钮旁边
-        if (index == 0)
+        if (index == _tabHome)
           PaneActionEntry(
             icon: Icons.insights_rounded,
             label: "Reading Report".tl,

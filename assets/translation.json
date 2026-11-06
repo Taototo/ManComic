@@ -537,7 +537,6 @@
     "Reading time (short to long)": "阅读时长（从短到长）",
     "Title A-Z": "标题 A-Z",
     "Title Z-A": "标题 Z-A",
-    "Today, last 7 days, all time and comics read recently": "今天、最近 7 天、全部时长，以及最近读过的作品",
     "No detail available for old records": "旧记录没有漫画 ID，无法跳转详情",
     "Less than a minute": "不到 1 分钟",
     "@m min": "@m 分钟",
@@ -732,7 +731,6 @@
     "Download the APK directly, or open the release page in a browser.": "将直接下载 APK 安装包，也可在浏览器中打开发布页。",
     "GitHub": "GitHub",
     "ManComic is a free and open-source app for comic reading.": "ManComic 是一款免费开源的漫画阅读应用",
-    "More": "更多",
     "No Image": "没有图片",
     "Invalid url config": "链接配置无效",
     "Found new version @version, current version @current.": "发现新版本 @version，当前版本 @current。",
@@ -851,7 +849,8 @@
     "Just now": "刚刚",
     "@a min ago": "@a 分钟前",
     "@a h ago": "@a 小时前",
-    "@a results": "@a 条"
+    "@a results": "@a 条",
+    "Recent comics, reading time, goals, achievements and the year in review": "最近在读什么、阅读时长、目标、成就与年度回顾"
   },
   "zh_TW": {
     "Home": "首頁",
@@ -1391,7 +1390,6 @@
     "Reading time (short to long)": "閱讀時長（從短到長）",
     "Title A-Z": "標題 A-Z",
     "Title Z-A": "標題 Z-A",
-    "Today, last 7 days, all time and comics read recently": "今天、最近 7 天、全部時長，以及最近讀過的作品",
     "No detail available for old records": "舊記錄沒有漫畫 ID，無法跳轉詳情",
     "Less than a minute": "不到 1 分鐘",
     "@m min": "@m 分鐘",
@@ -1586,7 +1584,6 @@
     "Download the APK directly, or open the release page in a browser.": "將直接下載 APK 安裝檔，也可在瀏覽器中開啟發佈頁。",
     "GitHub": "GitHub",
     "ManComic is a free and open-source app for comic reading.": "ManComic 是一款免費開源的漫畫閱讀應用",
-    "More": "更多",
     "No Image": "沒有圖片",
     "Invalid url config": "連結設定無效",
     "Found new version @version, current version @current.": "發現新版本 @version，目前版本 @current。",
@@ -1705,6 +1702,7 @@
     "Just now": "剛剛",
     "@a min ago": "@a 分鐘前",
     "@a h ago": "@a 小時前",
-    "@a results": "@a 筆"
+    "@a results": "@a 筆",
+    "Recent comics, reading time, goals, achievements and the year in review": "最近在讀什麼、閱讀時長、目標、成就與年度回顧"
   }
 }

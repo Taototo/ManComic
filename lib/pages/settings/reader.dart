@@ -531,19 +531,15 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             title: "Reading stats".tl,
             icon: Icons.insights_rounded,
           ),
-          // 年度报告原来是挂在「功能 > 阅读与通知」下的，那个分组名本身就说
-          // 不清里面有什么。阅读报告属于阅读，之后加阅读时长统计也落在这里。
+          // 原来这里是两个入口：年度报告 + 阅读统计。拆开以后用户要判断
+          // 「我想看的东西在哪个里面」，而两边的数据来源本来就是同一张表。
+          // 现在合成一个入口，报告的抬头就是最近 30 天在读什么，往下才是
+          // 这一年的成绩。
           _CallbackSetting(
-            title: "Reading Statistics".tl,
-            subtitle: "Today, last 7 days, all time and comics read recently"
-                .tl,
-            callback: () async {
-              context.to(() => const ReadingStatisticsPage());
-            },
-            actionTitle: 'Open'.tl,
-          ).toSliver(),
-          _CallbackSetting(
-            title: "Yearly Report".tl,
+            title: "Reading Report".tl,
+            subtitle:
+                "Recent comics, reading time, goals, achievements and the year in review"
+                    .tl,
             callback: () async {
               context.to(() => const ReadingReportPage());
             },

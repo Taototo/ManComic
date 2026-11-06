@@ -104,13 +104,16 @@ void main() {
     expect(tester.takeException(), isNull);
     expect(find.text('拷贝漫画'), findsOneWidget);
     expect(find.text('哔咔漫画'), findsOneWidget);
+    // 行首是状态圆点，不再有取名字首字的彩色方块
+    expect(find.text('拷'), findsNothing);
+    expect(find.text('哔'), findsNothing);
     expect(find.text('100'), findsOneWidget);
     expect(find.text('10'), findsOneWidget);
     // 没测过的源显示占位符，而不是 0 分
     expect(find.text('—'), findsOneWidget);
   });
 
-  testWidgets('点击卡片打开详情面板，且没有溢出', (tester) async {
+  testWidgets('点行末箭头打开详情面板，且没有溢出', (tester) async {
     final source = _fakeSource('拷贝漫画', 'copymanga');
     ComicSourceManager().add(source);
     SourceHealthService.instance.of(source)
@@ -123,7 +126,10 @@ void main() {
     await tester.pumpWidget(wrap(const ComicSourcePage()));
     await tester.pump(const Duration(milliseconds: 300));
 
-    await tester.tap(find.text('拷贝漫画'));
+    // 行本身现在是体检入口（点一下重测），进详情走行末箭头
+    expect(find.byIcon(Icons.chevron_right_rounded), findsOneWidget);
+
+    await tester.tap(find.byIcon(Icons.chevron_right_rounded));
     await tester.pumpAndSettle();
 
     expect(tester.takeException(), isNull);

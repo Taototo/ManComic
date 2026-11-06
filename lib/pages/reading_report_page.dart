@@ -5,12 +5,20 @@ import 'package:venera/foundation/achievements.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/context.dart';
+import 'package:venera/foundation/image_provider/cached_image.dart';
 import 'package:venera/foundation/widget_utils.dart';
 import 'package:venera/foundation/reading_stats.dart';
+import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
-/// 年度阅读报告：全部数据来自本地 [ReadingStats]，不联网。
+const _sortSettingKey = 'readingStatisticsSort';
+
+/// 阅读报告：抬头是最近 30 天在读什么，往下是这一年的成绩。
+///
+/// 原来「阅读统计」和「年度报告」是两个入口，但它们读的是同一张表，
+/// 区别只是时间尺度（现在 / 这一年）。拆成两页以后用户还得先判断自己想看
+/// 的东西在哪一页里，所以合并成一页：离现在最近的放最上面。
 class ReadingReportPage extends StatefulWidget {
   const ReadingReportPage({super.key, this.year});
 
@@ -29,6 +37,18 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
 
   List<int> _years = [];
 
+  /// 最近阅读段的排序方式，和设置一起持久化。
+  ReadingStatisticsSort _sort = ReadingStatisticsSort.lastRead;
+
+  /// 最近 30 天读过的作品（按 [_sort] 排好）
+  List<RecentComicReading> _recent = const [];
+
+  /// 全部时间的总时长
+  int _totalSeconds = 0;
+
+  /// 最近 7 天（含今天）每天读了多少秒，用来算「今天 / 最近 7 天」
+  List<({DateTime day, int seconds})> _daily = const [];
+
   @override
   void initState() {
     super.initState();
@@ -44,7 +64,134 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     }
     _summary = ReadingStats.summary(_year);
     _week = ReadingStats.week();
+    _sort = ReadingStatisticsSort.fromValue(appdata.settings[_sortSettingKey]);
+    _loadRecent();
     super.initState();
+  }
+
+  void _loadRecent({bool notify = false}) {
+    final comics = ReadingStats.recentComics(days: 30);
+    void apply() {
+      _daily = ReadingStats.dailySeconds(days: 7);
+      _totalSeconds = ReadingStats.totalSeconds();
+      _recent = _sorted(comics);
+    }
+
+    if (notify) {
+      setState(apply);
+    } else {
+      apply();
+    }
+  }
+
+  List<RecentComicReading> _sorted(List<RecentComicReading> input) {
+    final list = input.toList();
+    int byLastRead(RecentComicReading a, RecentComicReading b) =>
+        b.lastReadAt.compareTo(a.lastReadAt);
+    list.sort((a, b) {
+      final primary = switch (_sort) {
+        ReadingStatisticsSort.lastRead => byLastRead(a, b),
+        ReadingStatisticsSort.durationDesc => b.seconds.compareTo(a.seconds),
+        ReadingStatisticsSort.durationAsc => a.seconds.compareTo(b.seconds),
+        ReadingStatisticsSort.nameAsc => a.title.compareTo(b.title),
+        ReadingStatisticsSort.nameDesc => b.title.compareTo(a.title),
+      };
+      // 时长或标题相同时按「最近读的」兜底，排序结果才稳定
+      return primary != 0 ? primary : byLastRead(a, b);
+    });
+    return list;
+  }
+
+  void _applySort(ReadingStatisticsSort value) {
+    if (value == _sort) return;
+    setState(() {
+      _sort = value;
+      _recent = _sorted(_recent);
+    });
+    appdata.settings[_sortSettingKey] = value.value;
+    appdata.saveData();
+  }
+
+  String _sortLabel(ReadingStatisticsSort value) => switch (value) {
+        ReadingStatisticsSort.lastRead => "Last read".tl,
+        ReadingStatisticsSort.durationDesc => "Reading time (long to short)".tl,
+        ReadingStatisticsSort.durationAsc => "Reading time (short to long)".tl,
+        ReadingStatisticsSort.nameAsc => "Title A-Z".tl,
+        ReadingStatisticsSort.nameDesc => "Title Z-A".tl,
+      };
+
+  void _showSortDialog() {
+    var selected = _sort;
+    showDialog(
+      context: context,
+      builder: (dialogContext) {
+        return StatefulBuilder(
+          builder: (dialogContext, setDialogState) {
+            return ContentDialog(
+              title: "Sort".tl,
+              content: RadioGroup<ReadingStatisticsSort>(
+                groupValue: selected,
+                onChanged: (v) {
+                  if (v == null) return;
+                  setDialogState(() => selected = v);
+                },
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    for (final option in ReadingStatisticsSort.values)
+                      RadioListTile<ReadingStatisticsSort>(
+                        dense: true,
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12),
+                        title: Text(_sortLabel(option), style: ts.s14),
+                        value: option,
+                      ),
+                  ],
+                ),
+              ),
+              actions: [
+                TextButton(
+                  onPressed: () => dialogContext.pop(),
+                  child: Text("Cancel".tl),
+                ),
+                FilledButton(
+                  onPressed: () {
+                    dialogContext.pop();
+                    _applySort(selected);
+                  },
+                  child: Text("Confirm".tl),
+                ),
+              ],
+            );
+          },
+        );
+      },
+    );
+  }
+
+  void _openComic(RecentComicReading comic) {
+    // 老数据没有 id：只能按标题搜索，直接跳到搜索页没意义，所以给个提示
+    if (comic.id.isEmpty) {
+      context.showMessage(message: "No detail available for old records".tl);
+      return;
+    }
+    context.to(
+      () => ComicPage(
+        id: comic.id,
+        sourceKey: comic.sourceKey,
+        cover: comic.cover,
+        title: comic.title,
+      ),
+    );
+  }
+
+  void _deleteComic(RecentComicReading comic) {
+    ReadingStats.removeComic(
+      comic.sourceKey,
+      comic.title,
+      comicId: comic.id,
+    );
+    _loadRecent(notify: true);
   }
 
   void _switchYear(int year) {
@@ -84,7 +231,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       body: CustomScrollView(
         slivers: [
           SliverAppbar(
-            title: Text("Yearly Report".tl),
+            title: Text("Reading Report".tl),
             actions: [
               IconButton(
                 tooltip: "Share".tl,
@@ -114,6 +261,10 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                 ),
               ),
             ),
+          // 最近阅读这一段和选中的年份无关，所以放在年份筛选之外：
+          // 切到去年时它照样是「现在」的数据。
+          if (_totalSeconds > 0)
+            SliverToBoxAdapter(child: _buildRecentSection(colors)),
           SliverToBoxAdapter(
             child: _summary.isEmpty
                 ? _buildEmpty(colors)
@@ -135,15 +286,6 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
         ],
       ),
     );
-  }
-
-  String _durationText(int seconds) {
-    final h = seconds ~/ 3600;
-    final m = (seconds % 3600) ~/ 60;
-    if (h > 0) {
-      return "$h 小时 $m 分钟";
-    }
-    return "$m 分钟";
   }
 
   int get _monthReadMinutes {
@@ -408,7 +550,7 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
           Text(
             week.isEmpty
                 ? "No reading this week".tl
-                : _durationText(week.totalSeconds),
+                : formatReadingDuration(week.totalSeconds),
             style: ts.s20.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 2),
@@ -548,6 +690,132 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       showDragHandle: true,
       backgroundColor: context.colorScheme.surfaceContainerLow,
       builder: (context) => _AchievementSheet(progress: p),
+    );
+  }
+
+  /// 最近阅读：三格时长 + 最近 30 天读过的作品。
+  ///
+  /// 这一段是从原「阅读统计」页整块搬过来的。7 天柱状图没有跟着搬：下面
+  /// 「本周」那块热力图画的就是同样的 7 天，还多了按小时的分布，两张图
+  /// 挨着放只会让人来回对比两张表。
+  Widget _buildRecentSection(ColorScheme colors) {
+    final today = _daily.isEmpty ? 0 : _daily.last.seconds;
+    final week = _daily.fold<int>(0, (sum, item) => sum + item.seconds);
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        Padding(
+          padding: const EdgeInsets.fromLTRB(16, 12, 16, 0),
+          child: Container(
+            padding: const EdgeInsets.symmetric(vertical: 14),
+            decoration: BoxDecoration(
+              borderRadius: BorderRadius.circular(20),
+              color: colors.surfaceContainerLow,
+              border: Border.all(
+                color: colors.outlineVariant.withValues(alpha: 0.45),
+                width: 0.6,
+              ),
+            ),
+            child: IntrinsicHeight(
+              child: Row(
+                children: [
+                  _RecentStat(
+                    icon: Icons.today_outlined,
+                    label: "Today".tl,
+                    value: today > 0 ? formatReadingDuration(today) : "—",
+                    color: colors.primary,
+                  ),
+                  _VerticalDivider(color: colors.outlineVariant),
+                  _RecentStat(
+                    icon: Icons.date_range_outlined,
+                    label: "Last 7 Days".tl,
+                    value: week > 0 ? formatReadingDuration(week) : "—",
+                    color: colors.secondary,
+                  ),
+                  _VerticalDivider(color: colors.outlineVariant),
+                  _RecentStat(
+                    icon: Icons.auto_stories_outlined,
+                    label: "All Time".tl,
+                    value: _totalSeconds > 0
+                        ? formatReadingDuration(_totalSeconds)
+                        : "—",
+                    color: colors.tertiary,
+                  ),
+                ],
+              ),
+            ),
+          ),
+        ),
+        Padding(
+          padding: const EdgeInsets.fromLTRB(20, 20, 8, 6),
+          child: Row(
+            children: [
+              Icon(
+                Icons.menu_book_outlined,
+                size: 17,
+                color: colors.onSurfaceVariant,
+              ),
+              const SizedBox(width: 7),
+              Expanded(
+                child: Text(
+                  "Comics in Last 30 Days".tl,
+                  style: ts.s14.merge(
+                    const TextStyle(fontWeight: FontWeight.w600),
+                  ),
+                ),
+              ),
+              if (_recent.isNotEmpty)
+                TextButton.icon(
+                  onPressed: _showSortDialog,
+                  icon: const Icon(Icons.sort_rounded, size: 15),
+                  label: Text("Sort".tl, style: ts.s10),
+                  style: TextButton.styleFrom(
+                    padding: const EdgeInsets.symmetric(horizontal: 10),
+                    minimumSize: const Size(0, 30),
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                ),
+            ],
+          ),
+        ),
+        if (_recent.isEmpty)
+          Padding(
+            padding: const EdgeInsets.fromLTRB(20, 6, 20, 24),
+            child: Text(
+              "No comics read in the last 30 days".tl,
+              style: ts.s12.withColor(colors.onSurfaceVariant),
+            ),
+          )
+        else
+          Padding(
+            padding: const EdgeInsets.fromLTRB(16, 0, 16, 0),
+            child: Container(
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(20),
+                color: colors.surfaceContainerLow,
+                border: Border.all(
+                  color: colors.outlineVariant.withValues(alpha: 0.45),
+                  width: 0.6,
+                ),
+              ),
+              clipBehavior: Clip.antiAlias,
+              child: Material(
+                type: MaterialType.transparency,
+                child: Column(
+                  children: [
+                    for (var i = 0; i < _recent.length; i++)
+                      _ComicStatRow(
+                        comic: _recent[i],
+                        showDivider: i != _recent.length - 1,
+                        onTap: () => _openComic(_recent[i]),
+                        onDelete: () => _deleteComic(_recent[i]),
+                      ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+      ],
     );
   }
 
@@ -1165,4 +1433,189 @@ class _AchievementSheet extends StatelessWidget {
       ),
     );
   }
+}
+
+/// 最近阅读三格里的一个：图标 + 数值 + 说明。
+class _RecentStat extends StatelessWidget {
+  const _RecentStat({
+    required this.icon,
+    required this.label,
+    required this.value,
+    required this.color,
+  });
+
+  final IconData icon;
+
+  final String label;
+
+  final String value;
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Expanded(
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Icon(icon, size: 19, color: color),
+            const SizedBox(height: 7),
+            Text(
+              value,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: ts.s14.merge(const TextStyle(fontWeight: FontWeight.w600)),
+            ),
+            const SizedBox(height: 3),
+            Text(
+              label,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: ts.s10.withColor(context.colorScheme.onSurfaceVariant),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+class _VerticalDivider extends StatelessWidget {
+  const _VerticalDivider({required this.color});
+
+  final Color color;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: 0.7,
+      margin: const EdgeInsets.symmetric(vertical: 4),
+      color: color.withValues(alpha: 0.5),
+    );
+  }
+}
+
+/// 最近读过的作品：封面 + 标题 + 副标题/相对时间 + 时长。长按删除记录。
+class _ComicStatRow extends StatelessWidget {
+  const _ComicStatRow({
+    required this.comic,
+    required this.showDivider,
+    required this.onTap,
+    required this.onDelete,
+  });
+
+  final RecentComicReading comic;
+
+  final bool showDivider;
+
+  final VoidCallback onTap;
+
+  final VoidCallback onDelete;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    final cover = comic.cover;
+    return InkWell(
+      onTap: onTap,
+      onLongPress: onDelete,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 12, 10),
+            child: Row(
+              children: [
+                Container(
+                  width: 42,
+                  height: 58,
+                  clipBehavior: Clip.antiAlias,
+                  decoration: BoxDecoration(
+                    color: colors.surfaceContainerHighest,
+                    borderRadius: BorderRadius.circular(5),
+                  ),
+                  child: cover.isEmpty
+                      ? Icon(
+                          Icons.menu_book_outlined,
+                          size: 18,
+                          color: colors.outline,
+                        )
+                      : AnimatedImage(
+                          image: CachedImageProvider(
+                            cover,
+                            sourceKey: comic.sourceKey,
+                            cid: comic.id,
+                            fallbackToLocalCover: true,
+                          ),
+                          fit: BoxFit.cover,
+                          cacheWidth: 200,
+                        ),
+                ),
+                const SizedBox(width: 12),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        comic.title,
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ts.s14.merge(
+                          const TextStyle(fontWeight: FontWeight.w600),
+                        ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        [
+                          if (comic.subtitle.trim().isNotEmpty)
+                            comic.subtitle.trim(),
+                          _relativeTime(comic.lastReadAt),
+                        ].join(" · "),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ts.s10.withColor(colors.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
+                ),
+                const SizedBox(width: 10),
+                Text(
+                  formatReadingDuration(comic.seconds),
+                  style: ts.s12.withColor(colors.primary),
+                ),
+              ],
+            ),
+          ),
+          if (showDivider)
+            Container(
+              height: 0.7,
+              margin: const EdgeInsets.only(left: 66),
+              color: colors.outlineVariant.withValues(alpha: 0.5),
+            ),
+        ],
+      ),
+    );
+  }
+
+  static String _relativeTime(DateTime time) {
+    final diff = DateTime.now().difference(time);
+    if (diff.inMinutes < 1) return "Just now".tl;
+    if (diff.inMinutes < 60) return "@a min ago".tlParams({"a": diff.inMinutes});
+    if (diff.inHours < 24) return "@a h ago".tlParams({"a": diff.inHours});
+    return "@a d ago".tlParams({"a": diff.inDays});
+  }
+}
+
+/// 把秒数写成人话：超过一小时给「1 小时 20 分」，不到一分钟明确说不满一分钟。
+String formatReadingDuration(int seconds) {
+  if (seconds <= 0) return "0 min";
+  if (seconds < 60) return "Less than a minute".tl;
+  final minutes = seconds ~/ 60;
+  if (minutes < 60) return "@m min".tlParams({"m": minutes});
+  final hours = minutes ~/ 60;
+  final rest = minutes % 60;
+  if (rest == 0) return "@h h".tlParams({"h": hours});
+  return "@h h @m min".tlParams({"h": hours, "m": rest});
 }

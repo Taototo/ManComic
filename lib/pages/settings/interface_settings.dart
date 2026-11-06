@@ -48,6 +48,75 @@ class _AppSettingsState extends State<AppSettings> {
             App.forceRebuild();
           },
         ).toSliver(),
+        // 启动落在哪一页是首页的一部分，之前被塞在「功能 > 其他」里，
+        // 找的人不会想到去那儿。
+        _SettingPartTitle(title: "Home".tl, icon: Icons.home_outlined),
+        SelectSetting(
+          title: "Initial Page".tl,
+          settingKey: "initialPage",
+          optionTranslation: {
+            '0': "Home Page".tl,
+            '1': "Explore Page".tl,
+            '2': "Categories Page".tl,
+            '3': "Favorites Page".tl,
+          },
+        ).toSliver(),
+        _CallbackSetting(
+          title: "Home Modules".tl,
+          subtitle: "Reorder or hide sections on the home page".tl,
+          actionTitle: "Edit".tl,
+          callback: () {
+            context.to(() => const HomeModulesPage());
+          },
+        ).toSliver(),
+        _SettingPartTitle(title: "App icon".tl, icon: Icons.apps_rounded),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Pick the icon shown on your home screen. The change takes effect after the app restarts."
+                    .tl,
+                style: ts.s12,
+              ).paddingHorizontal(16).paddingTop(10),
+              const SizedBox(height: 2),
+              const _AppIconPicker(),
+            ],
+          ),
+        ),
+        // 只有 Android 有「向系统申请帧率」这条路：桌面和 iOS 不提供这个
+        // 通道，显示出来只会是一个点了没反应的选项。
+        if (App.isAndroid) ...[
+          _SettingPartTitle(title: "Display".tl, icon: Icons.speed_rounded),
+          // 高刷屏上应用跑 60 帧是最常见的「莫名不跟手」来源：不少 ROM 会给
+          // 非白名单应用锁 60Hz。这里让用户能手动钉住一档，也方便对比耗电。
+          SelectSetting(
+            title: "Refresh Rate".tl,
+            settingKey: "refreshRate",
+            optionTranslation: {
+              "auto": "Auto".tl,
+              "60": "60 Hz",
+              "90": "90 Hz",
+              "120": "120 Hz",
+            },
+            help: "Auto uses the highest rate the screen supports. Lower rates "
+                    "save battery; higher rates make scrolling smoother."
+                .tl,
+            onChanged: () async {
+              await DisplayRefresh.apply(appdata.settings['refreshRate']);
+            },
+          ).toSliver(),
+          _SwitchSetting(
+            title: "Show frame rate".tl,
+            subtitle:
+                "Live fps, frame times and dropped frames in the corner".tl,
+            settingKey: "showFps",
+            onChanged: () {
+              App.forceRebuild();
+            },
+          ).toSliver(),
+          SliverToBoxAdapter(child: const _ScreenInfo()),
+        ],
         _SettingPartTitle(
           title: "Glass effect".tl,
           icon: Icons.blur_on_rounded,
@@ -92,75 +161,6 @@ class _AppSettingsState extends State<AppSettings> {
             style: ts.s12,
           ).paddingHorizontal(16).paddingBottom(12),
         ),
-        // 只有 Android 有「向系统申请帧率」这条路：桌面和 iOS 不提供这个
-        // 通道，显示出来只会是一个点了没反应的选项。
-        if (App.isAndroid) ...[
-          _SettingPartTitle(title: "Display".tl, icon: Icons.speed_rounded),
-          // 高刷屏上应用跑 60 帧是最常见的「莫名不跟手」来源：不少 ROM 会给
-          // 非白名单应用锁 60Hz。这里让用户能手动钉住一档，也方便对比耗电。
-          SelectSetting(
-            title: "Refresh Rate".tl,
-            settingKey: "refreshRate",
-            optionTranslation: {
-              "auto": "Auto".tl,
-              "60": "60 Hz",
-              "90": "90 Hz",
-              "120": "120 Hz",
-            },
-            help: "Auto uses the highest rate the screen supports. Lower rates "
-                    "save battery; higher rates make scrolling smoother."
-                .tl,
-            onChanged: () async {
-              await DisplayRefresh.apply(appdata.settings['refreshRate']);
-            },
-          ).toSliver(),
-          _SwitchSetting(
-            title: "Show frame rate".tl,
-            subtitle:
-                "Live fps, frame times and dropped frames in the corner".tl,
-            settingKey: "showFps",
-            onChanged: () {
-              App.forceRebuild();
-            },
-          ).toSliver(),
-          SliverToBoxAdapter(child: const _ScreenInfo()),
-        ],
-        _SettingPartTitle(title: "App icon".tl, icon: Icons.apps_rounded),
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Pick the icon shown on your home screen. The change takes effect after the app restarts."
-                    .tl,
-                style: ts.s12,
-              ).paddingHorizontal(16).paddingTop(10),
-              const SizedBox(height: 2),
-              const _AppIconPicker(),
-            ],
-          ),
-        ),
-        _SettingPartTitle(title: "Home".tl, icon: Icons.home_outlined),
-        // 启动落在哪一页是首页的一部分，之前被塞在「功能 > 其他」里，
-        // 找的人不会想到去那儿。
-        SelectSetting(
-          title: "Initial Page".tl,
-          settingKey: "initialPage",
-          optionTranslation: {
-            '0': "Home Page".tl,
-            '1': "Explore Page".tl,
-            '2': "Categories Page".tl,
-            '3': "Favorites Page".tl,
-          },
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Home Modules".tl,
-          subtitle: "Reorder or hide sections on the home page".tl,
-          actionTitle: "Edit".tl,
-          callback: () {
-            context.to(() => const HomeModulesPage());
-          },
-        ).toSliver(),
         // 语言原来在「功能 > 其他」——那个分组是个垃圾桶，什么都能往里扔。
         // 改界面上的文字属于界面，和主题、缩略图是同一类事。
         _SettingPartTitle(

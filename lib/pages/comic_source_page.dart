@@ -212,19 +212,33 @@ class _BodyState extends State<_Body> {
     }
     return Padding(
       padding: const EdgeInsets.fromLTRB(22, 18, 22, 6),
-      child: Row(
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text(text, style: ts.s12.withColor(colors.onSurfaceVariant)),
-          const Spacer(),
-          if (updating)
-            SizedBox(
-              width: 11,
-              height: 11,
-              child: CircularProgressIndicator(
-                strokeWidth: 1.6,
-                color: colors.onSurfaceVariant,
-              ),
+          Row(
+            children: [
+              Text(text, style: ts.s12.withColor(colors.onSurfaceVariant)),
+              const Spacer(),
+              if (updating)
+                SizedBox(
+                  width: 11,
+                  height: 11,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 1.6,
+                    color: colors.onSurfaceVariant,
+                  ),
+                ),
+            ],
+          ),
+          // 行本身现在就是体检入口，这个动作没有可见的按钮，必须写出来，
+          // 否则用户只会发现「点一下怎么转圈了」。
+          const SizedBox(height: 3),
+          Text(
+            "Tap a row to retest".tl,
+            style: ts.s10.withColor(
+              colors.onSurfaceVariant.withValues(alpha: 0.75),
             ),
+          ),
         ],
       ),
     );
@@ -232,9 +246,9 @@ class _BodyState extends State<_Body> {
 
   /// 一页源 = 一张卡 + 每行一个源。
   ///
-  /// 行的信息密度按体检页来排：左边头像（保留源之间的辨识度），中间名字与
-  /// 「版本 · 能力」两行，右边分数与状态词，最后是进入详情的箭头。
-  /// 分数和状态词同时保留——分数用来横向比较，状态词用来一眼判断好与不好。
+  /// 行的信息密度按体检页来排：左边状态圆点、中间名字与「版本 · 能力」两行，
+  /// 右边分数、状态词和进详情的箭头。分数和状态词同时保留——分数用来横向
+  /// 比较，状态词用来一眼判断好与不好。
   Widget _buildSourceList(BuildContext context, List<ComicSource> sources) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
@@ -254,7 +268,9 @@ class _BodyState extends State<_Body> {
                   health: _health.of(sources[i]),
                   newVersion: _updateOf(sources[i]),
                   showDivider: i != sources.length - 1,
-                  onTap: () => _openDetail(sources[i]),
+                  onOpenDetail: () => _openDetail(sources[i]),
+                  // 和体检页同一个动作：点一下就把这一个源重测一遍。
+                  onRetest: () => _health.testOne(_health.of(sources[i])),
                 ),
             ],
           ),
@@ -607,58 +623,6 @@ class _AddAction extends StatelessWidget {
   }
 }
 
-/// 源图标：用 key 派生固定色相，取名字首字，比所有源共用一个通用图标好认。
-class _SourceAvatar extends StatelessWidget {
-  const _SourceAvatar({required this.source, this.size = 44});
-
-  final ComicSource source;
-
-  final double size;
-
-  @override
-  Widget build(BuildContext context) {
-    final seed = source.key.hashCode.abs();
-    final hue = (seed % 360).toDouble();
-    final c1 = HSLColor.fromAHSL(1, hue, 0.52, 0.66).toColor();
-    final c2 = HSLColor.fromAHSL(1, (hue + 26) % 360, 0.58, 0.48).toColor();
-    final initial = _initial(source.name);
-    return Container(
-      width: size,
-      height: size,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(size * 0.32),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [c1, c2],
-        ),
-        boxShadow: [
-          BoxShadow(
-            color: c2.withValues(alpha: 0.34),
-            blurRadius: 10,
-            offset: const Offset(0, 4),
-          ),
-        ],
-      ),
-      child: Text(
-        initial,
-        style: TextStyle(
-          fontSize: size * 0.4,
-          height: 1.1,
-          fontWeight: FontWeight.w600,
-          color: Colors.white,
-        ),
-      ),
-    );
-  }
-
-  static String _initial(String name) {
-    if (name.isEmpty) return "?";
-    final first = name.characters.first;
-    return first.toUpperCase();
-  }
-}
 
 /// 健康分环形进度。没测过时画一圈淡底轨并显示「—」，
 /// 而不是画一个 0 分的空环——「没测」和「测出 0 分」得能区分开。
@@ -766,17 +730,21 @@ class _RingPainter extends CustomPainter {
       old.strokeWidth != strokeWidth;
 }
 
-/// 源列表里的一行：头像 + 名称 + 版本能力 + 健康分 + 状态词。
+/// 一个源 = 一行，版式和「漫画源体检」页的行完全对齐。
 ///
-/// 样式对齐「漫画源体检」页——单卡多行、行间细分割线、右侧状态标签。
-/// 分数仍然保留（原来那个环形的读数），所以既能横向比大小，也能一眼读出
-/// 状态；状态词和分数同时给，是因为「92 分」和「良好」回答的是两个问题。
+/// 左边那个状态圆点替掉了原来的首字头像：八个源竖排下来，八个小圆点连成
+/// 一条颜色带，哪几个挂了扫一眼就能看出来；而「每个源一种彩色方块」其实
+/// 不携带任何信息——名字就写在旁边，颜色只是让眼睛多跳一次。
+///
+/// 体检功能直接搬到了行上：点行 = 重测这一个源（和体检页一致），进详情改
+/// 由右侧箭头负责。重测是高频动作，进详情是低频动作，不该抢同一个手势。
 class _SourceRow extends StatelessWidget {
   const _SourceRow({
     super.key,
     required this.source,
     required this.health,
-    required this.onTap,
+    required this.onOpenDetail,
+    required this.onRetest,
     required this.showDivider,
     this.newVersion,
   });
@@ -788,7 +756,11 @@ class _SourceRow extends StatelessWidget {
   /// 有可更新的版本时为非空
   final String? newVersion;
 
-  final VoidCallback onTap;
+  /// 打开源详情面板
+  final VoidCallback onOpenDetail;
+
+  /// 重新体检这个源
+  final VoidCallback onRetest;
 
   final bool showDivider;
 
@@ -799,15 +771,20 @@ class _SourceRow extends StatelessWidget {
     final testing = health.status == SourceHealthStatus.testing;
     final score = health.score;
     return InkWell(
-      onTap: onTap,
+      onTap: testing ? null : onRetest,
       child: Column(
         children: [
           Padding(
-            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+            padding: const EdgeInsets.fromLTRB(16, 11, 4, 11),
             child: Row(
               children: [
-                _SourceAvatar(source: source, size: 34),
-                const SizedBox(width: 11),
+                Container(
+                  width: 8,
+                  height: 8,
+                  decoration:
+                      BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                ),
+                const SizedBox(width: 12),
                 Expanded(
                   child: Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
@@ -859,11 +836,23 @@ class _SourceRow extends StatelessWidget {
                         overflow: TextOverflow.ellipsis,
                         style: ts.s10.withColor(colors.onSurfaceVariant),
                       ),
+                      // 出错时才多给一行：报错信息是「为什么不能用」的唯一
+                      // 线索，其余状态不需要这一段，行高保持紧凑。
+                      if (health.message != null)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 2),
+                          child: Text(
+                            health.message!,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: ts.s10.withColor(statusColor),
+                          ),
+                        ),
                     ],
                   ),
                 ),
                 const SizedBox(width: 6),
-                // 分数：没测过显示「—」，测的过程中转圈。固定宽度让三行的
+                // 分数：没测过显示「—」，测的过程中转圈。固定宽度让所有行的
                 // 名字左边缘对齐——数字宽度一变，整列都会跟着抖。
                 SizedBox(
                   width: 30,
@@ -882,7 +871,9 @@ class _SourceRow extends StatelessWidget {
                             score == null ? "—" : "$score",
                             style: ts.s14
                                 .withColor(statusColor)
-                                .merge(const TextStyle(fontWeight: FontWeight.w700)),
+                                .merge(
+                                  const TextStyle(fontWeight: FontWeight.w700),
+                                ),
                           ),
                   ),
                 ),
@@ -890,7 +881,7 @@ class _SourceRow extends StatelessWidget {
                 // 状态词长度不固定（「20 results」和「Search not supported」差
                 // 三倍），必须给上限并允许省略，否则窄屏上整行会被它顶出去。
                 ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 84),
+                  constraints: const BoxConstraints(maxWidth: 82),
                   child: Container(
                     padding: const EdgeInsets.symmetric(
                       horizontal: 8,
@@ -912,10 +903,19 @@ class _SourceRow extends StatelessWidget {
                     ),
                   ),
                 ),
-                Icon(
-                  Icons.chevron_right_rounded,
-                  size: 17,
-                  color: colors.onSurfaceVariant.withValues(alpha: 0.5),
+                IconButton(
+                  tooltip: "Details".tl,
+                  style: IconButton.styleFrom(
+                    minimumSize: const Size(34, 34),
+                    padding: EdgeInsets.zero,
+                    tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                  ),
+                  icon: Icon(
+                    Icons.chevron_right_rounded,
+                    size: 20,
+                    color: colors.onSurfaceVariant.withValues(alpha: 0.6),
+                  ),
+                  onPressed: onOpenDetail,
                 ),
               ],
             ),
@@ -923,7 +923,7 @@ class _SourceRow extends StatelessWidget {
           if (showDivider)
             Container(
               height: 0.7,
-              margin: const EdgeInsets.only(left: 57),
+              margin: const EdgeInsets.only(left: 36),
               color: colors.outlineVariant.withValues(alpha: 0.5),
             ),
         ],
@@ -1054,11 +1054,19 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
                 ),
               ),
               Padding(
-                padding: const EdgeInsets.fromLTRB(20, 14, 12, 0),
+                padding: const EdgeInsets.fromLTRB(18, 12, 8, 0),
                 child: Row(
                   children: [
-                    _SourceAvatar(source: source, size: 46),
-                    const SizedBox(width: 12),
+                    // 和列表行用同一颗状态点：从哪一行点进来，抬头就能对上。
+                    Container(
+                      width: 9,
+                      height: 9,
+                      decoration: BoxDecoration(
+                        color: _sourceHealthColor(colors, health.status),
+                        shape: BoxShape.circle,
+                      ),
+                    ),
+                    const SizedBox(width: 10),
                     Expanded(
                       child: Column(
                         crossAxisAlignment: CrossAxisAlignment.start,
@@ -1072,12 +1080,14 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
                               const TextStyle(fontWeight: FontWeight.w600),
                             ),
                           ),
-                          const SizedBox(height: 3),
+                          const SizedBox(height: 2),
+                          // 版本号和源 key 都只作识别用，小一号、单行省略，
+                          // 别让它们把标题挤成两行。
                           Text(
                             "v${source.version} · ${source.key}",
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style: ts.s12.withColor(colors.onSurfaceVariant),
+                            style: ts.s10.withColor(colors.onSurfaceVariant),
                           ),
                         ],
                       ),
@@ -1096,32 +1106,42 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
                     bottom: MediaQuery.paddingOf(context).bottom + 24,
                   ),
                   children: [
+                    // 四块内容的间距按「同类紧、异类松」排：健康卡和操作按钮
+                    // 是同一件事的两个面，贴得近；能力项是另一个维度；设置项
+                    // 又要更多留白——间距本身就是分组信息。
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
                       child: _buildHealthCard(context),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 12, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(20, 10, 20, 0),
                       child: _buildActions(context),
                     ),
                     Padding(
-                      padding: const EdgeInsets.fromLTRB(20, 16, 20, 0),
+                      padding: const EdgeInsets.fromLTRB(20, 14, 20, 0),
                       child: _buildCapabilities(context),
                     ),
                     // 没有设置项也没有账号时不留一个空的「设置」标题
                     if (settings.isNotEmpty || account.isNotEmpty)
                       Padding(
-                        padding: const EdgeInsets.fromLTRB(20, 18, 20, 4),
-                        child: Text(
-                          "Settings".tl,
-                          style: ts.s12
-                              .merge(
-                                  const TextStyle(fontWeight: FontWeight.w600))
-                              .withColor(colors.onSurfaceVariant),
+                        padding: const EdgeInsets.fromLTRB(20, 20, 20, 0),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Padding(
+                              padding: const EdgeInsets.only(left: 2, bottom: 8),
+                              child: Text(
+                                "Settings".tl,
+                                style: ts.s12
+                                    .merge(const TextStyle(
+                                        fontWeight: FontWeight.w600))
+                                    .withColor(colors.onSurfaceVariant),
+                              ),
+                            ),
+                            _buildTilesGroup([...settings, ...account]),
+                          ],
                         ),
                       ),
-                    ...settings,
-                    ...account,
                   ],
                 ),
               ),
@@ -1132,26 +1152,80 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
     );
   }
 
+  /// 把源自己的设置项与账号信息收进一张卡里。
+  ///
+  /// 这些条目原来直接铺在 ListView 上：ListTile 自带 16px 内边距，而上面的
+  /// 健康卡、能力 chips 都按 20px 外边距排，左边对不齐、右边还差 4px，滚动
+  /// 时像两块拼起来的页面。收进卡片并把 contentPadding 统一到 14，整列就
+  /// 站直了；分隔线用 14 的缩进跟着走。
+  Widget _buildTilesGroup(List<Widget> children) {
+    final colors = context.colorScheme;
+    return Container(
+      decoration: BoxDecoration(
+        color: colors.onSurface.withValues(alpha: 0.045),
+        borderRadius: BorderRadius.circular(18),
+      ),
+      clipBehavior: Clip.antiAlias,
+      child: Theme(
+        data: Theme.of(context).copyWith(
+          listTileTheme: const ListTileThemeData(
+            dense: true,
+            contentPadding: EdgeInsets.symmetric(horizontal: 14),
+          ),
+        ),
+        child: Column(
+          children: [
+            for (var i = 0; i < children.length; i++) ...[
+              if (i > 0)
+                Divider(
+                  height: 0.7,
+                  thickness: 0.7,
+                  indent: 14,
+                  endIndent: 14,
+                  color: colors.outlineVariant.withValues(alpha: 0.4),
+                ),
+              children[i],
+            ],
+          ],
+        ),
+      ),
+    );
+  }
+
+  /// 健康卡：一枚环形读数 + 三段文字（标题、等级、耗时/时间）。
+  ///
+  /// 原来没有标题，一进来就是「优秀 · 20 results」，看不出这块在说健康状态，
+  /// 也不知道右上角那个刷新键是干嘛的。补一行小标题做锚点，整块的分工就清
+  /// 楚了：左边读数、中间结论、右边重测。
   Widget _buildHealthCard(BuildContext context) {
     final colors = context.colorScheme;
     final statusColor = _sourceHealthColor(colors, health.status);
     final latency = health.latency;
     final checkedAt = health.checkedAt;
+    final testing = health.status == SourceHealthStatus.testing;
     return Container(
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 14),
+      padding: const EdgeInsets.fromLTRB(14, 12, 8, 12),
       decoration: BoxDecoration(
         color: colors.onSurface.withValues(alpha: 0.045),
         borderRadius: BorderRadius.circular(18),
       ),
       child: Row(
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          _HealthRing(health: health, color: statusColor, size: 56),
-          const SizedBox(width: 14),
+          _HealthRing(health: health, color: statusColor, size: 52),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               mainAxisSize: MainAxisSize.min,
               children: [
+                Text(
+                  "Source health".tl,
+                  style: ts.s10.withColor(
+                    colors.onSurfaceVariant.withValues(alpha: 0.85),
+                  ),
+                ),
+                const SizedBox(height: 3),
                 // 等级和状态合成一段富文本，交给单个 Text 自己省略。
                 // 之前是两个 Text 并排，没有任何弹性约束，等级词一长就整行溢出。
                 Text.rich(
@@ -1179,16 +1253,18 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
                   overflow: TextOverflow.ellipsis,
                   style: ts.s14,
                 ),
-                const SizedBox(height: 4),
+                const SizedBox(height: 3),
                 Text(
                   [
                     if (latency != null) "${latency}ms",
                     if (checkedAt != null) _formatTime(checkedAt),
                   ].join("  ·  "),
-                  style: ts.s12.withColor(colors.onSurfaceVariant),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ts.s10.withColor(colors.onSurfaceVariant),
                 ),
                 if (health.message != null) ...[
-                  const SizedBox(height: 3),
+                  const SizedBox(height: 4),
                   Text(
                     health.message!,
                     maxLines: 2,
@@ -1202,20 +1278,18 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
           IconButton(
             tooltip: "Test again".tl,
             style: IconButton.styleFrom(
-              minimumSize: const Size(38, 38),
+              minimumSize: const Size(36, 36),
               padding: EdgeInsets.zero,
               tapTargetSize: MaterialTapTargetSize.shrinkWrap,
             ),
-            icon: health.status == SourceHealthStatus.testing
+            icon: testing
                 ? const SizedBox(
                     width: 16,
                     height: 16,
                     child: CircularProgressIndicator(strokeWidth: 1.8),
                   )
                 : const Icon(Icons.refresh_rounded, size: 20),
-            onPressed: health.status == SourceHealthStatus.testing
-                ? null
-                : () => _health.testOne(health),
+            onPressed: testing ? null : () => _health.testOne(health),
           ),
         ],
       ),

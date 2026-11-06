@@ -26,7 +26,6 @@ import 'package:venera/network/app_dio.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/home_modules_page.dart';
 import 'package:venera/pages/reading_report_page.dart';
-import 'package:venera/pages/reading_statistics_page.dart';
 import 'package:venera/utils/app_icon.dart';
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/data_sync.dart';
