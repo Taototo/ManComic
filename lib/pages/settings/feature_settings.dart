@@ -41,35 +41,6 @@ class _FeatureSettingsState extends State<FeatureSettings> {
     }
   }
 
-  Future<void> _clearCache() async {
-    var loadingDialog = showLoadingDialog(
-      App.rootContext,
-      barrierDismissible: false,
-      allowCancel: false,
-    );
-    await CacheManager().clear();
-    loadingDialog.close();
-    if (!mounted) return;
-    context.showMessage(message: "Cache cleared".tl);
-    setState(() {});
-  }
-
-  void _setCacheLimit() {
-    showInputDialog(
-      context: context,
-      title: "Set Cache Limit".tl,
-      hintText: "Size in MB".tl,
-      inputValidator: RegExp(r"^\d+$"),
-      onConfirm: (value) {
-        appdata.settings['cacheSize'] = int.parse(value);
-        appdata.saveData();
-        setState(() {});
-        CacheManager().setLimitSize(appdata.settings['cacheSize']);
-        return null;
-      },
-    );
-  }
-
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
@@ -104,30 +75,14 @@ class _FeatureSettingsState extends State<FeatureSettings> {
           ),
           onTap: _setNewStoragePath,
         ).toSliver(),
-        // 「缓存大小」「清除缓存」「缓存上限」三行合并成一行，两件事用两个
-        // 图标按钮表达：清空、改上限。占用从三行变一行。
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          title: Text("Cache".tl),
-          subtitle: Text(
-            "${bytesToReadableString(CacheManager().currentSize)} / "
-            "${appdata.settings['cacheSize']} MB",
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              IconButton(
-                tooltip: "Clear Cache".tl,
-                icon: const Icon(Icons.delete_outline),
-                onPressed: _clearCache,
-              ),
-              IconButton(
-                tooltip: "Cache Limit".tl,
-                icon: const Icon(Icons.tune),
-                onPressed: _setCacheLimit,
-              ),
-            ],
-          ),
+        // 原来这里是一行「缓存 320 MB / 2048 MB」加两个图标按钮。总数看不出
+        // 谁占的空间，而且本地漫画、收藏封面、日志同样在吃存储却完全不可见。
+        // 改成进「存储」页看分类明细，清理和限额也都在那边。
+        _CallbackSetting(
+          title: "Storage".tl,
+          subtitle: "Cache, app data, local comics and logs".tl,
+          callback: () => context.to(() => const StorageSettings()),
+          actionTitle: "Manage".tl,
         ).toSliver(),
         _CallbackSetting(
           title: "Export App Data".tl,

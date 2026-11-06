@@ -381,6 +381,33 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             useDeviceSettings: useDeviceSpecificSettings,
           ),
         ),
+        // 休息提醒跟护眼、亮度是一类事情（都是一直看下去会伤眼），
+        // 放在「显示」组末尾，而不是单独开一组。
+        _SwitchSetting(
+          title: "Rest reminder".tl,
+          subtitle: "Remind you to take a break during long reading sessions".tl,
+          settingKey: "restReminderEnabled",
+          onChanged: () {
+            setState(() {});
+            widget.onChanged?.call("restReminderEnabled");
+          },
+        ).toSliver(),
+        SliverAnimatedVisibility(
+          visible: appdata.settings['restReminderEnabled'] == true,
+          child: _SliderSetting(
+            title: "Remind me every @a minutes".tlParams({
+              'a': (appdata.settings['restReminderInterval'] as int?) ?? 45,
+            }),
+            settingsIndex: "restReminderInterval",
+            interval: 5,
+            min: 15,
+            max: 120,
+            onChanged: () {
+              setState(() {});
+              widget.onChanged?.call("restReminderInterval");
+            },
+          ),
+        ),
         _SwitchSetting(
           title: 'Limit image width'.tl,
           subtitle: 'When using Continuous(Top to Bottom) mode'.tl,

@@ -14,6 +14,10 @@ class _ChaptersViewState extends State<_ChaptersView> {
 
   late final ScrollController _scrollController;
 
+  final TextEditingController _searchController = TextEditingController();
+
+  String query = '';
+
   var downloaded = <String>[];
 
   @override
@@ -30,12 +34,24 @@ class _ChaptersViewState extends State<_ChaptersView> {
   }
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    _scrollController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
     var chapters = widget.reader.widget.chapters!;
     var current = widget.reader.chapter - 1;
+    final titles = chapters.titles.toList();
+    final searching = query.trim().isNotEmpty;
+    // 搜索时按相关度排（章号命中优先），不再按升降序翻转，
+    // 否则「输入 380」的结果会被翻到最后一条。
+    final indices = searchChapters(titles, query);
     return Scaffold(
       body: SmoothCustomScrollView(
-        controller: _scrollController,
+        controller: searching ? null : _scrollController,
         slivers: [
           SliverAppbar(
             style: AppbarStyle.shadow,
@@ -58,27 +74,39 @@ class _ChaptersViewState extends State<_ChaptersView> {
               ),
             ],
           ),
-          SliverList(
-            delegate: SliverChildBuilderDelegate(
-              (context, index) {
-                if (desc) {
-                  index = chapters.length - 1 - index;
-                }
-                var chapter = chapters.titles.elementAt(index);
+          SliverToBoxAdapter(
+            child: _ChapterSearchBar(
+              controller: _searchController,
+              onChanged: (value) {
+                setState(() {
+                  query = value;
+                });
+              },
+            ),
+          ),
+          if (indices.isEmpty)
+            const SliverFillRemaining(
+              hasScrollBody: false,
+              child: _EmptySearchResult(),
+            )
+          else
+            SliverList(
+              delegate: SliverChildBuilderDelegate((context, index) {
+                final i = searching
+                    ? indices[index]
+                    : (desc ? titles.length - 1 - index : index);
+                var chapter = titles[i];
                 return _ChapterListTile(
                   onTap: () {
-                    widget.reader.toChapter(index + 1);
+                    widget.reader.toChapter(i + 1);
                     Navigator.of(context).pop();
                   },
                   title: chapter,
-                  isActive: current == index,
-                  isDownloaded:
-                      downloaded.contains(chapters.ids.elementAt(index)),
+                  isActive: current == i,
+                  isDownloaded: downloaded.contains(chapters.ids.elementAt(i)),
                 );
-              },
-              childCount: chapters.length,
+              }, childCount: searching ? indices.length : titles.length),
             ),
-          ),
         ],
       ),
     );
@@ -103,6 +131,10 @@ class _GroupedChaptersViewState extends State<_GroupedChaptersView>
   late final ScrollController _scrollController;
 
   late final String initialGroupName;
+
+  final TextEditingController _searchController = TextEditingController();
+
+  String query = '';
 
   var downloaded = <String>[];
 
@@ -135,20 +167,66 @@ class _GroupedChaptersViewState extends State<_GroupedChaptersView>
   }
 
   @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
+  @override
   Widget build(BuildContext context) {
+    final searching = query.trim().isNotEmpty;
+    final titles = chapters.titles.toList();
+    final indices = searchChapters(titles, query);
     return Column(
       children: [
         Appbar(title: Text("Chapters".tl)),
-        AppTabBar(
-          controller: tabController,
-          tabs: chapters.groups.map((e) => Tab(text: e)).toList(),
+        _ChapterSearchBar(
+          controller: _searchController,
+          onChanged: (value) {
+            setState(() {
+              query = value;
+            });
+          },
         ),
-        Expanded(
-          child: TabViewBody(
+        if (searching)
+          // 分组视图下搜索不按 tab 过滤，而是在全部章节里找——用户输入
+          // 章号时并不知道它落在哪个分组里，让他先切 tab 是多余的一步。
+          Expanded(
+            child: indices.isEmpty
+                ? const _EmptySearchResult()
+                : SmoothCustomScrollView(
+                    slivers: [
+                      SliverList(
+                        delegate: SliverChildBuilderDelegate((context, index) {
+                          final i = indices[index];
+                          return _ChapterListTile(
+                            onTap: () {
+                              widget.reader.toChapter(i + 1);
+                              context.pop();
+                            },
+                            title: titles[i],
+                            isActive: widget.reader.chapter == i + 1,
+                            isDownloaded: downloaded.contains(
+                              chapters.ids.elementAt(i),
+                            ),
+                          );
+                        }, childCount: indices.length),
+                      ),
+                    ],
+                  ),
+          )
+        else ...[
+          AppTabBar(
             controller: tabController,
-            children: chapters.groups.map(buildGroup).toList(),
+            tabs: chapters.groups.map((e) => Tab(text: e)).toList(),
           ),
-        ),
+          Expanded(
+            child: TabViewBody(
+              controller: tabController,
+              children: chapters.groups.map(buildGroup).toList(),
+            ),
+          ),
+        ],
       ],
     );
   }
@@ -184,6 +262,70 @@ class _GroupedChaptersViewState extends State<_GroupedChaptersView>
           ),
         ),
       ],
+    );
+  }
+}
+
+class _ChapterSearchBar extends StatelessWidget {
+  const _ChapterSearchBar({required this.controller, required this.onChanged});
+
+  final TextEditingController controller;
+
+  final ValueChanged<String> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
+      child: TextField(
+        controller: controller,
+        onChanged: onChanged,
+        textInputAction: TextInputAction.search,
+        style: ts.s14,
+        decoration: InputDecoration(
+          isDense: true,
+          hintText: "Search by title or chapter number".tl,
+          hintStyle: ts.s14.withColor(
+            context.colorScheme.onSurfaceVariant.withValues(alpha: 0.7),
+          ),
+          prefixIcon: const Icon(Icons.search_rounded, size: 20),
+          suffixIcon: controller.text.isEmpty
+              ? null
+              : IconButton(
+                  tooltip: "Clear".tl,
+                  icon: const Icon(Icons.close_rounded, size: 18),
+                  onPressed: () {
+                    controller.clear();
+                    onChanged('');
+                  },
+                ),
+          contentPadding: const EdgeInsets.symmetric(vertical: 10),
+          border: OutlineInputBorder(
+            borderRadius: BorderRadius.circular(10),
+            borderSide: BorderSide(
+              color: context.colorScheme.outlineVariant,
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptySearchResult extends StatelessWidget {
+  const _EmptySearchResult();
+
+  @override
+  Widget build(BuildContext context) {
+    return Center(
+      child: Padding(
+        padding: const EdgeInsets.all(24),
+        child: Text(
+          "No chapters matched".tl,
+          textAlign: TextAlign.center,
+          style: ts.s14.withColor(context.colorScheme.onSurfaceVariant),
+        ),
+      ),
     );
   }
 }

@@ -193,6 +193,8 @@ class Settings with ChangeNotifier {
     'blockedCommentWords': [],
     'defaultSearchTarget': null,
     'autoPageTurningInterval': 5, // in seconds
+    'restReminderEnabled': false,
+    'restReminderInterval': 45, // in minutes
     'readerMode': 'galleryLeftToRight', // values of [ReaderMode]
     'readerScreenPicNumberForLandscape': 1, // 1 - 5
     'readerScreenPicNumberForPortrait': 1, // 1 - 5

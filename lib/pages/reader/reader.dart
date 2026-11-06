@@ -21,6 +21,7 @@ import 'package:venera/foundation/achievements.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/cache_manager.dart';
+import 'package:venera/foundation/chapter_search.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/consts.dart';
@@ -115,7 +116,12 @@ class Reader extends StatefulWidget {
 }
 
 class _ReaderState extends State<Reader>
-    with _ReaderLocation, _ReaderWindow, _VolumeListener, _ImagePerPageHandler {
+    with
+        _ReaderLocation,
+        _ReaderWindow,
+        _VolumeListener,
+        _ImagePerPageHandler,
+        WidgetsBindingObserver {
   @override
   void update() {
     setState(() {});
@@ -239,6 +245,8 @@ class _ReaderState extends State<Reader>
       LocalFavoritesManager().onRead(cid, type);
     });
     _sessionStart = DateTime.now();
+    startRestReminder();
+    WidgetsBinding.instance.addObserver(this);
     super.initState();
   }
 
@@ -299,10 +307,12 @@ class _ReaderState extends State<Reader>
   @override
   void dispose() {
     _recordReadingSession();
+    WidgetsBinding.instance.removeObserver(this);
     if (isFullscreen) {
       fullscreen();
     }
     autoPageTurningTimer?.cancel();
+    pauseRestReminder();
     focusNode.dispose();
     SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     // 退出阅读页后把窗口亮度交还给系统，避免影响其他页面
@@ -314,6 +324,73 @@ class _ReaderState extends State<Reader>
     PaintingBinding.instance.imageCache.maximumSizeBytes = 100 << 20;
     disposeReaderWindow();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    super.didChangeAppLifecycleState(state);
+    // inactive 太敏感（下拉状态栏、来电横幅都会触发），只认真正的后台。
+    final inBackground =
+        state == AppLifecycleState.paused ||
+        state == AppLifecycleState.hidden ||
+        state == AppLifecycleState.detached;
+    if (inBackground) {
+      if (autoPageTurningTimer != null) {
+        autoPageTurningTimer!.cancel();
+        autoPageTurningTimer = null;
+        _autoPageTurningPausedInBackground = true;
+        update();
+      }
+      pauseRestReminder();
+    } else if (state == AppLifecycleState.resumed) {
+      if (_autoPageTurningPausedInBackground) {
+        _autoPageTurningPausedInBackground = false;
+        _startAutoPageTurning(cid, type);
+        update();
+      }
+      resumeRestReminder();
+    }
+  }
+
+  /// 休息提醒定时器。
+  ///
+  /// 只在阅读页活着，切到后台会被 [didChangeAppLifecycleState] 停掉，
+  /// 所以「切出去回个消息」本身就算一次休息，回到前台重新计时。
+  Timer? _restReminderTimer;
+
+  void startRestReminder() {
+    _restReminderTimer?.cancel();
+    _restReminderTimer = null;
+    if (appdata.settings['restReminderEnabled'] != true) {
+      return;
+    }
+    final minutes = (appdata.settings['restReminderInterval'] as int?) ?? 45;
+    if (minutes <= 0) {
+      return;
+    }
+    _restReminderTimer = Timer.periodic(Duration(minutes: minutes), (_) {
+      if (!mounted) {
+        return;
+      }
+      showToast(
+        message: "You have been reading for @a minutes. Time for a short break."
+            .tlParams({'a': minutes}),
+        // 用阅读页自己的 context，跟这里其他提示保持一致：它一定在
+        // OverlayWidget 之下，App.rootContext 也能找到但没必要绕一层。
+        context: context,
+        seconds: 6,
+        icon: const Icon(Icons.self_improvement_rounded),
+      );
+    });
+  }
+
+  void pauseRestReminder() {
+    _restReminderTimer?.cancel();
+    _restReminderTimer = null;
+  }
+
+  void resumeRestReminder() {
+    startRestReminder();
   }
 
   @override
@@ -739,23 +816,42 @@ abstract mixin class _ReaderLocation {
 
   Timer? autoPageTurningTimer;
 
+  /// 自动翻页是否因为切到后台而被临时收掉。
+  ///
+  /// `Timer.periodic` 不认生命周期：用户切去回消息，回来时已经自动翻过好几页、
+  /// 阅读位置被推走、历史也写脏了，中间一直在耗电。所以进后台就收掉定时器，
+  /// 但记住「用户本来开着自动阅读」，回到前台再按原间隔接上。
+  bool _autoPageTurningPausedInBackground = false;
+
   void autoPageTurning(String cid, ComicType type) {
     if (autoPageTurningTimer != null) {
       autoPageTurningTimer!.cancel();
       autoPageTurningTimer = null;
+      // 用户主动关掉，就不要在回到前台时自作主张续上。
+      _autoPageTurningPausedInBackground = false;
     } else {
-      int interval = appdata.settings.getReaderSetting(
-        cid,
-        type.sourceKey,
-        'autoPageTurningInterval',
-      );
-      autoPageTurningTimer = Timer.periodic(Duration(seconds: interval), (_) {
-        if (page == maxPage) {
-          autoPageTurningTimer!.cancel();
-        }
-        toNextPage();
-      });
+      _startAutoPageTurning(cid, type);
     }
+  }
+
+  void _startAutoPageTurning(String cid, ComicType type) {
+    int interval = appdata.settings.getReaderSetting(
+      cid,
+      type.sourceKey,
+      'autoPageTurningInterval',
+    );
+    autoPageTurningTimer = Timer.periodic(Duration(seconds: interval), (_) {
+      if (page == maxPage) {
+        // 到最后一页就停。定时器必须一并置 null，否则按钮一直显示「自动阅读中」，
+        // 实际早就停了，再点一下还会走进「取消」分支。
+        autoPageTurningTimer?.cancel();
+        autoPageTurningTimer = null;
+        _autoPageTurningPausedInBackground = false;
+        update();
+        return;
+      }
+      toNextPage();
+    });
   }
 }
 
