@@ -18,12 +18,15 @@ void main() {
 
   test('每个设置页都有分组标题', () {
     // 页面文件 → 至少需要几个分组标题
+    // 分类按 VeneraX 的口径重整后：Interface → App（多了隐私一组）、
+    // Actions → Favorites（手势与隐私分别搬去阅读和 App）、Features 拆成
+    // Content（源/来源/过滤/缩略图）与 Data & Sync（存储/下载/通知）。
     const pages = {
-      'interface_settings.dart': 5,
-      'action_settings.dart': 2,
-      'feature_settings.dart': 4,
+      'interface_settings.dart': 6,
+      'action_settings.dart': 1,
+      'feature_settings.dart': 6,
       'reader.dart': 4,
-      // 下载线程搬去「功能」后，网络页只剩「连接」一组。
+      // 下载线程搬去「数据与同步」后，网络页只剩「连接」一组。
       'network.dart': 1,
       'about.dart': 2,
     };

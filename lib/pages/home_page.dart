@@ -1,5 +1,3 @@
-import 'dart:math';
-
 import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
@@ -8,7 +6,6 @@ import 'package:url_launcher/url_launcher_string.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/components/image_favorites_card.dart';
 import 'package:venera/foundation/app.dart';
-import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
@@ -18,7 +15,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
-import 'package:venera/foundation/image_provider/cached_image.dart';
+import 'package:venera/pages/random_pick_dialog.dart';
 import 'package:venera/foundation/image_provider/history_image_provider.dart';
 import 'package:venera/pages/history_page.dart';
 import 'package:venera/pages/reader/reader.dart';
@@ -952,234 +949,114 @@ class _ImageFavoritesState extends State<ImageFavorites> {
   }
 }
 
-/// 首页「今天读什么」：从收藏和历史里随机抽一本。
+/// 首页「抽一本」入口。
 ///
-/// 收藏夹堆了几百本、或者翻来翻去不知道看哪本时，抽一张比翻列表轻松。
-/// 抽中的卡带一次「翻出来」的缩放+微旋转动效，点一下直接进详情页。
-class _RandomPick extends StatefulWidget {
+/// 以前这里是直接滚动显示一张随机卡：省一次点击，但也把「抽」这个动作本身
+/// 砍掉了——用户只看到一本书在眼前晃，不知道候选池有多大，也没法挑收藏夹或
+/// 只看没读过的。现在改成入口卡，点开是完整的抽签流程：选范围、选进度、
+/// 翻牌、再抽一次。
+class _RandomPick extends StatelessWidget {
   const _RandomPick();
 
-  @override
-  State<_RandomPick> createState() => _RandomPickState();
-}
-
-class _RandomPickState extends State<_RandomPick> {
-  List<Comic> _pool = const [];
-
-  Comic? _picked;
-
-  /// 换一张时递增，用作 AnimatedSwitcher 的 key，触发翻牌动效
-  int _seed = 0;
-
-  @override
-  void initState() {
-    super.initState();
-    _loadPool();
-  }
-
-  Future<void> _loadPool() async {
-    final map = <String, Comic>{};
-    try {
-      for (final comic in await LocalFavoritesManager().getAllComicsAsync()) {
-        if (comic.sourceKey == 'local') continue;
-        map['${comic.sourceKey}/${comic.id}'] = comic;
-      }
-    } catch (e) {
-      Log.error("RandomPick", "Failed to load favorites: $e");
-    }
-    try {
-      for (final comic in HistoryManager().getAll()) {
-        if (comic.sourceKey == 'local') continue;
-        map.putIfAbsent('${comic.sourceKey}/${comic.id}', () => comic);
-      }
-    } catch (e) {
-      Log.error("RandomPick", "Failed to load history: $e");
-    }
-    if (!mounted) return;
-    setState(() {
-      _pool = map.values.toList();
-      _picked = _pick();
-    });
-  }
-
-  Comic? _pick() {
-    if (_pool.isEmpty) return null;
-    if (_pool.length == 1) return _pool.first;
-    final random = Random();
-    var next = _pool[random.nextInt(_pool.length)];
-    // 别连续抽到同一本
-    var guard = 0;
-    while (_picked != null &&
-        next.id == _picked!.id &&
-        next.sourceKey == _picked!.sourceKey &&
-        guard++ < 8) {
-      next = _pool[random.nextInt(_pool.length)];
-    }
-    return next;
-  }
-
-  void _draw() {
-    setState(() {
-      _picked = _pick();
-      _seed++;
-      HapticFeedback.selectionClick();
-    });
-  }
-
-  void _open(Comic comic) {
+  Future<void> _open(BuildContext context) async {
+    final picked = await showRandomPickDialog(context);
+    if (picked == null) return;
     App.mainNavigatorKey?.currentContext?.to(
       () => ComicPage(
-        id: comic.id,
-        sourceKey: comic.sourceKey,
-        cover: comic.cover,
-        title: comic.title,
+        id: picked.id,
+        sourceKey: picked.type.sourceKey,
+        cover: picked.cover,
+        title: picked.title,
       ),
-    );
-  }
-
-  ImageProvider _providerOf(Comic comic) {
-    if (comic is History) {
-      return HistoryImageProvider(comic);
-    }
-    return CachedImageProvider(
-      comic.cover,
-      sourceKey: comic.sourceKey,
-      cid: comic.id,
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    final cs = context.colorScheme;
-    final picked = _picked;
+    final colors = context.colorScheme;
     return SliverToBoxAdapter(
-      child: Container(
-        margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        decoration: BoxDecoration(
-          border: Border.all(color: cs.outlineVariant, width: 0.6),
-          borderRadius: BorderRadius.circular(12),
-        ),
-        clipBehavior: Clip.antiAlias,
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            SizedBox(
-              height: 56,
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
+        child: Material(
+          color: Colors.transparent,
+          child: InkWell(
+            borderRadius: BorderRadius.circular(12),
+            onTap: () => _open(context),
+            child: Container(
+              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
+              decoration: BoxDecoration(
+                border: Border.all(color: colors.outlineVariant, width: 0.6),
+                borderRadius: BorderRadius.circular(12),
+              ),
               child: Row(
                 children: [
-                  const SizedBox(width: 16),
-                  Icon(Icons.casino_outlined, size: 18, color: cs.primary),
-                  const SizedBox(width: 8),
-                  Text('Today Picks'.tl, style: ts.s18),
-                  const Spacer(),
-                  if (picked != null)
-                    IconButton(
-                      onPressed: _draw,
-                      tooltip: 'Draw again'.tl,
-                      icon: const Icon(Icons.refresh, size: 20),
+                  const _MiniCardBack(),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      mainAxisSize: MainAxisSize.min,
+                      children: [
+                        Text(
+                          "Draw a comic".tl,
+                          style: ts.s16.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          "Pick one at random from your favorites"
+                              .tl,
+                          maxLines: 2,
+                          overflow: TextOverflow.ellipsis,
+                          style: ts.s12.withColor(colors.onSurfaceVariant),
+                        ),
+                      ],
                     ),
-                  const SizedBox(width: 4),
+                  ),
+                  const SizedBox(width: 8),
+                  FilledButton.tonal(
+                    onPressed: () => _open(context),
+                    style: FilledButton.styleFrom(
+                      minimumSize: const Size(0, 36),
+                      padding: const EdgeInsets.symmetric(horizontal: 14),
+                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
+                      visualDensity: VisualDensity.compact,
+                    ),
+                    child: Text("Draw".tl),
+                  ),
                 ],
               ),
             ),
-            Padding(
-              padding: const EdgeInsets.fromLTRB(8, 0, 8, 8),
-              child: picked == null
-                  ? Container(
-                      height: 78,
-                      alignment: Alignment.center,
-                      child: Text(
-                        'Favorite or read something first'.tl,
-                        style: ts.s14.withColor(cs.onSurfaceVariant),
-                      ),
-                    )
-                  : AnimatedSwitcher(
-                      duration: const Duration(milliseconds: 340),
-                      switchInCurve: Curves.easeOutCubic,
-                      switchOutCurve: Curves.easeIn,
-                      transitionBuilder: (child, animation) {
-                        final scale = CurvedAnimation(
-                          parent: animation,
-                          curve: Curves.easeOutBack,
-                        );
-                        return FadeTransition(
-                          opacity: animation,
-                          child: ScaleTransition(
-                            scale: Tween<double>(
-                              begin: 0.86,
-                              end: 1.0,
-                            ).animate(scale),
-                            child: RotationTransition(
-                              turns: Tween<double>(
-                                begin: -0.012,
-                                end: 0.0,
-                              ).animate(scale),
-                              child: child,
-                            ),
-                          ),
-                        );
-                      },
-                      child: KeyedSubtree(
-                        key: ValueKey(_seed),
-                        child: _buildCard(context, picked),
-                      ),
-                    ),
-            ),
-          ],
+          ),
         ),
       ),
     );
   }
+}
 
-  Widget _buildCard(BuildContext context, Comic comic) {
-    final cs = context.colorScheme;
-    final source = ComicSource.find(comic.sourceKey)?.name ?? comic.sourceKey;
-    return InkWell(
-      borderRadius: BorderRadius.circular(10),
-      onTap: () => _open(comic),
-      child: Padding(
-        padding: const EdgeInsets.all(8),
-        child: Row(
-          children: [
-            ClipRRect(
-              borderRadius: BorderRadius.circular(6),
-              child: SizedBox(
-                width: 58,
-                height: 78,
-                child: AnimatedImage(
-                  image: _providerOf(comic),
-                  fit: BoxFit.cover,
-                  cacheWidth: 240,
-                ),
-              ),
-            ),
-            const SizedBox(width: 12),
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    comic.title,
-                    maxLines: 2,
-                    overflow: TextOverflow.ellipsis,
-                    style: ts.s16.copyWith(fontWeight: FontWeight.w600),
-                  ),
-                  const SizedBox(height: 4),
-                  Text(
-                    source,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ts.s12.withColor(cs.onSurfaceVariant),
-                  ),
-                ],
-              ),
-            ),
-            const SizedBox(width: 8),
-            Icon(Icons.chevron_right, size: 20, color: cs.onSurfaceVariant),
-          ],
+/// 入口卡左边那张小卡背：和弹窗里的牌同一个配色，点进去有连贯感。
+class _MiniCardBack extends StatelessWidget {
+  const _MiniCardBack();
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    return Container(
+      width: 38,
+      height: 52,
+      alignment: Alignment.center,
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(8),
+        gradient: LinearGradient(
+          begin: Alignment.topLeft,
+          end: Alignment.bottomRight,
+          colors: [colors.primaryContainer, colors.tertiaryContainer],
+        ),
+        border: Border.all(
+          color: colors.primary.withValues(alpha: 0.55),
+          width: 1.2,
         ),
       ),
+      child: Icon(Icons.style_rounded, size: 20, color: colors.onPrimaryContainer),
     );
   }
 }

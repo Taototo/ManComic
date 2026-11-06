@@ -19,7 +19,7 @@ class ComicPeek {
     // 提前把封面送进图像缓存：封面多半刚在列表里显示过、已在内存，
     // 万一被回收也能借这次调用提前解码，弹层首帧就不会闪占位色。
     // 这里必须和列表用同一个解码尺寸，否则缓存键不同、等于白预热。
-    final image = _findImageProvider(comic);
+    final image = findImageProvider(comic);
     if (image != null) {
       precacheImage(
         ResizeImage.resizeIfNeeded(kCoverDecodeWidth, null, image),
@@ -134,7 +134,7 @@ class _ComicPeekLayerState extends State<_ComicPeekLayer>
     final cs = theme.colorScheme;
     final isDark = theme.brightness == Brightness.dark;
     final comic = widget.comic;
-    final image = _findImageProvider(comic);
+    final image = findImageProvider(comic);
     final tags = <String>[];
     for (final tag in comic.tags ?? const <String>[]) {
       var text = tag.translateTagsToCN;

@@ -26,6 +26,7 @@ import 'package:venera/network/app_dio.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/home_modules_page.dart';
 import 'package:venera/pages/reading_report_page.dart';
+import 'package:venera/pages/reading_statistics_page.dart';
 import 'package:venera/utils/app_icon.dart';
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/data_sync.dart';
@@ -64,35 +65,42 @@ class _SettingsPageState extends State<SettingsPage> {
 
   /// 分类按「你在改什么」划分，而不是按页面/模块划分。
   ///
-  /// 以前是 探索 / 阅读 / 外观 / 本地收藏 / 漫画源 / APP / 网络 / 关于——
-  /// 其中「APP」只是「没想好放哪的都塞进来」，「探索」既是页面名又装着一堆
-  /// 缩略图设置，本地收藏整页其实都是收藏操作。现在按语义收成六类：
-  ///
-  /// * 界面 —— 看起来怎么样（主题、图标、材质、缩略图）
-  /// * 阅读 —— 书怎么看（翻页、显示、图片、评论）
-  /// * 操作 —— 手怎么用（手势、收藏操作、隐私）
-  /// * 功能 —— 能做什么（数据、通知、内容来源、屏蔽）
-  /// * 网络 —— 怎么连
-  /// * 关于 —— 版本与更新
+  /// 这套分类参考 VeneraX：App / Reading / Favorites / Data & Sync / Explore /
+  /// Network / About，属于同一件事的设置挨在一起，并且每个分类配一句说明——
+  /// 光看名字猜不到「Data & Sync」里有下载线程，「Explore」里有列表缩略图。
   ///
   /// 调试相关的东西不在这里——「重载配置 / JS 求值器」对绝大多数人没有意义，
   /// 放在列表里只会增加噪声。需要时在「关于」页连点版本号 7 次打开。
   final categories = <String>[
-    "Interface",
+    "App",
     "Reading",
-    "Actions",
-    "Features",
+    "Favorites",
+    "Data & Sync",
+    // 这里叫 Content 而不是 Explore：应用里的 Explore 已经是「推荐」页的
+    // 专名，同一个词出现在设置里会让人以为是在调推荐页。
+    "Content",
     "Network",
     "About",
   ];
 
   final icons = <IconData>[
-    Icons.palette_outlined,
-    Icons.auto_stories_outlined,
-    Icons.touch_app_outlined,
-    Icons.widgets_outlined,
+    Icons.apps,
+    Icons.book,
+    Icons.collections_bookmark_rounded,
+    Icons.cloud_sync_outlined,
+    Icons.explore,
     Icons.public,
     Icons.info_outline,
+  ];
+
+  final descriptions = <String>[
+    "Appearance, language, privacy and home layout",
+    "Page layout, gestures and reading display",
+    "Favorite folders and collection behavior",
+    "Storage, cache, backups and downloads",
+    "Comic lists, sources and content filters",
+    "Proxy, DNS and connections",
+    "Version, updates and help",
   ];
 
   @override
@@ -199,7 +207,7 @@ class _SettingsPageState extends State<SettingsPage> {
         key: ValueKey(id),
         duration: const Duration(milliseconds: 200),
         width: double.infinity,
-        height: 46,
+        height: 66,
         padding: const EdgeInsets.fromLTRB(12, 0, 12, 0),
         decoration: BoxDecoration(
           color: selected ? colors.primaryContainer.toOpacity(0.36) : null,
@@ -214,8 +222,27 @@ class _SettingsPageState extends State<SettingsPage> {
           children: [
             Icon(icons[id]),
             const SizedBox(width: 16),
-            Text(name, style: ts.s16),
-            const Spacer(),
+            Expanded(
+              child: Column(
+                mainAxisSize: MainAxisSize.min,
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    name,
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s16,
+                  ),
+                  const SizedBox(height: 2),
+                  Text(
+                    descriptions[id].tl,
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s10.withColor(colors.onSurfaceVariant),
+                  ),
+                ],
+              ),
+            ),
             if (selected) const Icon(Icons.arrow_right),
           ],
         ),
@@ -263,13 +290,14 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSettingsContent(int pageIndex) {
     return switch (pageIndex) {
-      0 => const InterfaceSettings(),
-      // 手势已经拆到「操作」分类，阅读页不再重复显示。
-      1 => const ReaderSettings(showGestures: false, showReports: true),
-      2 => const ActionSettings(),
-      3 => const FeatureSettings(),
-      4 => const NetworkSettings(),
-      5 => const AboutSettings(),
+      0 => const AppSettings(),
+      // 手势回到阅读页：它管的就是「书怎么看」，和翻页、显示是一类事。
+      1 => const ReaderSettings(showGestures: true, showReports: true),
+      2 => const FavoritesSettings(),
+      3 => const DataSettings(),
+      4 => const ExploreSettings(),
+      5 => const NetworkSettings(),
+      6 => const AboutSettings(),
       _ => throw UnimplementedError(),
     };
   }
@@ -287,12 +315,14 @@ class _SettingsDetailPage extends StatelessWidget {
 
   Widget _buildPage() {
     return switch (pageIndex) {
-      0 => const InterfaceSettings(),
-      1 => const ReaderSettings(showGestures: false, showReports: true),
-      2 => const ActionSettings(),
-      3 => const FeatureSettings(),
-      4 => const NetworkSettings(),
-      5 => const AboutSettings(),
+      0 => const AppSettings(),
+      // 手势回到阅读页：它管的就是「书怎么看」，和翻页、显示是一类事。
+      1 => const ReaderSettings(showGestures: true, showReports: true),
+      2 => const FavoritesSettings(),
+      3 => const DataSettings(),
+      4 => const ExploreSettings(),
+      5 => const NetworkSettings(),
+      6 => const AboutSettings(),
       _ => throw UnimplementedError(),
     };
   }

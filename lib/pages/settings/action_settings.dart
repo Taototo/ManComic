@@ -1,30 +1,25 @@
 part of 'settings_page.dart';
 
-/// 操作：怎么点、怎么滑、点完发生什么。
+/// Favorites：收藏夹怎么用。
 ///
-/// 和「阅读」的分工：阅读页管的是「书怎么看」（翻页方式、显示、图片处理），
-/// 这一页管的是「手怎么用」——阅读器里的手势、收藏相关的快捷操作、以及
-/// 需要额外验证才能进入的隐私项。这些设置共同的特点是「改了之后手上能立刻
-/// 感觉到差别」，所以放在一起。
-class ActionSettings extends StatefulWidget {
-  const ActionSettings({super.key});
+/// 只管和收藏相关的行为：点一下收藏是看详情还是直接读、长按快捷收藏放到哪个
+/// 文件夹、读完之后要不要自动挪走。这些设置的共同点是「影响收藏夹里发生了什么」，
+/// 和「书怎么看」（阅读）或「App 长什么样」（App）都不重叠。
+class FavoritesSettings extends StatefulWidget {
+  const FavoritesSettings({super.key});
 
   @override
-  State<ActionSettings> createState() => _ActionSettingsState();
+  State<FavoritesSettings> createState() => _FavoritesSettingsState();
 }
 
-class _ActionSettingsState extends State<ActionSettings> {
+class _FavoritesSettingsState extends State<FavoritesSettings> {
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
       slivers: [
-        SliverAppbar(title: Text("Actions".tl)),
-        // 阅读器里的手势排在最前：这一页的主题就是「手怎么用」，手势是其中
-        // 用得最频繁的一项。它们和阅读页共用同一套开关，放这里是因为关注点
-        // 是「怎么操作」而不是「画面怎么显示」。
-        SliverToBoxAdapter(child: const ReaderGestureSettings()),
+        SliverAppbar(title: Text("Favorites".tl)),
         _SettingPartTitle(
-          title: "Favorites".tl,
+          title: "Collection behavior".tl,
           icon: Icons.bookmark_border_rounded,
         ),
         SelectSetting(
@@ -82,41 +77,6 @@ class _ActionSettingsState extends State<ActionSettings> {
           },
           actionTitle: 'Delete'.tl,
         ).toSliver(),
-        // 阅读器里的手势：和阅读页共用同一套开关，放在这里是因为它们都是
-        // 「手怎么操作」，而不是「画面怎么显示」。
-        _SettingPartTitle(
-          title: "Privacy & security".tl,
-          icon: Icons.lock_outline_rounded,
-        ),
-        _SwitchSetting(
-          title: "Privacy Shield for Favorites".tl,
-          subtitle:
-              "Blur the page until you tap to unlock, resets on app restart".tl,
-          settingKey: "privacyFavorites",
-        ).toSliver(),
-        if (!App.isLinux)
-          _SwitchSetting(
-            title: "Authorization Required".tl,
-            settingKey: "authorizationRequired",
-            onChanged: () async {
-              var current = appdata.settings['authorizationRequired'];
-              if (current) {
-                final auth = LocalAuthentication();
-                final bool canAuthenticateWithBiometrics =
-                    await auth.canCheckBiometrics;
-                final bool canAuthenticate = canAuthenticateWithBiometrics ||
-                    await auth.isDeviceSupported();
-                if (!canAuthenticate) {
-                  context.showMessage(message: "Biometrics not supported".tl);
-                  setState(() {
-                    appdata.settings['authorizationRequired'] = false;
-                  });
-                  appdata.saveData();
-                  return;
-                }
-              }
-            },
-          ).toSliver(),
       ],
     );
   }

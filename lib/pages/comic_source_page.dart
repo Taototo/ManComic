@@ -172,26 +172,16 @@ class _BodyState extends State<_Body> {
             SliverToBoxAdapter(child: _buildAddCard(context)),
             if (sources.isEmpty)
               SliverToBoxAdapter(child: _buildEmpty(context))
-            else
+            else ...[
               SliverToBoxAdapter(child: _buildListHeader(context, sources)),
-            SliverList(
-              delegate: SliverChildBuilderDelegate((context, index) {
-                final source = sources[index];
-                final health = _health.of(source);
-                final newVersion =
-                    ComicSourceManager().availableUpdates[source.key];
-                return _SourceCard(
-                  key: ValueKey(source.key),
-                  source: source,
-                  health: health,
-                  newVersion: newVersion != null &&
-                          compareSemVer(newVersion, source.version)
-                      ? newVersion
-                      : null,
-                  onTap: () => _openDetail(source),
-                );
-              }, childCount: sources.isEmpty ? 0 : sources.length),
-            ),
+              // 所有源收在一张卡里，行与行之间用分隔线切开。
+              //
+              // 原来每个源是一张独立的玻璃卡：八个源就是八层模糊、八个圆角、
+              // 八次阴影，滚动时每帧都在重算；而且卡与卡之间的空隙让「一共
+              // 有几个源、几个挂了」这件事散了。体检页那种单卡多行读起来是
+              // 一张表，逐行对比健康状态快得多。
+              SliverToBoxAdapter(child: _buildSourceList(context, sources)),
+            ],
             SliverPadding(
               padding: EdgeInsets.only(bottom: context.padding.bottom + 16),
             ),
@@ -240,8 +230,49 @@ class _BodyState extends State<_Body> {
     );
   }
 
-  Widget _buildEmpty(BuildContext context) {
-    final colors = context.colorScheme;
+  /// 一页源 = 一张卡 + 每行一个源。
+  ///
+  /// 行的信息密度按体检页来排：左边头像（保留源之间的辨识度），中间名字与
+  /// 「版本 · 能力」两行，右边分数与状态词，最后是进入详情的箭头。
+  /// 分数和状态词同时保留——分数用来横向比较，状态词用来一眼判断好与不好。
+  Widget _buildSourceList(BuildContext context, List<ComicSource> sources) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      child: LiquidGlass(
+        borderRadius: BorderRadius.circular(22),
+        blur: math.min(GlassConfig.blur, 18.0),
+        child: Material(
+          type: MaterialType.transparency,
+          borderRadius: BorderRadius.circular(22),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              for (var i = 0; i < sources.length; i++)
+                _SourceRow(
+                  key: ValueKey(sources[i].key),
+                  source: sources[i],
+                  health: _health.of(sources[i]),
+                  newVersion: _updateOf(sources[i]),
+                  showDivider: i != sources.length - 1,
+                  onTap: () => _openDetail(sources[i]),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 有比本地更新、且确实更晚的版本才返回，否则 [String]? 为空。
+  String? _updateOf(ComicSource source) {
+    final newVersion = ComicSourceManager().availableUpdates[source.key];
+    if (newVersion != null && compareSemVer(newVersion, source.version)) {
+      return newVersion;
+    }
+    return null;
+  }
+
+  Widget _buildEmpty(BuildContext context) {    final colors = context.colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 28, 16, 0),
       child: LiquidGlass(
@@ -735,18 +766,18 @@ class _RingPainter extends CustomPainter {
       old.strokeWidth != strokeWidth;
 }
 
-/// 一个源 = 一张条状玻璃卡。
+/// 源列表里的一行：头像 + 名称 + 版本能力 + 健康分 + 状态词。
 ///
-/// 之前所有源的设置项（select / switch / input / callback）和账号操作全部平铺
-/// 在同一页，源一多整页就是几十行无标题的 ListTile，既找不到东西也不知道每行
-/// 属于哪个源。现在卡片只留「叫什么、什么版本、能干什么、健不健康」，
-/// 其余全部进详情面板。
-class _SourceCard extends StatelessWidget {
-  const _SourceCard({
+/// 样式对齐「漫画源体检」页——单卡多行、行间细分割线、右侧状态标签。
+/// 分数仍然保留（原来那个环形的读数），所以既能横向比大小，也能一眼读出
+/// 状态；状态词和分数同时给，是因为「92 分」和「良好」回答的是两个问题。
+class _SourceRow extends StatelessWidget {
+  const _SourceRow({
     super.key,
     required this.source,
     required this.health,
     required this.onTap,
+    required this.showDivider,
     this.newVersion,
   });
 
@@ -759,146 +790,176 @@ class _SourceCard extends StatelessWidget {
 
   final VoidCallback onTap;
 
+  final bool showDivider;
+
   @override
   Widget build(BuildContext context) {
     final colors = context.colorScheme;
-    final statusColor = _healthColor(colors, health.status);
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(16, 6, 16, 6),
-      child: DecoratedBox(
-        // LiquidGlass 自带的阴影是按大面板调的，放在 70px 高的条上太重，
-        // 这里用一层轻阴影把卡片从背景上抬起来就够了。
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(22),
-          boxShadow: [
-            BoxShadow(
-              color: Colors.black.withValues(alpha: 0.07),
-              blurRadius: 16,
-              offset: const Offset(0, 6),
-            ),
-          ],
-        ),
-        child: LiquidGlass(
-          borderRadius: BorderRadius.circular(22),
-          // 卡片面积小，模糊值不需要页面级那么高，低一点滚动更跟手。
-          blur: math.min(GlassConfig.blur, 16.0),
-          shadow: false,
-          child: Material(
-            type: MaterialType.transparency,
-            child: InkWell(
-              borderRadius: BorderRadius.circular(22),
-              onTap: onTap,
-              child: Padding(
-                padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-                child: Row(
-                  children: [
-                    _SourceAvatar(source: source),
-                    const SizedBox(width: 12),
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        mainAxisSize: MainAxisSize.min,
+    final statusColor = _sourceHealthColor(colors, health.status);
+    final testing = health.status == SourceHealthStatus.testing;
+    final score = health.score;
+    return InkWell(
+      onTap: onTap,
+      child: Column(
+        children: [
+          Padding(
+            padding: const EdgeInsets.fromLTRB(12, 10, 10, 10),
+            child: Row(
+              children: [
+                _SourceAvatar(source: source, size: 34),
+                const SizedBox(width: 11),
+                Expanded(
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Row(
                         children: [
-                          Row(
-                            children: [
-                              Flexible(
-                                child: Text(
-                                  source.name,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                  style: ts.s16.merge(
-                                    const TextStyle(
-                                      fontWeight: FontWeight.w600,
-                                    ),
-                                  ),
-                                ),
+                          Flexible(
+                            child: Text(
+                              source.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: ts.s14.merge(
+                                const TextStyle(fontWeight: FontWeight.w600),
                               ),
-                              if (newVersion != null) ...[
-                                const SizedBox(width: 6),
-                                Container(
-                                  padding: const EdgeInsets.symmetric(
-                                    horizontal: 6,
-                                    vertical: 1,
-                                  ),
-                                  decoration: BoxDecoration(
-                                    color:
-                                        colors.primary.withValues(alpha: 0.16),
-                                    borderRadius: BorderRadius.circular(7),
-                                  ),
-                                  child: Text(
-                                    "Update".tl,
-                                    style: ts.s8.withColor(colors.primary),
-                                  ),
-                                ),
-                              ],
-                              if (source.isLogged) ...[
-                                const SizedBox(width: 6),
-                                Icon(
-                                  Icons.verified_user_outlined,
-                                  size: 13,
-                                  color: colors.primary.withValues(alpha: 0.75),
-                                ),
-                              ],
-                            ],
+                            ),
                           ),
-                          const SizedBox(height: 5),
-                          Text(
-                            _metaLine(source, health),
-                            maxLines: 1,
-                            overflow: TextOverflow.ellipsis,
-                            style: ts.s12.withColor(colors.onSurfaceVariant),
-                          ),
+                          if (newVersion != null) ...[
+                            const SizedBox(width: 6),
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 5,
+                                vertical: 1,
+                              ),
+                              decoration: BoxDecoration(
+                                color: colors.primary.withValues(alpha: 0.16),
+                                borderRadius: BorderRadius.circular(6),
+                              ),
+                              child: Text(
+                                "Update".tl,
+                                style: ts.s8.withColor(colors.primary),
+                              ),
+                            ),
+                          ],
+                          if (source.isLogged) ...[
+                            const SizedBox(width: 5),
+                            Icon(
+                              Icons.verified_user_outlined,
+                              size: 12,
+                              color: colors.primary.withValues(alpha: 0.75),
+                            ),
+                          ],
                         ],
                       ),
-                    ),
-                    const SizedBox(width: 10),
-                    _HealthRing(health: health, color: statusColor, size: 42),
-                    const SizedBox(width: 5),
-                    Icon(
-                      Icons.chevron_right_rounded,
-                      size: 18,
-                      color: colors.onSurfaceVariant.withValues(alpha: 0.6),
-                    ),
-                  ],
+                      const SizedBox(height: 3),
+                      Text(
+                        _sourceMetaLine(source),
+                        maxLines: 1,
+                        overflow: TextOverflow.ellipsis,
+                        style: ts.s10.withColor(colors.onSurfaceVariant),
+                      ),
+                    ],
+                  ),
                 ),
-              ),
+                const SizedBox(width: 6),
+                // 分数：没测过显示「—」，测的过程中转圈。固定宽度让三行的
+                // 名字左边缘对齐——数字宽度一变，整列都会跟着抖。
+                SizedBox(
+                  width: 30,
+                  height: 28,
+                  child: Center(
+                    child: testing
+                        ? SizedBox(
+                            width: 13,
+                            height: 13,
+                            child: CircularProgressIndicator(
+                              strokeWidth: 1.6,
+                              color: statusColor,
+                            ),
+                          )
+                        : Text(
+                            score == null ? "—" : "$score",
+                            style: ts.s14
+                                .withColor(statusColor)
+                                .merge(const TextStyle(fontWeight: FontWeight.w700)),
+                          ),
+                  ),
+                ),
+                const SizedBox(width: 8),
+                // 状态词长度不固定（「20 results」和「Search not supported」差
+                // 三倍），必须给上限并允许省略，否则窄屏上整行会被它顶出去。
+                ConstrainedBox(
+                  constraints: const BoxConstraints(maxWidth: 84),
+                  child: Container(
+                    padding: const EdgeInsets.symmetric(
+                      horizontal: 8,
+                      vertical: 3,
+                    ),
+                    decoration: BoxDecoration(
+                      // 中性底色 + 彩色文字：分数本身已经是彩色的，标签再铺
+                      // 一层同色底会在视觉上连成一块，两个信息看起来像一个。
+                      color: colors.surfaceContainerHighest.withValues(
+                        alpha: 0.7,
+                      ),
+                      borderRadius: BorderRadius.circular(8),
+                    ),
+                    child: Text(
+                      health.statusText,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: ts.s10.withColor(statusColor),
+                    ),
+                  ),
+                ),
+                Icon(
+                  Icons.chevron_right_rounded,
+                  size: 17,
+                  color: colors.onSurfaceVariant.withValues(alpha: 0.5),
+                ),
+              ],
             ),
           ),
-        ),
+          if (showDivider)
+            Container(
+              height: 0.7,
+              margin: const EdgeInsets.only(left: 57),
+              color: colors.outlineVariant.withValues(alpha: 0.5),
+            ),
+        ],
       ),
     );
   }
+}
 
-  static Color _healthColor(ColorScheme colors, SourceHealthStatus status) {
-    switch (status) {
-      // 用 iOS 系统色，比 M3 的绿/橙更亮一档，和玻璃底色在一起更正。
-      case SourceHealthStatus.ok:
-        return const Color(0xFF34C759);
-      case SourceHealthStatus.empty:
-        return const Color(0xFFFF9F0A);
-      case SourceHealthStatus.error:
-        return colors.error;
-      case SourceHealthStatus.testing:
-        return colors.primary;
-      case SourceHealthStatus.waiting:
-      case SourceHealthStatus.unsupported:
-        return colors.onSurfaceVariant;
-    }
+Color _sourceHealthColor(ColorScheme colors, SourceHealthStatus status) {
+  switch (status) {
+    // 用 iOS 系统色，比 M3 的绿/橙更亮一档，和玻璃底色在一起更正。
+    case SourceHealthStatus.ok:
+      return const Color(0xFF34C759);
+    case SourceHealthStatus.empty:
+      return const Color(0xFFFF9F0A);
+    case SourceHealthStatus.error:
+      return colors.error;
+    case SourceHealthStatus.testing:
+      return colors.primary;
+    case SourceHealthStatus.waiting:
+    case SourceHealthStatus.unsupported:
+      return colors.onSurfaceVariant;
   }
+}
 
-  /// 副标题只放「版本 + 能力」，健康状态交给右边的环，避免同一件事说两遍。
-  static String _metaLine(ComicSource source, SourceHealth health) {
-    final parts = <String>["v${source.version}"];
-    if (source.explorePages.isNotEmpty) {
-      parts.add("${"Explore".tl} ${source.explorePages.length}");
-    }
-    if (source.categoryData != null) parts.add("Category".tl);
-    if (source.searchPageData != null) parts.add("Search".tl);
-    if (source.favoriteData != null) parts.add("Favorites".tl);
-    if (source.account != null) parts.add("Login".tl);
-    parts.add(health.statusText);
-    return parts.join(" · ");
+/// 副标题只放「版本 + 能力」。健康状态交给右边的分数和标签，不在这里重复。
+String _sourceMetaLine(ComicSource source) {
+  final parts = <String>["v${source.version}"];
+  if (source.explorePages.isNotEmpty) {
+    parts.add("${"Explore".tl} ${source.explorePages.length}");
   }
+  if (source.categoryData != null) parts.add("Category".tl);
+  if (source.searchPageData != null) parts.add("Search".tl);
+  if (source.favoriteData != null) parts.add("Favorites".tl);
+  if (source.account != null) parts.add("Login".tl);
+  return parts.join(" · ");
 }
 
 /// 源详情面板：健康数据 + 操作 + 源自己的设置项 + 账号。
@@ -973,6 +1034,11 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
         child: LiquidGlass(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
           blur: 24,
+          // 详情面板是一块「要读内容」的面板，不是浮在画面上的装饰：设置项、
+          // 账号信息、错误消息全都写在上面。原来跟着全局玻璃浓度走（默认
+          // 58%），底下的源列表和封面直接透上来，字压着图看不清。这里钉死
+          // 到接近不透明，模糊只用来软化边缘。
+          opacity: 0.95,
           shadow: false,
           // 内容少时贴合内容高度，别留一大片空白；超过 82% 才滚动。
           child: Column(
@@ -1068,7 +1134,7 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
 
   Widget _buildHealthCard(BuildContext context) {
     final colors = context.colorScheme;
-    final statusColor = _SourceCard._healthColor(colors, health.status);
+    final statusColor = _sourceHealthColor(colors, health.status);
     final latency = health.latency;
     final checkedAt = health.checkedAt;
     return Container(

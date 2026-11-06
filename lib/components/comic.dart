@@ -1,6 +1,6 @@
 part of 'components.dart';
 
-ImageProvider? _findImageProvider(Comic comic) {
+ImageProvider? findImageProvider(Comic comic) {
   ImageProvider image;
   if (comic is LocalComic) {
     image = LocalComicImageProvider(comic);
@@ -258,7 +258,7 @@ class ComicTile extends StatelessWidget {
   }
 
   Widget buildImage(BuildContext context) {
-    var image = _findImageProvider(comic);
+    var image = findImageProvider(comic);
     if (image == null) {
       return const SizedBox();
     }
@@ -1856,7 +1856,7 @@ class SimpleComicTile extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    var image = _findImageProvider(comic);
+    var image = findImageProvider(comic);
 
     Widget child = image == null
         ? const SizedBox()

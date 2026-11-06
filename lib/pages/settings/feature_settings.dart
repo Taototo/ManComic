@@ -1,19 +1,104 @@
 part of 'settings_page.dart';
 
-/// 功能：数据、通知、内容来源与过滤。
+/// Content：看什么、从哪看、怎么排。
 ///
-/// 原来这些散在「APP」和「探索」两个分类里：「APP」这个名字本身就说明不了
-/// 里面有什么（数据备份 + 阅读报告 + 语言 + 指纹锁），而探索页显示哪些源、
-/// 屏蔽哪些词又藏在「探索」下面。现在按「功能」这个语义收成一处：拿到一台
-/// 新手机要搬的东西、要关掉的通知、要屏蔽的关键词，都在这一页。
-class FeatureSettings extends StatefulWidget {
-  const FeatureSettings({super.key});
+/// 参考 VeneraX 的分类口径——「漫画列表、源与内容过滤」。所以这一页装三件事：
+/// 源本身、内容来源与关键词过滤、以及列表里缩略图的排布方式（缩略图是内容
+/// 的组织形态，不是 App 的外观）。
+class ExploreSettings extends StatefulWidget {
+  const ExploreSettings({super.key});
 
   @override
-  State<FeatureSettings> createState() => _FeatureSettingsState();
+  State<ExploreSettings> createState() => _ExploreSettingsState();
 }
 
-class _FeatureSettingsState extends State<FeatureSettings> {
+class _ExploreSettingsState extends State<ExploreSettings> {
+  @override
+  Widget build(BuildContext context) {
+    return SmoothCustomScrollView(
+      slivers: [
+        SliverAppbar(title: Text("Content".tl)),
+        _SettingPartTitle(title: "Comic sources".tl, icon: Icons.dns_outlined),
+        // 漫画源是一个完整的管理页（源列表、导入、调试），单独一行跳过去，
+        // 比在一堆开关中间塞「管理源」按钮清楚。
+        ListTile(
+          contentPadding: kSettingTilePadding,
+          title: Text("Comic Sources".tl),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const ComicSourcePage());
+          },
+        ).toSliver(),
+        _SettingPartTitle(title: "Content sources".tl, icon: Icons.tune_rounded),
+        ...contentSourceSlivers(),
+        _SettingPartTitle(
+          title: "Filters".tl,
+          icon: Icons.filter_alt_outlined,
+        ),
+        // 「屏蔽哪些词」和「从哪些源取内容」是同一件事的两面：都是在决定
+        // 内容边界。
+        ...keywordFilterSlivers(),
+        _SettingPartTitle(
+          title: "Comic tiles".tl,
+          icon: Icons.grid_view_rounded,
+        ),
+        SelectSetting(
+          title: "Display mode of comic tile".tl,
+          settingKey: "comicDisplayMode",
+          optionTranslation: {
+            "detailed": "Detailed".tl,
+            "brief": "Brief".tl,
+          },
+        ).toSliver(),
+        SelectSetting(
+          title: "Layout mode of comic grid".tl,
+          settingKey: "comicLayoutMode",
+          optionTranslation: {
+            "grid": "Grid Layout".tl,
+            "staggered": "Staggered Layout".tl,
+          },
+        ).toSliver(),
+        SelectSetting(
+          title: "Display mode of comic list".tl,
+          settingKey: "comicListDisplayMode",
+          optionTranslation: {
+            "paging": "Paging".tl,
+            "Continuous": "Continuous".tl,
+          },
+        ).toSliver(),
+        _SliderSetting(
+          title: "Size of comic tile".tl,
+          settingsIndex: "comicTileScale",
+          interval: 0.05,
+          min: 0.5,
+          max: 1.5,
+        ).toSliver(),
+        _SwitchSetting(
+          title: "Show favorite status on comic tile".tl,
+          settingKey: "showFavoriteStatusOnTile",
+        ).toSliver(),
+        _SwitchSetting(
+          title: "Show history on comic tile".tl,
+          settingKey: "showHistoryStatusOnTile",
+        ).toSliver(),
+      ],
+    );
+  }
+}
+
+/// Data & Sync：要搬走的东西和要吃掉的空间。
+///
+/// 存储路径、存储占用、导入导出、WebDAV、下载并发、通知——共同点是「和这台
+/// 设备上的数据有关」。下载线程原本挂在「网络」页，用户想调下载不会去点网络，
+/// 放这里和存储、缓存一起才找得到。
+class DataSettings extends StatefulWidget {
+  const DataSettings({super.key});
+
+  @override
+  State<DataSettings> createState() => _DataSettingsState();
+}
+
+class _DataSettingsState extends State<DataSettings> {
   Future<void> _setNewStoragePath() async {
     String? result;
     if (App.isAndroid) {
@@ -45,22 +130,7 @@ class _FeatureSettingsState extends State<FeatureSettings> {
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
       slivers: [
-        SliverAppbar(title: Text("Features".tl)),
-        _SettingPartTitle(title: "Content".tl, icon: Icons.dns_outlined),
-        // 漫画源是一个完整的管理页（源列表、导入、调试），单独一行跳过去，
-        // 比在一堆开关中间塞「管理源」按钮清楚。
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          title: Text("Comic Sources".tl),
-          trailing: const Icon(Icons.arrow_right),
-          onTap: () {
-            context.to(() => const ComicSourcePage());
-          },
-        ).toSliver(),
-        ...contentSourceSlivers(),
-        // 「屏蔽哪些词」和「从哪些源取内容」是同一件事的两面：都是在决定
-        // 内容边界。以前分两个分组标题，中间只隔三行，属于为了分组而分组。
-        ...keywordFilterSlivers(),
+        SliverAppbar(title: Text("Data & Sync".tl)),
         _SettingPartTitle(
           title: "Data & backup".tl,
           icon: Icons.storage_rounded,
@@ -90,9 +160,7 @@ class _FeatureSettingsState extends State<FeatureSettings> {
           ),
           onTap: _setNewStoragePath,
         ).toSliver(),
-        // 原来这里是一行「缓存 320 MB / 2048 MB」加两个图标按钮。总数看不出
-        // 谁占的空间，而且本地漫画、收藏封面、日志同样在吃存储却完全不可见。
-        // 改成进「存储」页看分类明细，清理和限额也都在那边。
+        // 总数看不出谁占的空间，所以进「存储」页看分类明细。
         _CallbackSetting(
           title: "Storage".tl,
           subtitle: "Cache, app data, local comics and logs".tl,
@@ -144,8 +212,6 @@ class _FeatureSettingsState extends State<FeatureSettings> {
           },
           actionTitle: 'Set'.tl,
         ).toSliver(),
-        // 下载线程原本挂在「网络」页——用户想调下载不会去点网络。并发数
-        // 也是「功能」的一部分，和存储路径、缓存限额放在一起才找得到。
         _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
         _SliderSetting(
           title: "Download Threads".tl,

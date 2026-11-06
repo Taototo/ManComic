@@ -534,6 +534,15 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           // 年度报告原来是挂在「功能 > 阅读与通知」下的，那个分组名本身就说
           // 不清里面有什么。阅读报告属于阅读，之后加阅读时长统计也落在这里。
           _CallbackSetting(
+            title: "Reading Statistics".tl,
+            subtitle: "Today, last 7 days, all time and comics read recently"
+                .tl,
+            callback: () async {
+              context.to(() => const ReadingStatisticsPage());
+            },
+            actionTitle: 'Open'.tl,
+          ).toSliver(),
+          _CallbackSetting(
             title: "Yearly Report".tl,
             callback: () async {
               context.to(() => const ReadingReportPage());

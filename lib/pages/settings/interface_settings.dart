@@ -1,18 +1,23 @@
 part of 'settings_page.dart';
 
-/// 界面：所有「看起来怎么样」的设置。
+/// App：应用本身长什么样、说什么语言、要不要锁。
 ///
-/// 原来的分类里，主题和应用图标在「外观」，缩略图 / 网格 / 尺寸在「探索」，
-/// 首页模块又回到「外观」——同一件事被拆到两个页面，找起来只能靠猜。这里
-/// 按「影响屏幕上的什么」重新收拢：主题与材质、首页、列表里的缩略图。
-class InterfaceSettings extends StatelessWidget {
-  const InterfaceSettings({super.key});
+/// 主题、材质、图标、语言、隐私、首页布局都归这里——它们共同的问法是
+/// 「这个 App 是什么样子」，而不是「书怎么看」。列表里的缩略图与网格属于
+/// 「内容怎么排」，跟着「探索」走。
+class AppSettings extends StatefulWidget {
+  const AppSettings({super.key});
 
+  @override
+  State<AppSettings> createState() => _AppSettingsState();
+}
+
+class _AppSettingsState extends State<AppSettings> {
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
       slivers: [
-        SliverAppbar(title: Text("Interface".tl)),
+        SliverAppbar(title: Text("App".tl)),
         _SettingPartTitle(title: "Theme".tl, icon: Icons.palette_outlined),
         SelectSetting(
           title: "Theme Mode".tl,
@@ -156,49 +161,6 @@ class InterfaceSettings extends StatelessWidget {
             context.to(() => const HomeModulesPage());
           },
         ).toSliver(),
-        _SettingPartTitle(
-          title: "Comic tiles".tl,
-          icon: Icons.grid_view_rounded,
-        ),
-        SelectSetting(
-          title: "Display mode of comic tile".tl,
-          settingKey: "comicDisplayMode",
-          optionTranslation: {
-            "detailed": "Detailed".tl,
-            "brief": "Brief".tl,
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Layout mode of comic grid".tl,
-          settingKey: "comicLayoutMode",
-          optionTranslation: {
-            "grid": "Grid Layout".tl,
-            "staggered": "Staggered Layout".tl,
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Display mode of comic list".tl,
-          settingKey: "comicListDisplayMode",
-          optionTranslation: {
-            "paging": "Paging".tl,
-            "Continuous": "Continuous".tl,
-          },
-        ).toSliver(),
-        _SliderSetting(
-          title: "Size of comic tile".tl,
-          settingsIndex: "comicTileScale",
-          interval: 0.05,
-          min: 0.5,
-          max: 1.5,
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Show favorite status on comic tile".tl,
-          settingKey: "showFavoriteStatusOnTile",
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Show history on comic tile".tl,
-          settingKey: "showHistoryStatusOnTile",
-        ).toSliver(),
         // 语言原来在「功能 > 其他」——那个分组是个垃圾桶，什么都能往里扔。
         // 改界面上的文字属于界面，和主题、缩略图是同一类事。
         _SettingPartTitle(
@@ -218,6 +180,39 @@ class InterfaceSettings extends StatelessWidget {
             App.forceRebuild();
           },
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Privacy & security".tl,
+          icon: Icons.lock_outline_rounded,
+        ),
+        _SwitchSetting(
+          title: "Privacy Shield for Favorites".tl,
+          subtitle:
+              "Blur the page until you tap to unlock, resets on app restart".tl,
+          settingKey: "privacyFavorites",
+        ).toSliver(),
+        if (!App.isLinux)
+          _SwitchSetting(
+            title: "Authorization Required".tl,
+            settingKey: "authorizationRequired",
+            onChanged: () async {
+              var current = appdata.settings['authorizationRequired'];
+              if (current) {
+                final auth = LocalAuthentication();
+                final bool canAuthenticateWithBiometrics =
+                    await auth.canCheckBiometrics;
+                final bool canAuthenticate = canAuthenticateWithBiometrics ||
+                    await auth.isDeviceSupported();
+                if (!canAuthenticate) {
+                  context.showMessage(message: "Biometrics not supported".tl);
+                  setState(() {
+                    appdata.settings['authorizationRequired'] = false;
+                  });
+                  appdata.saveData();
+                  return;
+                }
+              }
+            },
+          ).toSliver(),
       ],
     );
   }

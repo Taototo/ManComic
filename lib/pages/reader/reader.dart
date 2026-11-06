@@ -277,6 +277,11 @@ class _ReaderState extends State<Reader>
         duration: DateTime.now().difference(start),
         sourceKey: type.sourceKey,
         title: widget.name,
+        // id 与封面让「最近 30 天读过的作品」能直接跳详情、显示封面；
+        // 只记标题的话，那一页就只剩一串文字。
+        comicId: widget.cid,
+        cover: widget.history.cover,
+        subtitle: widget.history.subtitle,
       );
       Achievements.checkAndNotify();
     } catch (_) {

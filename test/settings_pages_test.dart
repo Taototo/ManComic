@@ -24,8 +24,10 @@ void main() {
         home: Scaffold(body: child),
       );
 
+  // 只挑不依赖运行环境的页：Favorites / Data / Explore 一进 build 就要读
+  // 收藏数据库、本地漫画路径和已加载的源，在 widget 测试里没有这些。
   for (final entry in {
-    'interface': const InterfaceSettings(),
+    'app': const AppSettings(),
     'network': const NetworkSettings(),
     'about': const AboutSettings(),
   }.entries) {

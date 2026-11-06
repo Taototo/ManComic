@@ -72,7 +72,7 @@ void main() {
         home: child,
       );
 
-  testWidgets('每个源一张卡，卡片上显示版本和健康分', (tester) async {
+  testWidgets('源列表是一张卡多行，每行显示版本和健康分', (tester) async {
     final sources = [
       _fakeSource('拷贝漫画', 'copymanga'),
       _fakeSource('哔咔漫画', 'picacg', version: '2.3.1', logged: true),

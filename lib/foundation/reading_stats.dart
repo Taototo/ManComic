@@ -12,13 +12,74 @@ class ReadingSession {
   final String source;
   final String title;
 
+  /// 漫画 id、封面与副标题。
+  ///
+  /// 老版本只记了 source + title，所以这三个字段可能是空的：按标题聚合还能
+  /// 用，但没法从「最近 30 天」直接跳详情。新记录会填上。
+  final String? comicId;
+  final String? cover;
+  final String? subtitle;
+
   const ReadingSession({
     required this.start,
     required this.day,
     required this.seconds,
     required this.source,
     required this.title,
+    this.comicId,
+    this.cover,
+    this.subtitle,
   });
+}
+
+/// 「最近 N 天读过的作品」里的一行：一本漫画在这个时间段里的总时长。
+class RecentComicReading {
+  final String id;
+
+  final String sourceKey;
+
+  final String title;
+
+  final String subtitle;
+
+  final String cover;
+
+  final int seconds;
+
+  final DateTime lastReadAt;
+
+  const RecentComicReading({
+    required this.id,
+    required this.sourceKey,
+    required this.title,
+    required this.subtitle,
+    required this.cover,
+    required this.seconds,
+    required this.lastReadAt,
+  });
+
+  /// 老数据没有 id，用标题兜底：点进去至少还能按标题搜索。
+  String get identity => id.isEmpty ? "title:$title" : "$sourceKey/$id";
+}
+
+/// 30 天列表的排序方式
+enum ReadingStatisticsSort {
+  lastRead("last_read"),
+  durationDesc("duration_desc"),
+  durationAsc("duration_asc"),
+  nameAsc("name_asc"),
+  nameDesc("name_desc");
+
+  const ReadingStatisticsSort(this.value);
+
+  final String value;
+
+  static ReadingStatisticsSort fromValue(Object? value) {
+    for (final item in values) {
+      if (item.value == value) return item;
+    }
+    return lastRead;
+  }
 }
 
 /// 年度阅读总结。
@@ -139,9 +200,21 @@ class ReadingStats {
         day text not null,
         seconds integer not null,
         source text not null,
-        title text not null
+        title text not null,
+        comic_id text,
+        cover text,
+        subtitle text
       );
     """);
+    // 老库补列。ALTER TABLE 加列在已有数据上是原地操作，不用重建表；重复
+    // 执行只会抛「duplicate column」，吞掉即可。
+    for (final column in ["comic_id", "cover", "subtitle"]) {
+      try {
+        db.execute("alter table reading_session add column $column text;");
+      } catch (_) {
+        // 列已存在
+      }
+    }
     db.execute("""
       create index if not exists idx_reading_session_start
       on reading_session(start);
@@ -157,10 +230,16 @@ class ReadingStats {
   }
 
   /// 记录一次阅读会话。
+  ///
+  /// [comicId] / [cover] / [subtitle] 用来让「最近 30 天」那一页能直接跳到详情
+  /// 并显示封面；不传也能记，只是那一行会退化成「按标题聚合」。
   static void record({
     required Duration duration,
     required String sourceKey,
     required String title,
+    String? comicId,
+    String? cover,
+    String? subtitle,
   }) {
     if (duration.inSeconds < minSessionSeconds) {
       return;
@@ -172,18 +251,164 @@ class ReadingStats {
     final start = end.subtract(Duration(seconds: seconds));
     try {
       _database.execute(
-        "insert into reading_session (start, day, seconds, source, title) "
-        "values (?, ?, ?, ?, ?);",
+        "insert into reading_session "
+        "(start, day, seconds, source, title, comic_id, cover, subtitle) "
+        "values (?, ?, ?, ?, ?, ?, ?, ?);",
         [
           start.millisecondsSinceEpoch,
           _dayKey(end),
           seconds,
           sourceKey,
           title,
+          comicId,
+          cover,
+          subtitle,
         ],
       );
     } catch (_) {
       // 统计失败不能影响阅读
+    }
+  }
+
+  static ReadingSession _sessionFromRow(Row row) => ReadingSession(
+        start: row["start"] as int,
+        day: row["day"] as String,
+        seconds: row["seconds"] as int,
+        source: row["source"] as String,
+        title: row["title"] as String,
+        comicId: row["comic_id"] as String?,
+        cover: row["cover"] as String?,
+        subtitle: row["subtitle"] as String?,
+      );
+
+  static const _sessionColumns =
+      "start, day, seconds, source, title, comic_id, cover, subtitle";
+
+  /// 全部时间的累计秒数（跨年，和年度报告的 [summary] 不同）。
+  static int totalSeconds() {
+    try {
+      final rows = _database.select(
+        "select sum(seconds) as s from reading_session;",
+      );
+      final value = rows.first["s"];
+      return value is num ? value.toInt() : 0;
+    } catch (_) {
+      return 0;
+    }
+  }
+
+  /// 最近 [days] 天（含今天）每天的总秒数，从最早的一天排到今天。
+  static List<({DateTime day, int seconds})> dailySeconds({
+    int days = 7,
+    DateTime? reference,
+  }) {
+    final now = reference ?? DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final from = today.subtract(Duration(days: days - 1));
+    final values = <String, int>{};
+    try {
+      final rows = _database.select(
+        "select day, sum(seconds) as s from reading_session "
+        "where start >= ? group by day;",
+        [from.millisecondsSinceEpoch],
+      );
+      for (final row in rows) {
+        values[row["day"] as String] = (row["s"] as num).toInt();
+      }
+    } catch (_) {
+      // 查询失败按全零处理：统计页空着也比崩掉好
+    }
+    return [
+      for (var i = 0; i < days; i++)
+        (
+          day: DateTime(from.year, from.month, from.day + i),
+          seconds: values[_dayKey(
+                DateTime(from.year, from.month, from.day + i),
+              )] ??
+              0,
+        ),
+    ];
+  }
+
+  /// 统计最近 [days] 天读过的作品，按本聚合。
+  ///
+  /// 老数据没有 comic_id，同一个 id 位置会是 null——这时用标题当聚合键，
+  /// 至少不会把同一本书拆成两行。
+  static List<RecentComicReading> recentComics({
+    int days = 30,
+    DateTime? reference,
+  }) {
+    final now = reference ?? DateTime.now();
+    final today = DateTime(now.year, now.month, now.day);
+    final from = today.subtract(Duration(days: days - 1));
+    List<ReadingSession> sessions;
+    try {
+      final rows = _database.select(
+        "select $_sessionColumns from reading_session "
+        "where start >= ? order by start asc;",
+        [from.millisecondsSinceEpoch],
+      );
+      sessions = rows.map(_sessionFromRow).toList();
+    } catch (_) {
+      return [];
+    }
+
+    final grouped = <String, RecentComicReading>{};
+    for (final session in sessions) {
+      final key = session.comicId == null || session.comicId!.isEmpty
+          ? "${session.source}/title:${session.title}"
+          : "${session.source}/${session.comicId}";
+      final end = DateTime.fromMillisecondsSinceEpoch(
+        session.start,
+      ).add(Duration(seconds: session.seconds));
+      final existing = grouped[key];
+      if (existing == null) {
+        grouped[key] = RecentComicReading(
+          id: session.comicId ?? "",
+          sourceKey: session.source,
+          title: session.title,
+          subtitle: session.subtitle ?? "",
+          cover: session.cover ?? "",
+          seconds: session.seconds,
+          lastReadAt: end,
+        );
+      } else {
+        grouped[key] = RecentComicReading(
+          // 后到的记录可能补上了封面（老记录没有），以非空为准
+          id: existing.id.isEmpty ? (session.comicId ?? "") : existing.id,
+          sourceKey: existing.sourceKey,
+          title: existing.title,
+          subtitle: existing.subtitle.isEmpty
+              ? (session.subtitle ?? "")
+              : existing.subtitle,
+          cover: existing.cover.isEmpty
+              ? (session.cover ?? "")
+              : existing.cover,
+          seconds: existing.seconds + session.seconds,
+          lastReadAt: end.isAfter(existing.lastReadAt)
+              ? end
+              : existing.lastReadAt,
+        );
+      }
+    }
+    return grouped.values.toList();
+  }
+
+  /// 删掉某本漫画的全部统计。
+  static void removeComic(String sourceKey, String title, {String? comicId}) {
+    try {
+      if (comicId != null && comicId.isNotEmpty) {
+        _database.execute(
+          "delete from reading_session where source = ? and comic_id = ?;",
+          [sourceKey, comicId],
+        );
+      }
+      _database.execute(
+        "delete from reading_session where source = ? and title = ?;",
+        [sourceKey, title],
+      );
+    } catch (_) {
+      // 删除失败不影响使用
     }
   }
 
@@ -192,19 +417,11 @@ class ReadingStats {
     final end = DateTime(year + 1, 1, 1).millisecondsSinceEpoch;
     try {
       final rows = _database.select(
-        "select start, day, seconds, source, title from reading_session "
+        "select $_sessionColumns from reading_session "
         "where start >= ? and start < ? order by start asc;",
         [start, end],
       );
-      return rows
-          .map((e) => ReadingSession(
-                start: e["start"] as int,
-                day: e["day"] as String,
-                seconds: e["seconds"] as int,
-                source: e["source"] as String,
-                title: e["title"] as String,
-              ))
-          .toList();
+      return rows.map(_sessionFromRow).toList();
     } catch (_) {
       return [];
     }
@@ -214,18 +431,9 @@ class ReadingStats {
   static List<ReadingSession> allSessions() {
     try {
       final rows = _database.select(
-        "select start, day, seconds, source, title from reading_session "
-        "order by start asc;",
+        "select $_sessionColumns from reading_session order by start asc;",
       );
-      return rows
-          .map((e) => ReadingSession(
-                start: e["start"] as int,
-                day: e["day"] as String,
-                seconds: e["seconds"] as int,
-                source: e["source"] as String,
-                title: e["title"] as String,
-              ))
-          .toList();
+      return rows.map(_sessionFromRow).toList();
     } catch (_) {
       return [];
     }
@@ -264,19 +472,11 @@ class ReadingStats {
     List<ReadingSession> sessions;
     try {
       final rows = _database.select(
-        "select start, day, seconds, source, title from reading_session "
+        "select $_sessionColumns from reading_session "
         "where start >= ? and start < ? order by start asc;",
         [startMs, endMs],
       );
-      sessions = rows
-          .map((e) => ReadingSession(
-                start: e["start"] as int,
-                day: e["day"] as String,
-                seconds: e["seconds"] as int,
-                source: e["source"] as String,
-                title: e["title"] as String,
-              ))
-          .toList();
+      sessions = rows.map(_sessionFromRow).toList();
     } catch (_) {
       sessions = [];
     }
