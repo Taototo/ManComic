@@ -743,3 +743,164 @@ class AppSurface extends StatelessWidget {
     return surface;
   }
 }
+
+/// 液态主题下的「按压回弹」。
+///
+/// iOS 26 的液态玻璃控件按下时不是变暗，而是**先胀开一点、松手再弹回**——
+/// 像一块果冻被指尖压了一下又回位。这里用两段动画复刻：
+///
+/// - 按下：110ms `easeOut` 到 [scale]，快，跟手；
+/// - 松开：380ms `elasticOut` 回 1.0，中途会冲过 1.0 再荡回来，这一下「涟
+///   漪」是液态感的来源，用普通 `easeOut` 只会是一次平淡的收缩。
+///
+/// 默认主题下直接返回 child，不做任何包装——这是「新主题」，不该动老外观。
+class LiquidPressable extends StatefulWidget {
+  const LiquidPressable({
+    super.key,
+    required this.child,
+    this.scale = 1.06,
+    this.enabled = true,
+  });
+
+  final Widget child;
+
+  /// 按下时放大到多少。大按钮用小一点（1.03），小块用大一点（1.08）。
+  final double scale;
+
+  /// 交给外层手势控制。按钮自己正在处理 loading 时就不该再弹。
+  final bool enabled;
+
+  @override
+  State<LiquidPressable> createState() => _LiquidPressableState();
+}
+
+class _LiquidPressableState extends State<LiquidPressable> {
+  bool _down = false;
+
+  void _set(bool v) {
+    if (!widget.enabled || _down == v) return;
+    setState(() => _down = v);
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    if (!LiquidTheme.isOn(context)) return widget.child;
+    return Listener(
+      // 用 Listener 而不是 GestureDetector：按钮自己已经有 InkWell 在抢点击，
+      // 再套一层手势会互相吃掉，表现成「按下没反应」。Listener 只旁听指针，
+      // 不参与手势竞技场。
+      //
+      // behavior 必须是 opaque：默认的 deferToChild 会一路问到最里面那层，
+      // 玻璃按钮内部是透明的 Material，指针可能直接穿过去收不到。
+      behavior: HitTestBehavior.opaque,
+      onPointerDown: (_) => _set(true),
+      onPointerUp: (_) => _set(false),
+      onPointerCancel: (_) => _set(false),
+      child: AnimatedScale(
+        scale: _down ? widget.scale : 1.0,
+        duration: _down
+            ? const Duration(milliseconds: 110)
+            : const Duration(milliseconds: 380),
+        curve: _down ? Curves.easeOut : Curves.elasticOut,
+        child: widget.child,
+      ),
+    );
+  }
+}
+
+/// 液态主题下的玻璃胶囊按钮。
+///
+/// 详情页的 Read / Continue / Download 这类主操作。默认主题下退回 [FilledButton]
+/// 的等效外观（实心主色 / tonal 色），保证不切主题时一模一样。
+class LiquidGlassButton extends StatelessWidget {
+  const LiquidGlassButton({
+    super.key,
+    required this.child,
+    required this.onPressed,
+    this.tonal = false,
+    this.height = 44,
+  });
+
+  final Widget child;
+
+  final VoidCallback? onPressed;
+
+  /// tonal 是次要操作（下载），用更淡的着色；否则是主操作（开始阅读）。
+  final bool tonal;
+
+  final double height;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final enabled = onPressed != null;
+    final radius = BorderRadius.circular(height / 2);
+
+    if (!LiquidTheme.isOn(context)) {
+      final label = DefaultTextStyle.of(context).style.merge(
+            TextStyle(
+              fontSize: 14,
+              fontWeight: FontWeight.w500,
+              color: enabled
+                  ? (tonal ? colors.onSecondaryContainer : colors.onPrimary)
+                  : colors.onSurface.withValues(alpha: 0.38),
+            ),
+          );
+      return SizedBox(
+        height: height,
+        child: Material(
+          color: enabled
+              ? (tonal ? colors.secondaryContainer : colors.primary)
+              : colors.onSurface.withValues(alpha: 0.12),
+          borderRadius: radius,
+          child: InkWell(
+            borderRadius: radius,
+            onTap: onPressed,
+            child: Center(child: DefaultTextStyle(style: label, child: child)),
+          ),
+        ),
+      );
+    }
+
+    // 液态：主操作用主色薄薄地给玻璃上色，次要操作用中性玻璃。都不做实时
+    // 模糊——它们和卡片同时可见，逐个挂 BackdropFilter 会把帧率拖垮。
+    final tint = tonal ? colors.surface : colors.primary;
+
+    return LiquidPressable(
+      scale: 1.04,
+      enabled: enabled,
+      child: SizedBox(
+        height: height,
+        child: LiquidGlass(
+          borderRadius: radius,
+          blur: 0,
+          // 主操作也留一点通透：0.72 时能感觉到主色底下有东西，但不是
+          // 「半透明按钮」那种看不清的状态；全不透明就跟没换主题一样了。
+          opacity: tonal ? 0.34 : 0.72,
+          tint: tint,
+          shadow: false,
+          highlight: tonal ? 0.6 : 1.4,
+          child: Material(
+            type: MaterialType.transparency,
+            child: InkWell(
+              borderRadius: radius,
+              onTap: onPressed,
+              child: Center(
+                child: DefaultTextStyle(
+                  style: DefaultTextStyle.of(context).style.merge(
+                        TextStyle(
+                          fontSize: 14,
+                          fontWeight: FontWeight.w600,
+                          color: tonal ? colors.onSurface : colors.onPrimary,
+                        ),
+                      ),
+                  child: child,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ),
+    );
+  }
+}

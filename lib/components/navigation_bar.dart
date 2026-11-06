@@ -948,19 +948,27 @@ class _TabTransitionState extends State<_TabTransition>
 
   @override
   Widget build(BuildContext context) {
+    final liquid = LiquidTheme.isOn(context);
     return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
+      color: liquid
+          ? Colors.transparent
+          : Theme.of(context).colorScheme.surface,
       child: AnimatedBuilder(
         animation: _controller,
         builder: (context, child) {
           final t = Curves.easeOutCubic.transform(_controller.value);
-          return Opacity(
-            opacity: 0.65 + 0.35 * t,
-            child: Transform.translate(
-              offset: Offset(widget.direction * 16 * (1 - t), 0),
-              child: child,
-            ),
+          final moved = Transform.translate(
+            offset: Offset(widget.direction * 16 * (1 - t), 0),
+            child: child,
           );
+          // 液态主题下不做透明度淡入。
+          //
+          // 两个原因：1) 页面底已经透明了，Opacity 0.65 会把文字也一起调淡，
+          // 叠在色斑上看起来是「发灰」而不是「淡入」，220ms 内闪一下很难看；
+          // 2) 没有底色可垫，淡入过程中看到的就是色斑本身，反而像闪屏。
+          // 只留位移入场，干净得多。
+          if (liquid) return moved;
+          return Opacity(opacity: 0.65 + 0.35 * t, child: moved);
         },
         child: widget.child,
       ),

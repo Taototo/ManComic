@@ -181,4 +181,130 @@ void main() {
       expect(inner.left - surface.left, closeTo(8 + 12 + 0.6, 0.01));
     });
   });
+
+  group('按压回弹与玻璃按钮', () {
+    ThemeData liquidTheme() => ThemeData(
+          colorScheme: liquidColorScheme(
+            ColorScheme.fromSeed(seedColor: Colors.indigo),
+          ),
+          extensions: const [LiquidTheme.on],
+        );
+
+    testWidgets('默认主题不接管任何手势，原样返回', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(),
+          home: const Scaffold(
+            body: LiquidPressable(child: SizedBox(width: 50, height: 50)),
+          ),
+        ),
+      );
+      // 默认主题下不该有 Listener，否则会和按钮自己的 InkWell 抢指针。
+      expect(
+        find.descendant(
+          of: find.byType(LiquidPressable),
+          matching: find.byType(Listener),
+        ),
+        findsNothing,
+      );
+    });
+
+    testWidgets('液态下按下放大、松开回弹到原尺寸', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: liquidTheme(),
+          home: const Scaffold(
+            body: Center(
+              child: LiquidPressable(
+                scale: 1.1,
+                child: SizedBox(width: 50, height: 50, key: ValueKey('box')),
+              ),
+            ),
+          ),
+        ),
+      );
+      double scaleOf() => tester
+          .widget<AnimatedScale>(
+            find.descendant(
+              of: find.byType(LiquidPressable),
+              matching: find.byType(AnimatedScale),
+            ),
+          )
+          .scale;
+
+      expect(scaleOf(), 1.0);
+
+      final box = tester.getCenter(find.byKey(const ValueKey('box')));
+      final gesture = await tester.startGesture(box);
+      await tester.pump(const Duration(milliseconds: 150));
+      expect(scaleOf(), 1.1, reason: '按住时应该胀开');
+
+      await gesture.up();
+      await tester.pumpAndSettle();
+      expect(scaleOf(), 1.0, reason: '松手要弹回去');
+    });
+
+    testWidgets('玻璃按钮在默认主题下仍是实心主色', (tester) async {
+      final colors = ColorScheme.fromSeed(seedColor: Colors.indigo);
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(colorScheme: colors),
+          home: Scaffold(
+            body: Center(
+              child: LiquidGlassButton(
+                onPressed: () {},
+                child: const Text('Read'),
+              ),
+            ),
+          ),
+        ),
+      );
+      final material = tester.widget<Material>(
+        find.descendant(
+          of: find.byType(LiquidGlassButton),
+          matching: find.byType(Material),
+        ).first,
+      );
+      expect(material.color, colors.primary);
+      expect(find.byType(LiquidGlass), findsNothing);
+    });
+
+    testWidgets('玻璃按钮在液态下换成一整块玻璃', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: liquidTheme(),
+          home: Scaffold(
+            body: Center(
+              child: LiquidGlassButton(
+                onPressed: () {},
+                child: const Text('Read'),
+              ),
+            ),
+          ),
+        ),
+      );
+      expect(find.byType(LiquidGlass), findsOneWidget);
+      expect(find.byType(LiquidPressable), findsOneWidget);
+    });
+
+    testWidgets('玻璃按钮点了会回调', (tester) async {
+      var taps = 0;
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: liquidTheme(),
+          home: Scaffold(
+            body: Center(
+              child: LiquidGlassButton(
+                onPressed: () => taps++,
+                child: const Text('Read'),
+              ),
+            ),
+          ),
+        ),
+      );
+      await tester.tap(find.byType(LiquidGlassButton));
+      await tester.pumpAndSettle();
+      expect(taps, 1);
+    });
+  });
 }

@@ -207,6 +207,10 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               color: scheme.surface.withValues(alpha: 0.90),
             )
           : null,
+      // 这里**故意不改** filledButtonTheme / outlinedButtonTheme。
+      // 全局改会把 `FilledButton.tonal` 也一起改成主色（两者的 style 会合并），
+      // 详情页那种「下载是淡色、阅读是主色」的主次关系就没了。按钮的玻璃化
+      // 交给 LiquidGlassButton 逐个做，其余按钮保持在半透明容器上即可。
       extensions: liquid ? const [LiquidTheme.on] : const [LiquidTheme.off],
     );
   }
