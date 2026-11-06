@@ -1,13 +1,19 @@
 part of 'settings_page.dart';
 
-class AppSettings extends StatefulWidget {
-  const AppSettings({super.key});
+/// 功能：数据、通知、内容来源与过滤。
+///
+/// 原来这些散在「APP」和「探索」两个分类里：「APP」这个名字本身就说明不了
+/// 里面有什么（数据备份 + 阅读报告 + 语言 + 指纹锁），而探索页显示哪些源、
+/// 屏蔽哪些词又藏在「探索」下面。现在按「功能」这个语义收成一处：拿到一台
+/// 新手机要搬的东西、要关掉的通知、要屏蔽的关键词，都在这一页。
+class FeatureSettings extends StatefulWidget {
+  const FeatureSettings({super.key});
 
   @override
-  State<AppSettings> createState() => _AppSettingsState();
+  State<FeatureSettings> createState() => _FeatureSettingsState();
 }
 
-class _AppSettingsState extends State<AppSettings> {
+class _FeatureSettingsState extends State<FeatureSettings> {
   Future<void> _setNewStoragePath() async {
     String? result;
     if (App.isAndroid) {
@@ -68,10 +74,14 @@ class _AppSettingsState extends State<AppSettings> {
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
       slivers: [
-        SliverAppbar(title: Text("App".tl)),
-        _SettingPartTitle(title: "Data".tl, icon: Icons.storage),
+        SliverAppbar(title: Text("Features".tl)),
+        _SettingPartTitle(
+          title: "Data & backup".tl,
+          icon: Icons.storage_rounded,
+        ),
         // 原来是「显示路径」+「设置新路径」两行，说的其实是同一件事。
         ListTile(
+          contentPadding: kSettingTilePadding,
           title: Text("Storage Path for local comics".tl),
           subtitle: Text(LocalManager().path, softWrap: false),
           trailing: Row(
@@ -97,6 +107,7 @@ class _AppSettingsState extends State<AppSettings> {
         // 「缓存大小」「清除缓存」「缓存上限」三行合并成一行，两件事用两个
         // 图标按钮表达：清空、改上限。占用从三行变一行。
         ListTile(
+          contentPadding: kSettingTilePadding,
           title: Text("Cache".tl),
           subtitle: Text(
             "${bytesToReadableString(CacheManager().currentSize)} / "
@@ -164,7 +175,7 @@ class _AppSettingsState extends State<AppSettings> {
           actionTitle: 'Set'.tl,
         ).toSliver(),
         _SettingPartTitle(
-          title: "Reading".tl,
+          title: "Reading & notifications".tl,
           icon: Icons.auto_stories_outlined,
         ),
         _CallbackSetting(
@@ -190,7 +201,34 @@ class _AppSettingsState extends State<AppSettings> {
             await BackgroundTasks.syncSchedule();
           },
         ).toSliver(),
-        _SettingPartTitle(title: "User".tl, icon: Icons.person_outline),
+        _SettingPartTitle(title: "Content".tl, icon: Icons.dns_outlined),
+        // 漫画源是一个完整的管理页（源列表、导入、调试），单独一行跳过去，
+        // 比在一堆开关中间塞「管理源」按钮清楚。
+        ListTile(
+          contentPadding: kSettingTilePadding,
+          title: Text("Comic Sources".tl),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const ComicSourcePage());
+          },
+        ).toSliver(),
+        ...contentSourceSlivers(),
+        _SettingPartTitle(
+          title: "Filters & keywords".tl,
+          icon: Icons.filter_alt_outlined,
+        ),
+        ...keywordFilterSlivers(),
+        _SettingPartTitle(title: "Other".tl, icon: Icons.tune_rounded),
+        SelectSetting(
+          title: "Initial Page".tl,
+          settingKey: "initialPage",
+          optionTranslation: {
+            '0': "Home Page".tl,
+            '1': "Explore Page".tl,
+            '2': "Categories Page".tl,
+            '3': "Favorites Page".tl,
+          },
+        ).toSliver(),
         SelectSetting(
           title: "Language".tl,
           settingKey: "language",
@@ -204,30 +242,6 @@ class _AppSettingsState extends State<AppSettings> {
             App.forceRebuild();
           },
         ).toSliver(),
-        if (!App.isLinux)
-          _SwitchSetting(
-            title: "Authorization Required".tl,
-            settingKey: "authorizationRequired",
-            onChanged: () async {
-              var current = appdata.settings['authorizationRequired'];
-              if (current) {
-                final auth = LocalAuthentication();
-                final bool canAuthenticateWithBiometrics =
-                    await auth.canCheckBiometrics;
-                final bool canAuthenticate =
-                    canAuthenticateWithBiometrics ||
-                    await auth.isDeviceSupported();
-                if (!canAuthenticate) {
-                  context.showMessage(message: "Biometrics not supported".tl);
-                  setState(() {
-                    appdata.settings['authorizationRequired'] = false;
-                  });
-                  appdata.saveData();
-                  return;
-                }
-              }
-            },
-          ).toSliver(),
       ],
     );
   }
@@ -387,9 +401,9 @@ class _LogsPageState extends State<LogsPage> {
                   Text(logToShow[index].content),
                   Text(
                     logToShow[index].time.toString().replaceAll(
-                      RegExp(r"\.\w+"),
-                      "",
-                    ),
+                          RegExp(r"\.\w+"),
+                          "",
+                        ),
                   ),
                   TextButton(
                     onPressed: () {
@@ -413,22 +427,25 @@ class _LogsPageState extends State<LogsPage> {
     saveFile(data: utf8.encode(log), filename: 'log.txt');
   }
 
-  /// 直接调起系统分享，长日志走文件分享避免超出 Intent 大小限制
+  /// 调起系统分享，**一律作为 log.txt 附件**。
+  ///
+  /// 以前短日志走 `shareText`：接收方拿到的是一坨没有文件名、没有换行上下文
+  /// 的纯文本，微信/邮件里会被折叠成一段，几十行堆栈根本没法看，也没法转存。
+  /// 走文件分享，对方看到的就是一个 log.txt，能直接下载、能拖进编辑器。
+  ///
+  /// 顺带也解决了 Intent 大小限制：文本分享超过 ~500KB 会被系统截断或直接
+  /// 抛 TransactionTooLargeException，文件分享没有这个问题。
   void shareLog(String log) {
     if (log.isEmpty) {
       context.showMessage(message: "No logs to share".tl);
       return;
     }
     try {
-      if (log.length > 180000) {
-        Share.shareFile(
-          data: utf8.encode(log),
-          filename: 'log.txt',
-          mime: 'text/plain',
-        );
-      } else {
-        Share.shareText(log);
-      }
+      Share.shareFile(
+        data: utf8.encode(log),
+        filename: 'log.txt',
+        mime: 'text/plain',
+      );
     } catch (e) {
       Log.error("Share log failed", e.toString());
       context.showMessage(message: "Failed to share logs".tl);

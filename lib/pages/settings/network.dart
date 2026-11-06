@@ -10,28 +10,27 @@ class NetworkSettings extends StatefulWidget {
 class _NetworkSettingsState extends State<NetworkSettings> {
   @override
   Widget build(BuildContext context) {
-    return SettingIndentScope(
-      indented: false,
-      child: SmoothCustomScrollView(
-        slivers: [
-          SliverAppbar(title: Text("Network".tl)),
-          _PopupWindowSetting(
-            title: "Proxy".tl,
-            builder: () => const _ProxySettingView(),
-          ).toSliver(),
-          _PopupWindowSetting(
-            title: "DNS Overrides".tl,
-            builder: () => const _DNSOverrides(),
-          ).toSliver(),
-          _SliderSetting(
-            title: "Download Threads".tl,
-            settingsIndex: 'downloadThreads',
-            interval: 1,
-            min: 1,
-            max: 16,
-          ).toSliver(),
-        ],
-      ),
+    return SmoothCustomScrollView(
+      slivers: [
+        SliverAppbar(title: Text("Network".tl)),
+        _SettingPartTitle(title: "Connection".tl, icon: Icons.wifi_rounded),
+        _PopupWindowSetting(
+          title: "Proxy".tl,
+          builder: () => const _ProxySettingView(),
+        ).toSliver(),
+        _PopupWindowSetting(
+          title: "DNS Overrides".tl,
+          builder: () => const _DNSOverrides(),
+        ).toSliver(),
+        _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
+        _SliderSetting(
+          title: "Download Threads".tl,
+          settingsIndex: 'downloadThreads',
+          interval: 1,
+          min: 1,
+          max: 16,
+        ).toSliver(),
+      ],
     );
   }
 }

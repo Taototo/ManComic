@@ -1,55 +1,19 @@
 part of 'settings_page.dart';
 
-/// 有分组标题的页面里，设置明细行的左右留白。
+/// 设置明细行的左右留白。
 ///
-/// 分组标题是「16 + 图标 24 + 8」从 48 起排字，明细行原来也用默认的 16，
-/// 两者左边界一样，长列表翻起来分不清哪一行属于哪个分组。
-///
+/// 每个设置页都按「图标 + 标题」分组，标题是「16 + 图标 24 + 8」从 48 起排字。
 /// 明细行给到 48，正好和标题文字对齐：图标独占最左一列，明细整体内收成一个
 /// 块，层级不用靠字号也能看出来。取 40 那种"半缩进"反而会让明细卡在图标和
 /// 标题文字之间，看着像没对齐。
 ///
-/// 这个缩进只在**有**分组标题的页面成立。关于、本地收藏这类整页没有一级标题
-/// 的设置页，用 48 就只是平白多出一段左边距，所以改用 [kSettingTilePaddingPlain]。
+/// 这里曾经用 InheritedWidget 让「没有分组标题的页面」退回 16，结果踩了一个
+/// 很隐蔽的坑：那个查找函数拿到的 context 是页面 State
+/// 自己的，位于 scope **之上**，查不到 scope 就按默认值 48 处理，于是那几页
+/// 怎么改都还是 48。现在统一成「每页都有分组标题 + 恒定 48」，规则只有一条，
+/// 也不会再被 context 层级坑到。
 const EdgeInsetsDirectional kSettingTilePadding =
     EdgeInsetsDirectional.only(start: 48, end: 16);
-
-/// 没有分组标题的页面里的明细行留白，就是普通列表的 16。
-const EdgeInsetsDirectional kSettingTilePaddingPlain =
-    EdgeInsetsDirectional.only(start: 16, end: 16);
-
-/// 声明「本页有没有分组标题」，决定明细行要不要内收。
-///
-/// 由页面在最外层包一层，明细行自己不去猜——同一批公共组件被有标题和没标题的
-/// 页面共用，只有页面自己知道该不该缩进。
-class SettingIndentScope extends InheritedWidget {
-  const SettingIndentScope({
-    required this.indented,
-    required super.child,
-    super.key,
-  });
-
-  /// 本页是否有「图标 + 标题」的分组行。
-  final bool indented;
-
-  static bool of(BuildContext context) {
-    var scope = context
-        .dependOnInheritedWidgetOfExactType<SettingIndentScope>();
-    // 默认按有标题处理：绝大多数设置页都是分组的，漏包一层时保持原样，
-    // 不会因为忘加 scope 就突然全部顶到最左边。
-    return scope?.indented ?? true;
-  }
-
-  @override
-  bool updateShouldNotify(SettingIndentScope oldWidget) =>
-      oldWidget.indented != indented;
-}
-
-/// 当前页面该用的明细行留白。
-EdgeInsetsDirectional kSettingTilePaddingOf(BuildContext context) =>
-    SettingIndentScope.of(context)
-        ? kSettingTilePadding
-        : kSettingTilePaddingPlain;
 
 class _SwitchSetting extends StatefulWidget {
   const _SwitchSetting({
@@ -90,13 +54,13 @@ class _SwitchSettingState extends State<_SwitchSetting> {
             widget.settingKey,
           )
         : widget.useDeviceSettings
-        ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
-        : appdata.settings[widget.settingKey];
+            ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
+            : appdata.settings[widget.settingKey];
 
     assert(value is bool);
 
     return ListTile(
-      contentPadding: kSettingTilePaddingOf(context),
+      contentPadding: kSettingTilePadding,
       title: Text(widget.title),
       subtitle: widget.subtitle == null ? null : Text(widget.subtitle!),
       trailing: Switch(
@@ -255,8 +219,8 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
           widget.settingKey,
         )
       : widget.useDeviceSettings
-      ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
-      : appdata.settings[widget.settingKey];
+          ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
+          : appdata.settings[widget.settingKey];
 
   void _apply(String value) {
     final custom = widget.writeValue;
@@ -284,7 +248,7 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
     var value = widget.readValue?.call() ?? _rawValue();
 
     return ListTile(
-      contentPadding: kSettingTilePaddingOf(context),
+      contentPadding: kSettingTilePadding,
       title: Row(
         children: [
           Text(widget.title),
@@ -398,8 +362,8 @@ class _EndSelectorSelectSettingState extends State<_EndSelectorSelectSetting> {
           widget.settingKey,
         )
       : widget.useDeviceSettings
-      ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
-      : appdata.settings[widget.settingKey];
+          ? appdata.settings.getDeviceReaderSetting(widget.settingKey)
+          : appdata.settings[widget.settingKey];
 
   void _apply(String value) {
     final custom = widget.writeValue;
@@ -427,7 +391,7 @@ class _EndSelectorSelectSettingState extends State<_EndSelectorSelectSetting> {
     var options = widget.optionTranslation;
     var value = widget.readValue?.call() ?? _rawValue();
     return ListTile(
-      contentPadding: kSettingTilePaddingOf(context),
+      contentPadding: kSettingTilePadding,
       title: Row(
         children: [
           Text(widget.title),
@@ -508,19 +472,18 @@ class _SliderSetting extends StatefulWidget {
 class _SliderSettingState extends State<_SliderSetting> {
   @override
   Widget build(BuildContext context) {
-    var value =
-        (widget.comicId != null
-                ? appdata.settings.getReaderSetting(
-                    widget.comicId!,
-                    widget.comicSource!,
-                    widget.settingsIndex,
-                  )
-                : widget.useDeviceSettings
+    var value = (widget.comicId != null
+            ? appdata.settings.getReaderSetting(
+                widget.comicId!,
+                widget.comicSource!,
+                widget.settingsIndex,
+              )
+            : widget.useDeviceSettings
                 ? appdata.settings.getDeviceReaderSetting(widget.settingsIndex)
                 : appdata.settings[widget.settingsIndex])
-            .toDouble();
+        .toDouble();
     return ListTile(
-      contentPadding: kSettingTilePaddingOf(context),
+      contentPadding: kSettingTilePadding,
       title: Text(widget.title, softWrap: true, maxLines: 2),
       trailing: Text(value.toString(), style: ts.s12),
       subtitle: Slider(
@@ -585,7 +548,7 @@ class _PopupWindowSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: kSettingTilePaddingOf(context),
+      contentPadding: kSettingTilePadding,
       title: Text(title),
       trailing: const Icon(Icons.arrow_right),
       onTap: () {
@@ -812,7 +775,7 @@ class _CallbackSetting extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return ListTile(
-      contentPadding: kSettingTilePaddingOf(context),
+      contentPadding: kSettingTilePadding,
       title: Text(title),
       subtitle: subtitle == null ? null : Text(subtitle!),
       trailing: Button.normal(
@@ -820,6 +783,39 @@ class _CallbackSetting extends StatelessWidget {
         child: Text(actionTitle),
       ).fixHeight(28),
       onTap: callback,
+    );
+  }
+}
+
+/// 分组标题的展平版（只有那一行，不含 sliver 外壳）。
+///
+/// 有些页面会把若干设置拼成一个普通 Widget 再塞进 sliver，那时不能直接
+/// 用下面的 [_SettingPartTitle]（它自带 SliverToBoxAdapter），所以拆成两半。
+class _SettingPartTitleRow extends StatelessWidget {
+  const _SettingPartTitleRow({required this.title, required this.icon});
+
+  final String title;
+
+  final IconData icon;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.only(left: 16, top: 16, bottom: 8),
+      decoration: BoxDecoration(
+        border: Border(
+          bottom: BorderSide(
+            color: context.colorScheme.onSurface.withValues(alpha: 0.1),
+          ),
+        ),
+      ),
+      child: Row(
+        children: [
+          Icon(icon, size: 24),
+          const SizedBox(width: 8),
+          Text(title, style: ts.s18),
+        ],
+      ),
     );
   }
 }
@@ -834,23 +830,7 @@ class _SettingPartTitle extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return SliverToBoxAdapter(
-      child: Container(
-        padding: const EdgeInsets.only(left: 16, top: 16, bottom: 8),
-        decoration: BoxDecoration(
-          border: Border(
-            bottom: BorderSide(
-              color: context.colorScheme.onSurface.withValues(alpha: 0.1),
-            ),
-          ),
-        ),
-        child: Row(
-          children: [
-            Icon(icon, size: 24),
-            const SizedBox(width: 8),
-            Text(title, style: ts.s18),
-          ],
-        ),
-      ),
+      child: _SettingPartTitleRow(title: title, icon: icon),
     );
   }
 }

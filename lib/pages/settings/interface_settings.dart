@@ -1,120 +1,160 @@
 part of 'settings_page.dart';
 
-class AppearanceSettings extends StatefulWidget {
-  const AppearanceSettings({super.key});
+/// 界面：所有「看起来怎么样」的设置。
+///
+/// 原来的分类里，主题和应用图标在「外观」，缩略图 / 网格 / 尺寸在「探索」，
+/// 首页模块又回到「外观」——同一件事被拆到两个页面，找起来只能靠猜。这里
+/// 按「影响屏幕上的什么」重新收拢：主题与材质、首页、列表里的缩略图。
+class InterfaceSettings extends StatelessWidget {
+  const InterfaceSettings({super.key});
 
-  @override
-  State<AppearanceSettings> createState() => _AppearanceSettingsState();
-}
-
-class _AppearanceSettingsState extends State<AppearanceSettings> {
   @override
   Widget build(BuildContext context) {
-    return SettingIndentScope(
-      indented: false,
-      child: SmoothCustomScrollView(
-        slivers: [
-          SliverAppbar(title: Text("Appearance".tl)),
-          SelectSetting(
-            title: "Theme Mode".tl,
-            settingKey: "theme_mode",
-            optionTranslation: {
-              "system": "System".tl,
-              "light": "Light".tl,
-              "dark": "Dark".tl,
-            },
-            onChanged: () async {
-              App.forceRebuild();
-            },
-          ).toSliver(),
-          SelectSetting(
-            title: "Theme Color".tl,
-            settingKey: "color",
-            optionTranslation: {
-              "system": "System".tl,
-              "red": "Red".tl,
-              "pink": "Pink".tl,
-              "purple": "Purple".tl,
-              "green": "Green".tl,
-              "orange": "Orange".tl,
-              "blue": "Blue".tl,
-            },
-            onChanged: () async {
-              await App.init();
-              App.forceRebuild();
-            },
-          ).toSliver(),
-          _CallbackSetting(
-            title: "Home Modules".tl,
-            subtitle: "Reorder or hide sections on the home page".tl,
-            actionTitle: "Edit".tl,
-            callback: () {
-              context.to(() => const HomeModulesPage());
-            },
-          ).toSliver(),
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "App Icon".tl,
-                  style: ts.s16.bold,
-                ).paddingHorizontal(16).paddingTop(16),
-                Text(
-                  "Pick the icon shown on your home screen. The change takes effect after the app restarts."
-                      .tl,
-                  style: ts.s12,
-                ).paddingHorizontal(16).paddingTop(4).paddingBottom(4),
-                const _AppIconPicker(),
-              ],
-            ),
+    return SmoothCustomScrollView(
+      slivers: [
+        SliverAppbar(title: Text("Interface".tl)),
+        _SettingPartTitle(title: "Theme".tl, icon: Icons.palette_outlined),
+        SelectSetting(
+          title: "Theme Mode".tl,
+          settingKey: "theme_mode",
+          optionTranslation: {
+            "system": "System".tl,
+            "light": "Light".tl,
+            "dark": "Dark".tl,
+          },
+          onChanged: () async {
+            App.forceRebuild();
+          },
+        ).toSliver(),
+        SelectSetting(
+          title: "Theme Color".tl,
+          settingKey: "color",
+          optionTranslation: {
+            "system": "System".tl,
+            "red": "Red".tl,
+            "pink": "Pink".tl,
+            "purple": "Purple".tl,
+            "green": "Green".tl,
+            "orange": "Orange".tl,
+            "blue": "Blue".tl,
+          },
+          onChanged: () async {
+            await App.init();
+            App.forceRebuild();
+          },
+        ).toSliver(),
+        _SettingPartTitle(title: "App icon".tl, icon: Icons.apps_rounded),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Pick the icon shown on your home screen. The change takes effect after the app restarts."
+                    .tl,
+                style: ts.s12,
+              ).paddingHorizontal(16).paddingTop(10),
+              const SizedBox(height: 2),
+              const _AppIconPicker(),
+            ],
           ),
-          SliverToBoxAdapter(
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  "Glass Effect".tl,
-                  style: ts.s16.bold,
-                ).paddingHorizontal(16).paddingTop(16),
-                Text(
-                  "Adjust the frosted glass blur and opacity of app bars and reader toolbars."
-                      .tl,
-                  style: ts.s12,
-                ).paddingHorizontal(16).paddingTop(4),
-                const _GlassPreview(),
-              ],
-            ),
+        ),
+        _SettingPartTitle(
+          title: "Glass effect".tl,
+          icon: Icons.blur_on_rounded,
+        ),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Adjust the frosted glass blur and opacity of app bars and reader toolbars."
+                    .tl,
+                style: ts.s12,
+              ).paddingHorizontal(16).paddingTop(10),
+              const _GlassPreview(),
+            ],
           ),
-          _SliderSetting(
-            title: "Glass Blur".tl,
-            settingsIndex: "glassBlur",
-            interval: 2,
-            min: 0,
-            max: 40,
-            onChanged: () {
-              App.forceRebuild();
-            },
-          ).toSliver(),
-          _SliderSetting(
-            title: "${"Glass Opacity".tl} (%)",
-            settingsIndex: "glassOpacity",
-            interval: 5,
-            min: 10,
-            max: 95,
-            onChanged: () {
-              App.forceRebuild();
-            },
-          ).toSliver(),
-          SliverToBoxAdapter(
-            child: Text(
-              "Lower opacity makes the glass more transparent. Set blur to 0 to disable the frosted effect."
-                  .tl,
-              style: ts.s12,
-            ).paddingHorizontal(16).paddingBottom(16),
-          ),
-        ],
-      ),
+        ),
+        _SliderSetting(
+          title: "Glass Blur".tl,
+          settingsIndex: "glassBlur",
+          interval: 2,
+          min: 0,
+          max: 40,
+          onChanged: () {
+            App.forceRebuild();
+          },
+        ).toSliver(),
+        _SliderSetting(
+          title: "${"Glass Opacity".tl} (%)",
+          settingsIndex: "glassOpacity",
+          interval: 5,
+          min: 10,
+          max: 95,
+          onChanged: () {
+            App.forceRebuild();
+          },
+        ).toSliver(),
+        SliverToBoxAdapter(
+          child: Text(
+            "Lower opacity makes the glass more transparent. Set blur to 0 to disable the frosted effect."
+                .tl,
+            style: ts.s12,
+          ).paddingHorizontal(16).paddingBottom(12),
+        ),
+        _SettingPartTitle(title: "Home".tl, icon: Icons.home_outlined),
+        _CallbackSetting(
+          title: "Home Modules".tl,
+          subtitle: "Reorder or hide sections on the home page".tl,
+          actionTitle: "Edit".tl,
+          callback: () {
+            context.to(() => const HomeModulesPage());
+          },
+        ).toSliver(),
+        _SettingPartTitle(
+          title: "Comic tiles".tl,
+          icon: Icons.grid_view_rounded,
+        ),
+        SelectSetting(
+          title: "Display mode of comic tile".tl,
+          settingKey: "comicDisplayMode",
+          optionTranslation: {
+            "detailed": "Detailed".tl,
+            "brief": "Brief".tl,
+          },
+        ).toSliver(),
+        SelectSetting(
+          title: "Layout mode of comic grid".tl,
+          settingKey: "comicLayoutMode",
+          optionTranslation: {
+            "grid": "Grid Layout".tl,
+            "staggered": "Staggered Layout".tl,
+          },
+        ).toSliver(),
+        SelectSetting(
+          title: "Display mode of comic list".tl,
+          settingKey: "comicListDisplayMode",
+          optionTranslation: {
+            "paging": "Paging".tl,
+            "Continuous": "Continuous".tl,
+          },
+        ).toSliver(),
+        _SliderSetting(
+          title: "Size of comic tile".tl,
+          settingsIndex: "comicTileScale",
+          interval: 0.05,
+          min: 0.5,
+          max: 1.5,
+        ).toSliver(),
+        _SwitchSetting(
+          title: "Show favorite status on comic tile".tl,
+          settingKey: "showFavoriteStatusOnTile",
+        ).toSliver(),
+        _SwitchSetting(
+          title: "Show history on comic tile".tl,
+          settingKey: "showHistoryStatusOnTile",
+        ).toSliver(),
+      ],
     );
   }
 }

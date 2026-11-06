@@ -32,15 +32,15 @@ import 'package:venera/utils/translations.dart';
 import 'package:venera/utils/version.dart';
 import 'package:yaml/yaml.dart';
 
-part 'reader.dart';
-part 'explore_settings.dart';
 part 'setting_components.dart';
-part 'appearance.dart';
-part 'local_favorites.dart';
-part 'app.dart';
+part 'explore_settings.dart';
+part 'reader.dart';
+part 'interface_settings.dart';
+part 'action_settings.dart';
+part 'feature_settings.dart';
+part 'network.dart';
 part 'about.dart';
 part 'update_download.dart';
-part 'network.dart';
 part 'debug.dart';
 
 class SettingsPage extends StatefulWidget {
@@ -59,29 +59,37 @@ class _SettingsPageState extends State<SettingsPage> {
 
   bool get enableTwoViews => context.width > 720;
 
-  /// 普通用户需要的分类。调试相关的东西不在这里——「重载配置 / JS 求值器」
-  /// 对绝大多数人没有意义，放在列表里只会增加噪声。需要时在「关于」页连点
-  /// 版本号 7 次打开。
+  /// 分类按「你在改什么」划分，而不是按页面/模块划分。
+  ///
+  /// 以前是 探索 / 阅读 / 外观 / 本地收藏 / 漫画源 / APP / 网络 / 关于——
+  /// 其中「APP」只是「没想好放哪的都塞进来」，「探索」既是页面名又装着一堆
+  /// 缩略图设置，本地收藏整页其实都是收藏操作。现在按语义收成六类：
+  ///
+  /// * 界面 —— 看起来怎么样（主题、图标、材质、缩略图）
+  /// * 阅读 —— 书怎么看（翻页、显示、图片、评论）
+  /// * 操作 —— 手怎么用（手势、收藏操作、隐私）
+  /// * 功能 —— 能做什么（数据、通知、内容来源、屏蔽）
+  /// * 网络 —— 怎么连
+  /// * 关于 —— 版本与更新
+  ///
+  /// 调试相关的东西不在这里——「重载配置 / JS 求值器」对绝大多数人没有意义，
+  /// 放在列表里只会增加噪声。需要时在「关于」页连点版本号 7 次打开。
   final categories = <String>[
-    "Explore",
+    "Interface",
     "Reading",
-    "Appearance",
-    "Local Favorites",
-    "Comic Sources",
-    "APP",
+    "Actions",
+    "Features",
     "Network",
     "About",
   ];
 
   final icons = <IconData>[
-    Icons.explore,
-    Icons.book,
-    Icons.color_lens,
-    Icons.collections_bookmark_rounded,
-    Icons.dns_outlined,
-    Icons.apps,
+    Icons.palette_outlined,
+    Icons.auto_stories_outlined,
+    Icons.touch_app_outlined,
+    Icons.widgets_outlined,
     Icons.public,
-    Icons.info,
+    Icons.info_outline,
   ];
 
   @override
@@ -252,15 +260,13 @@ class _SettingsPageState extends State<SettingsPage> {
 
   Widget _buildSettingsContent(int pageIndex) {
     return switch (pageIndex) {
-      0 => const ExploreSettings(),
-      1 => const ReaderSettings(),
-      2 => const AppearanceSettings(),
-      3 => const LocalFavoritesSettings(),
-      // 「漫画源」直接作为设置的顶级分类，点开即源管理页。
-      4 => const ComicSourcePage(),
-      5 => const AppSettings(),
-      6 => const NetworkSettings(),
-      7 => const AboutSettings(),
+      0 => const InterfaceSettings(),
+      // 手势已经拆到「操作」分类，阅读页不再重复显示。
+      1 => const ReaderSettings(showGestures: false),
+      2 => const ActionSettings(),
+      3 => const FeatureSettings(),
+      4 => const NetworkSettings(),
+      5 => const AboutSettings(),
       _ => throw UnimplementedError(),
     };
   }
@@ -278,14 +284,12 @@ class _SettingsDetailPage extends StatelessWidget {
 
   Widget _buildPage() {
     return switch (pageIndex) {
-      0 => const ExploreSettings(),
-      1 => const ReaderSettings(),
-      2 => const AppearanceSettings(),
-      3 => const LocalFavoritesSettings(),
-      4 => const ComicSourcePage(),
-      5 => const AppSettings(),
-      6 => const NetworkSettings(),
-      7 => const AboutSettings(),
+      0 => const InterfaceSettings(),
+      1 => const ReaderSettings(showGestures: false),
+      2 => const ActionSettings(),
+      3 => const FeatureSettings(),
+      4 => const NetworkSettings(),
+      5 => const AboutSettings(),
       _ => throw UnimplementedError(),
     };
   }

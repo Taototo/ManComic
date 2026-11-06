@@ -104,7 +104,7 @@ class _MainPageState extends State<MainPage> {
         });
       },
       paneActions: [
-        if(index != 0)
+        if (index != 0)
           PaneActionEntry(
             icon: Icons.search,
             label: "Search".tl,
@@ -112,25 +112,40 @@ class _MainPageState extends State<MainPage> {
               to(() => const SearchPage(), preventDuplicate: true);
             },
           ),
-        // 布局切换按钮 - 仅在发现页显示
+        // 缩略图显示模式开关 - 仅在发现页显示
+        //
+        // 这里原来是「网格 / 瀑布流」的布局切换。布局是「整页怎么排」，改一次
+        // 基本就不再动了；而「详细 / 简洁」是「一张卡显示多少信息」，翻两页
+        // 就想换一次——后者才是高频操作，放到顶栏才合理。布局本身仍在
+        // 设置 - 界面 里。
         if (index == 1)
           PaneActionEntry(
-            icon: (appdata.settings['comicLayoutMode'] ?? 'grid') == 'staggered'
-                ? Icons.grid_view
-                : Icons.view_module,
-            label: (appdata.settings['comicLayoutMode'] ?? 'grid') == 'staggered'
-                ? "Grid".tl
-                : "Flow".tl,
+            icon: (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
+                    'detailed'
+                ? Icons.view_agenda_outlined
+                : Icons.grid_view_rounded,
+            label: (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
+                    'detailed'
+                ? "Brief".tl
+                : "Detailed".tl,
             onTap: () {
-              final layoutMode =
-                  appdata.settings['comicLayoutMode'] ?? 'grid';
-              final newMode = layoutMode == 'grid' ? 'staggered' : 'grid';
-              appdata.settings['comicLayoutMode'] = newMode;
+              final current =
+                  appdata.settings['comicDisplayMode'] ?? 'detailed';
+              final next = current == 'detailed' ? 'brief' : 'detailed';
+              appdata.settings['comicDisplayMode'] = next;
+              // 详细模式在瀑布流里没有意义（瀑布流一律用简洁卡片），
+              // 想切回详细就得同时回到网格，否则点了没有任何视觉变化。
+              if (next == 'detailed' &&
+                  (appdata.settings['comicLayoutMode'] ?? 'grid') ==
+                      'staggered') {
+                appdata.settings['comicLayoutMode'] = 'grid';
+              }
               appdata.saveData();
-              final message = newMode == 'staggered'
-                  ? "Switched to Staggered Layout".tl
-                  : "Switched to Grid Layout".tl;
-              App.rootContext.showMessage(message: message);
+              App.rootContext.showMessage(
+                message: next == 'detailed'
+                    ? "Switched to Detailed Mode".tl
+                    : "Switched to Brief Mode".tl,
+              );
               setState(() {});
             },
           ),

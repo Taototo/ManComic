@@ -1,143 +1,63 @@
 part of 'settings_page.dart';
 
-class ExploreSettings extends StatefulWidget {
-  const ExploreSettings({super.key});
+/// 「内容来源」分组：每个页面显示哪些源、默认搜哪里、按语言过滤。
+///
+/// 这些设置原来是「探索」页设置的全部内容，但其中一半根本不属于探索页——
+/// 分类页、网络收藏页、搜索源各自是独立页面。现在作为功能页里的一组。
+List<Widget> contentSourceSlivers() => [
+      _PopupWindowSetting(
+        title: "Explore Pages".tl,
+        builder: setExplorePagesWidget,
+      ).toSliver(),
+      _PopupWindowSetting(
+        title: "Category Pages".tl,
+        builder: setCategoryPagesWidget,
+      ).toSliver(),
+      _PopupWindowSetting(
+        title: "Network Favorite Pages".tl,
+        builder: setFavoritesPagesWidget,
+      ).toSliver(),
+      _PopupWindowSetting(
+        title: "Search Sources".tl,
+        builder: setSearchSourcesWidget,
+      ).toSliver(),
+      SelectSetting(
+        title: "Default Search Target".tl,
+        settingKey: "defaultSearchTarget",
+        optionTranslation: {
+          '_aggregated_': "Aggregated".tl,
+          ...() {
+            var map = <String, String>{};
+            for (var c in ComicSource.all()) {
+              map[c.key] = c.name;
+            }
+            return map;
+          }(),
+        },
+      ).toSliver(),
+      SelectSetting(
+        title: "Auto Language Filters".tl,
+        settingKey: "autoAddLanguageFilter",
+        optionTranslation: {
+          'none': "None".tl,
+          'chinese': "Chinese",
+          'english': "English",
+          'japanese': "Japanese",
+        },
+      ).toSliver(),
+    ];
 
-  @override
-  State<ExploreSettings> createState() => _ExploreSettingsState();
-}
-
-class _ExploreSettingsState extends State<ExploreSettings> {
-  @override
-  Widget build(BuildContext context) {
-    return SmoothCustomScrollView(
-      slivers: [
-        SliverAppbar(title: Text("Explore".tl)),
-        _SettingPartTitle(
-          title: "Layout".tl,
-          icon: Icons.dashboard_outlined,
-        ),
-        SelectSetting(
-          title: "Display mode of comic tile".tl,
-          settingKey: "comicDisplayMode",
-          optionTranslation: {
-            "detailed": "Detailed".tl,
-            "brief": "Brief".tl,
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Layout mode of comic grid".tl,
-          settingKey: "comicLayoutMode",
-          optionTranslation: {
-            "grid": "Grid Layout".tl,
-            "staggered": "Staggered Layout".tl,
-          },
-        ).toSliver(),
-        _SliderSetting(
-          title: "Size of comic tile".tl,
-          settingsIndex: "comicTileScale",
-          interval: 0.05,
-          min: 0.5,
-          max: 1.5,
-        ).toSliver(),
-        _SettingPartTitle(
-          title: "Pages & sources".tl,
-          icon: Icons.tune,
-        ),
-        _PopupWindowSetting(
-          title: "Explore Pages".tl,
-          builder: setExplorePagesWidget,
-        ).toSliver(),
-        _PopupWindowSetting(
-          title: "Category Pages".tl,
-          builder: setCategoryPagesWidget,
-        ).toSliver(),
-        _PopupWindowSetting(
-          title: "Network Favorite Pages".tl,
-          builder: setFavoritesPagesWidget,
-        ).toSliver(),
-        _PopupWindowSetting(
-          title: "Search Sources".tl,
-          builder: setSearchSourcesWidget,
-        ).toSliver(),
-        _SettingPartTitle(
-          title: "Tiles".tl,
-          icon: Icons.grid_view_rounded,
-        ),
-        _SwitchSetting(
-          title: "Show favorite status on comic tile".tl,
-          settingKey: "showFavoriteStatusOnTile",
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Show history on comic tile".tl,
-          settingKey: "showHistoryStatusOnTile",
-        ).toSliver(),
-        _SwitchSetting(
-          title: "Reverse default chapter order".tl,
-          settingKey: "reverseChapterOrder",
-        ).toSliver(),
-        _SettingPartTitle(
-          title: "Filters & search".tl,
-          icon: Icons.filter_alt_outlined,
-        ),
-        _PopupWindowSetting(
-          title: "Keyword blocking".tl,
-          builder: () => const _ManageBlockingWordView(),
-        ).toSliver(),
-        _PopupWindowSetting(
-          title: "Comment keyword blocking".tl,
-          builder: () => const _ManageBlockingCommentWordView(),
-        ).toSliver(),
-        SelectSetting(
-          title: "Default Search Target".tl,
-          settingKey: "defaultSearchTarget",
-          optionTranslation: {
-            '_aggregated_': "Aggregated".tl,
-            ...((){
-              var map = <String, String>{};
-              for (var c in ComicSource.all()) {
-                map[c.key] = c.name;
-              }
-              return map;
-            }()),
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Auto Language Filters".tl,
-          settingKey: "autoAddLanguageFilter",
-          optionTranslation: {
-            'none': "None".tl,
-            'chinese': "Chinese",
-            'english': "English",
-            'japanese': "Japanese",
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Display mode of comic list".tl,
-          settingKey: "comicListDisplayMode",
-          optionTranslation: {
-            "paging": "Paging".tl,
-            "Continuous": "Continuous".tl,
-          },
-        ).toSliver(),
-        _SettingPartTitle(
-          title: "Startup".tl,
-          icon: Icons.play_circle_outline,
-        ),
-        SelectSetting(
-          title: "Initial Page".tl,
-          settingKey: "initialPage",
-          optionTranslation: {
-            '0': "Home Page".tl,
-            '1': "Explore Page".tl,
-            '2': "Categories Page".tl,
-            '3': "Favorites Page".tl,
-          },
-        ).toSliver(),
-      ],
-    );
-  }
-}
+/// 「过滤与屏蔽」分组：标题关键词和评论关键词。
+List<Widget> keywordFilterSlivers() => [
+      _PopupWindowSetting(
+        title: "Keyword blocking".tl,
+        builder: () => const _ManageBlockingWordView(),
+      ).toSliver(),
+      _PopupWindowSetting(
+        title: "Comment keyword blocking".tl,
+        builder: () => const _ManageBlockingCommentWordView(),
+      ).toSliver(),
+    ];
 
 class _ManageBlockingWordView extends StatefulWidget {
   const _ManageBlockingWordView();
@@ -292,7 +212,8 @@ class _ManageBlockingCommentWordView extends StatefulWidget {
       _ManageBlockingCommentWordViewState();
 }
 
-class _ManageBlockingCommentWordViewState extends State<_ManageBlockingCommentWordView> {
+class _ManageBlockingCommentWordViewState
+    extends State<_ManageBlockingCommentWordView> {
   @override
   Widget build(BuildContext context) {
     assert(appdata.settings["blockedCommentWords"] is List);

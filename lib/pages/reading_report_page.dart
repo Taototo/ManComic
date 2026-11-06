@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:venera/components/achievement_badge.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/achievements.dart';
 import 'package:venera/foundation/appdata.dart';
@@ -96,7 +97,8 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
             SliverToBoxAdapter(
               child: SingleChildScrollView(
                 scrollDirection: Axis.horizontal,
-                padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
+                padding:
+                    const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
                 child: Row(
                   children: _years.map((year) {
                     final active = year == _year;
@@ -159,8 +161,30 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     return int.tryParse('$raw') ?? 0;
   }
 
+  /// 本月目标的档位：读到一点就点亮青铜，50% 白银，达成黄金，超额 150% 钻石。
+  ///
+  /// 门槛设在 0 / 50 / 100 / 150 而不是 25 / 50 / 75 / 100，是因为「才读了
+  /// 一成」也值得给个青铜——目标卡的第一眼应该是「已经开始了」，而不是
+  /// 一上来就顶着一枚灰徽章。
+  AchievementTier _goalTier(int goal, int read) {
+    if (goal <= 0 || read <= 0) {
+      return AchievementTier.locked;
+    }
+    final ratio = read / goal;
+    if (ratio >= 1.5) {
+      return AchievementTier.diamond;
+    }
+    if (ratio >= 1) {
+      return AchievementTier.gold;
+    }
+    if (ratio >= 0.5) {
+      return AchievementTier.silver;
+    }
+    return AchievementTier.bronze;
+  }
+
   Future<void> _editGoal() async {
-    const presets = [60, 180, 300, 600];
+    const presets = [60, 180, 300, 600, 1200];
     final current = _goalMinutes;
     final result = await showDialog<int>(
       context: context,
@@ -169,7 +193,9 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
         children: [
           for (final minutes in presets)
             ListTile(
-              title: Text('@a min'.tlParams({'a': '$minutes'})),
+              title: Text(
+                Achievements.valueText(AchievementMetric.seconds, minutes * 60),
+              ),
               trailing: minutes == current ? const Icon(Icons.check) : null,
               onTap: () => dialogContext.pop(minutes),
             ),
@@ -189,13 +215,36 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     }
   }
 
-  /// 本月阅读目标：圆环进度 + 已读/目标分钟数，点一下换目标。
+  /// 本月阅读目标：一枚随完成度换材质的徽章 + 带刻度的进度条。
+  ///
+  /// 原来是一个圆环套百分比，和下面「本周」「年度总时长」三块长得差不多，
+  /// 看不出哪一块是「你给自己定的目标」。现在目标单独用徽章语言表达：
+  /// 徽章的材质就是完成度，外圈是到下一档的距离。
   Widget _buildGoal(ColorScheme colors) {
     final goal = _goalMinutes;
     final read = _monthReadMinutes;
     final ratio = goal <= 0 ? 0.0 : (read / goal).clamp(0.0, 1.0);
     final reached = goal > 0 && read >= goal;
-    final accent = reached ? Colors.green : colors.primary;
+    final tier = _goalTier(goal, read);
+    final accent = tier.isUnlocked ? tier.deep : colors.onSurfaceVariant;
+    final subtitle = goal <= 0
+        ? 'Set a goal'.tl
+        : reached
+            ? (read > goal
+                ? '@a over the goal'.tlParams({
+                    'a': Achievements.valueText(
+                      AchievementMetric.seconds,
+                      (read - goal) * 60,
+                    ),
+                  })
+                : 'Goal reached'.tl)
+            : '@a left this month'.tlParams({
+                'a': Achievements.valueText(
+                  AchievementMetric.seconds,
+                  (goal - read) * 60,
+                ),
+              });
+
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       decoration: BoxDecoration(
@@ -210,71 +259,81 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       child: InkWell(
         onTap: _editGoal,
         child: Padding(
-          padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
+          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
           child: Row(
             children: [
-              SizedBox(
-                width: 64,
-                height: 64,
-                child: Stack(
-                  alignment: Alignment.center,
-                  children: [
-                    SizedBox.expand(
-                      child: TweenAnimationBuilder<double>(
-                        tween: Tween(begin: 0, end: ratio),
-                        duration: const Duration(milliseconds: 700),
-                        curve: Curves.easeOutCubic,
-                        builder: (context, value, _) =>
-                            CircularProgressIndicator(
-                          value: goal <= 0 ? 0 : value,
-                          strokeWidth: 6,
-                          strokeCap: StrokeCap.round,
-                          backgroundColor:
-                              colors.outlineVariant.withValues(alpha: 0.3),
-                          valueColor: AlwaysStoppedAnimation(accent),
-                        ),
-                      ),
-                    ),
-                    if (goal <= 0)
-                      Icon(
-                        Icons.flag_outlined,
-                        size: 20,
-                        color: colors.onSurfaceVariant,
-                      )
-                    else if (reached)
-                      Icon(Icons.check_rounded, size: 26, color: accent)
-                    else
-                      Text(
-                        '${(ratio * 100).round()}%',
-                        style: ts.s14.copyWith(
-                          fontWeight: FontWeight.w600,
-                          color: accent,
-                        ),
-                      ),
-                  ],
-                ),
+              AchievementBadge(
+                icon: Icons.flag_rounded,
+                tier: tier,
+                size: 76,
+                ratio: goal <= 0 ? null : ratio,
               ),
-              const SizedBox(width: 16),
+              const SizedBox(width: 14),
               Expanded(
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   mainAxisSize: MainAxisSize.min,
                   children: [
-                    Text(
-                      'Monthly Goal'.tl,
-                      style: ts.s14.copyWith(fontWeight: FontWeight.w600),
+                    Row(
+                      children: [
+                        Text(
+                          'Monthly Goal'.tl,
+                          style: ts.s14.copyWith(fontWeight: FontWeight.w600),
+                        ),
+                        const SizedBox(width: 8),
+                        if (reached)
+                          Container(
+                            padding: const EdgeInsets.symmetric(
+                              horizontal: 7,
+                              vertical: 2,
+                            ),
+                            decoration: BoxDecoration(
+                              color: AchievementTier.gold.base.withValues(
+                                alpha: 0.2,
+                              ),
+                              borderRadius: BorderRadius.circular(20),
+                            ),
+                            child: Text(
+                              'Goal reached'.tl,
+                              style: ts.s10.withColor(
+                                AchievementTier.gold.deep,
+                              ),
+                            ),
+                          ),
+                      ],
                     ),
-                    const SizedBox(height: 6),
-                    Text(
-                      goal <= 0
-                          ? 'Set a goal'.tl
-                          : reached
-                              ? 'Goal reached · @a min'
-                                  .tlParams({'a': '$read'})
-                              : '@a / @b min'
-                                  .tlParams({'a': '$read', 'b': '$goal'}),
-                      style: ts.s12.withColor(colors.onSurfaceVariant),
-                    ),
+                    const SizedBox(height: 4),
+                    if (goal > 0)
+                      Text.rich(
+                        TextSpan(
+                          children: [
+                            TextSpan(
+                              text: '$read',
+                              style: ts.s24.copyWith(
+                                fontWeight: FontWeight.bold,
+                                color: accent,
+                              ),
+                            ),
+                            TextSpan(
+                              text: ' / $goal ${'min'.tl}',
+                              style: ts.s10.withColor(colors.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      )
+                    else
+                      Text(
+                        'Set a goal'.tl,
+                        style: ts.s12.withColor(colors.onSurfaceVariant),
+                      ),
+                    const SizedBox(height: 2),
+                    if (goal > 0)
+                      Text(
+                        subtitle,
+                        style: ts.s10.withColor(colors.onSurfaceVariant),
+                      ),
+                    const SizedBox(height: 10),
+                    _GoalBar(ratio: ratio, color: tier.base, base: colors),
                   ],
                 ),
               ),
@@ -347,7 +406,9 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
           ),
           const SizedBox(height: 8),
           Text(
-            week.isEmpty ? "No reading this week".tl : _durationText(week.totalSeconds),
+            week.isEmpty
+                ? "No reading this week".tl
+                : _durationText(week.totalSeconds),
             style: ts.s20.copyWith(fontWeight: FontWeight.bold),
           ),
           const SizedBox(height: 2),
@@ -362,13 +423,17 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     );
   }
 
-  /// 成就墙：全部由本地阅读记录与收藏数推导
+  /// 成就墙。
+  ///
+  /// 每个家族一枚徽章，四档共用一套画法，点亮得越多徽章越亮、星标越多。
+  /// 点开看得到四档门槛和到下一档还差多少——「升级」这件事要能被看见，
+  /// 否则徽章只是装饰。
   Widget _buildAchievements(ColorScheme colors) {
     final progress = Achievements.progress();
-    final unlocked = progress.where((e) => e.unlocked).length;
+    final summary = Achievements.summary(progress);
     return Container(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      padding: const EdgeInsets.fromLTRB(16, 14, 12, 16),
+      padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
       decoration: BoxDecoration(
         borderRadius: BorderRadius.circular(20),
         color: colors.surfaceContainerLow,
@@ -380,89 +445,109 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Row(
-            children: [
-              Text(
-                "Achievements".tl,
-                style: ts.s14.copyWith(fontWeight: FontWeight.w600),
-              ),
-              const Spacer(),
-              Text(
-                "@a/@b".tlParams({
-                  'a': unlocked.toString(),
-                  'b': progress.length.toString(),
-                }),
-                style: ts.s10.withColor(colors.onSurfaceVariant),
-              ),
-            ],
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 4),
+            child: Row(
+              children: [
+                Text(
+                  "Achievements".tl,
+                  style: ts.s14.copyWith(fontWeight: FontWeight.w600),
+                ),
+                const Spacer(),
+                Text(
+                  "@a/@b".tlParams({
+                    'a': summary.unlocked.toString(),
+                    'b': summary.total.toString(),
+                  }),
+                  style: ts.s10.withColor(colors.onSurfaceVariant),
+                ),
+              ],
+            ),
           ),
-          const SizedBox(height: 14),
-          Wrap(
-            spacing: 6,
-            runSpacing: 14,
-            children:
-                progress.map((p) => _buildBadge(p, colors)).toList(),
+          Padding(
+            padding: const EdgeInsets.only(left: 4, top: 3),
+            child: Text(
+              "Four tiers each: Bronze, Silver, Gold and Diamond".tl,
+              style: ts.s10.withColor(
+                colors.onSurfaceVariant.withValues(alpha: 0.8),
+              ),
+            ),
+          ),
+          const SizedBox(height: 12),
+          LayoutBuilder(
+            builder: (context, constraints) {
+              const gap = 4.0;
+              final itemWidth = (constraints.maxWidth - gap * 3) / 4;
+              return Wrap(
+                spacing: gap,
+                runSpacing: 10,
+                children: [
+                  for (final p in progress)
+                    SizedBox(
+                      width: itemWidth,
+                      child: _buildBadgeTile(p, colors),
+                    ),
+                ],
+              );
+            },
           ),
         ],
       ),
     );
   }
 
-  Widget _buildBadge(AchievementProgress p, ColorScheme colors) {
-    final on = p.unlocked;
-    return SizedBox(
-      width: 72,
-      child: Column(
-        children: [
-          Container(
-            width: 52,
-            height: 52,
-            decoration: BoxDecoration(
-              shape: BoxShape.circle,
-              color: on
-                  ? colors.primaryContainer
-                  : colors.surfaceContainerHighest,
-              border: Border.all(
-                color: on
-                    ? colors.primary.withValues(alpha: 0.45)
-                    : colors.outlineVariant.withValues(alpha: 0.6),
-                width: 0.8,
+  Widget _buildBadgeTile(AchievementProgress p, ColorScheme colors) {
+    final tier = p.tier;
+    return InkWell(
+      borderRadius: BorderRadius.circular(14),
+      onTap: () => _showAchievementDetails(p),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(vertical: 6, horizontal: 2),
+        child: Column(
+          children: [
+            AchievementBadge(
+              icon: p.family.icon,
+              tier: tier,
+              size: 54,
+              ratio: p.unlocked ? p.ratioToNext : null,
+              glow: false,
+            ),
+            const SizedBox(height: 7),
+            Text(
+              p.family.title.tl,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: ts.s10.withColor(
+                tier.isUnlocked
+                    ? colors.onSurface
+                    : colors.onSurfaceVariant.withValues(alpha: 0.6),
               ),
             ),
-            child: Icon(
-              p.achievement.icon,
-              size: 24,
-              color: on
-                  ? colors.onPrimaryContainer
-                  : colors.onSurfaceVariant.withValues(alpha: 0.4),
+            const SizedBox(height: 1),
+            Text(
+              tier.label.tl,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              textAlign: TextAlign.center,
+              style: ts.s10.withColor(
+                tier.isUnlocked
+                    ? tier.deep
+                    : colors.onSurfaceVariant.withValues(alpha: 0.45),
+              ),
             ),
-          ),
-          const SizedBox(height: 5),
-          Text(
-            p.achievement.title.tl,
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: ts.s10.withColor(
-              on
-                  ? colors.onSurface
-                  : colors.onSurfaceVariant.withValues(alpha: 0.5),
-            ),
-          ),
-          const SizedBox(height: 1),
-          Text(
-            Achievements.progressText(p),
-            maxLines: 1,
-            overflow: TextOverflow.ellipsis,
-            textAlign: TextAlign.center,
-            style: ts.s10.withColor(
-              on
-                  ? colors.primary
-                  : colors.onSurfaceVariant.withValues(alpha: 0.35),
-            ),
-          ),
-        ],
+          ],
+        ),
       ),
+    );
+  }
+
+  void _showAchievementDetails(AchievementProgress p) {
+    showModalBottomSheet(
+      context: context,
+      showDragHandle: true,
+      backgroundColor: context.colorScheme.surfaceContainerLow,
+      builder: (context) => _AchievementSheet(progress: p),
     );
   }
 
@@ -542,7 +627,11 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
         : _summary.totalSeconds ~/ _summary.activeDays;
     final tiles = [
       (Icons.calendar_month, "${_summary.activeDays}", "Reading days"),
-      (Icons.local_fire_department, "${_summary.longestStreak}", "Longest streak"),
+      (
+        Icons.local_fire_department,
+        "${_summary.longestStreak}",
+        "Longest streak"
+      ),
       (Icons.menu_book, "${_summary.comicCount}", "Comics read"),
       (Icons.timelapse, "${avg ~/ 60}", "Avg minutes per day"),
     ];
@@ -612,7 +701,8 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                           height: 6 + 66 * ratio,
                           decoration: BoxDecoration(
                             color: ratio > 0
-                                ? colors.primary.withValues(alpha: 0.35 + 0.55 * ratio)
+                                ? colors.primary
+                                    .withValues(alpha: 0.35 + 0.55 * ratio)
                                 : colors.outlineVariant.withValues(alpha: 0.4),
                             borderRadius: BorderRadius.circular(4),
                           ),
@@ -659,7 +749,9 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                   Row(
                     children: [
                       Expanded(
-                        child: Text(name, style: ts.s12, maxLines: 1,
+                        child: Text(name,
+                            style: ts.s12,
+                            maxLines: 1,
                             overflow: TextOverflow.ellipsis),
                       ),
                       Text(
@@ -674,7 +766,8 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                     child: LinearProgressIndicator(
                       value: ratio.clamp(0.02, 1.0),
                       minHeight: 6,
-                      backgroundColor: colors.outlineVariant.withValues(alpha: 0.3),
+                      backgroundColor:
+                          colors.outlineVariant.withValues(alpha: 0.3),
                     ),
                   ),
                 ],
@@ -738,7 +831,6 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     );
   }
 }
-
 
 /// 7 x 24 的阅读热力图
 class _WeekHeatmap extends StatelessWidget {
@@ -817,6 +909,260 @@ class _WeekHeatmap extends StatelessWidget {
           ],
         ),
       ],
+    );
+  }
+}
+
+/// 本月目标的进度条：底轨 + 填充 + 25/50/75 三道刻度。
+///
+/// 刻度用卡片底色「挖」出来，看起来像轨道被分成四段——比一条纯色条更能
+/// 传达「还差几段」，也顺便和上面的徽章档位对上。
+class _GoalBar extends StatelessWidget {
+  const _GoalBar({
+    required this.ratio,
+    required this.color,
+    required this.base,
+  });
+
+  final double ratio;
+
+  final Color color;
+
+  final ColorScheme base;
+
+  @override
+  Widget build(BuildContext context) {
+    const height = 7.0;
+    return LayoutBuilder(
+      builder: (context, constraints) {
+        final width = constraints.maxWidth;
+        return SizedBox(
+          height: height,
+          child: Stack(
+            children: [
+              Container(
+                width: width,
+                height: height,
+                decoration: BoxDecoration(
+                  color: base.outlineVariant.withValues(alpha: 0.35),
+                  borderRadius: BorderRadius.circular(height / 2),
+                ),
+              ),
+              Container(
+                width: (width * ratio.clamp(0.0, 1.0)).clamp(height, width),
+                height: height,
+                decoration: BoxDecoration(
+                  color: color,
+                  borderRadius: BorderRadius.circular(height / 2),
+                ),
+              ),
+              for (final tick in const [0.25, 0.5, 0.75])
+                Positioned(
+                  left: width * tick,
+                  top: 0,
+                  bottom: 0,
+                  child: Container(
+                    width: 1.4,
+                    color: base.surfaceContainerLow,
+                  ),
+                ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+}
+
+/// 成就详情：一枚大徽章 + 四档阶梯。
+///
+/// 阶梯里每一行都画真实档位的徽章（未达到的降透明度），既能看清下一档
+/// 长什么样，也能一眼看出自己走到第几级。
+class _AchievementSheet extends StatelessWidget {
+  const _AchievementSheet({required this.progress});
+
+  final AchievementProgress progress;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    final p = progress;
+    final next = p.nextTarget;
+    return SafeArea(
+      top: false,
+      // 小屏幕上八条成就 + 四档阶梯可能撑满一屏，允许滚动，不要溢出。
+      child: SingleChildScrollView(
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
+          child: Column(
+            mainAxisSize: MainAxisSize.min,
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Row(
+                children: [
+                  AchievementBadge(
+                    icon: p.family.icon,
+                    tier: p.tier,
+                    size: 72,
+                    ratio: p.unlocked ? p.ratioToNext : null,
+                  ),
+                  const SizedBox(width: 16),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(p.family.title.tl, style: ts.s18.bold),
+                        const SizedBox(height: 6),
+                        Row(
+                          children: [
+                            Container(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 8,
+                                vertical: 2,
+                              ),
+                              decoration: BoxDecoration(
+                                color: p.tier.base.withValues(alpha: 0.18),
+                                borderRadius: BorderRadius.circular(20),
+                              ),
+                              child: Text(
+                                p.tier.label.tl,
+                                style: ts.s10.copyWith(
+                                  fontWeight: FontWeight.w600,
+                                  color: p.tier.isUnlocked
+                                      ? p.tier.deep
+                                      : colors.onSurfaceVariant,
+                                ),
+                              ),
+                            ),
+                            const SizedBox(width: 8),
+                            Text(
+                              Achievements.valueText(
+                                p.family.metric,
+                                p.value,
+                              ),
+                              style: ts.s10.withColor(colors.onSurfaceVariant),
+                            ),
+                          ],
+                        ),
+                      ],
+                    ),
+                  ),
+                ],
+              ),
+              const SizedBox(height: 14),
+              Text(
+                p.family.description.tl,
+                style: ts.s12.withColor(colors.onSurfaceVariant),
+              ),
+              const SizedBox(height: 16),
+              if (next != null) ...[
+                Row(
+                  children: [
+                    Text(
+                      "Next tier".tl,
+                      style: ts.s10.copyWith(fontWeight: FontWeight.w600),
+                    ),
+                    const Spacer(),
+                    Text(
+                      "@a to go".tlParams({
+                        'a': Achievements.valueText(
+                          p.family.metric,
+                          p.remainingToNext,
+                        ),
+                      }),
+                      style: ts.s10.withColor(colors.onSurfaceVariant),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 7),
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(4),
+                  child: LinearProgressIndicator(
+                    value: p.ratioToNext,
+                    minHeight: 6,
+                    backgroundColor:
+                        colors.outlineVariant.withValues(alpha: 0.35),
+                    valueColor: AlwaysStoppedAnimation(
+                      AchievementTier.values[p.tierIndex + 1].base,
+                    ),
+                  ),
+                ),
+              ] else
+                Row(
+                  children: [
+                    Icon(
+                      Icons.workspace_premium_rounded,
+                      size: 15,
+                      color: AchievementTier.diamond.deep,
+                    ),
+                    const SizedBox(width: 6),
+                    Text(
+                      "Max tier reached".tl,
+                      style: ts.s10.withColor(AchievementTier.diamond.deep),
+                    ),
+                  ],
+                ),
+              const SizedBox(height: 18),
+              for (var i = 0; i < AchievementTier.tierCount; i++)
+                _ladderRow(context, i),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _ladderRow(BuildContext context, int index) {
+    final colors = context.colorScheme;
+    final tier = AchievementTier.values[index + 1];
+    final target = progress.family.tiers[index];
+    final reached = progress.tierIndex >= index + 1;
+    final isNext = progress.tierIndex == index;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 5),
+      child: Row(
+        children: [
+          Opacity(
+            opacity: reached ? 1 : 0.42,
+            child: AchievementBadge(
+              icon: progress.family.icon,
+              tier: tier,
+              size: 32,
+              glow: false,
+            ),
+          ),
+          const SizedBox(width: 12),
+          Text(
+            tier.label.tl,
+            style: ts.s12.copyWith(
+              fontWeight: reached ? FontWeight.w600 : FontWeight.w400,
+              color: reached ? colors.onSurface : colors.onSurfaceVariant,
+            ),
+          ),
+          const Spacer(),
+          Text(
+            Achievements.valueText(progress.family.metric, target),
+            style: ts.s12.withColor(colors.onSurfaceVariant),
+          ),
+          const SizedBox(width: 8),
+          SizedBox(
+            width: 18,
+            child: reached
+                ? Icon(
+                    Icons.check_circle_rounded,
+                    size: 16,
+                    color: tier.base,
+                  )
+                : isNext
+                    ? Icon(
+                        Icons.radio_button_unchecked,
+                        size: 14,
+                        color: colors.primary,
+                      )
+                    : null,
+          ),
+        ],
+      ),
     );
   }
 }

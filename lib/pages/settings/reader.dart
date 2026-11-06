@@ -6,11 +6,18 @@ class ReaderSettings extends StatefulWidget {
     this.onChanged,
     this.comicId,
     this.comicSource,
+    this.showGestures = true,
   });
 
   final void Function(String key)? onChanged;
   final String? comicId;
   final String? comicSource;
+
+  /// 是否把「手势」分组画在本页末尾。
+  ///
+  /// 阅读器里弹出的设置面板要在一页里看全，所以默认画；设置页把它们拆到了
+  /// 「操作」分类，那边传 false，避免同一个开关出现两遍。
+  final bool showGestures;
 
   @override
   State<ReaderSettings> createState() => _ReaderSettingsState();
@@ -89,39 +96,16 @@ class _ReaderSettingsState extends State<ReaderSettings> {
     final sourceKey = widget.comicSource;
     final key = "$comicId@$sourceKey";
 
-    bool isEnabledSpecificSettings =
-        comicId != null &&
-        appdata.settings.isComicSpecificSettingsEnabled(comicId, sourceKey);
-    bool useDeviceSpecificSettings =
-        !isEnabledSpecificSettings &&
-        appdata.settings.isDeviceSpecificSettingsEnabled();
-
-    // 读写走同一套优先级：漫画专属 > 设备专属 > 全局。
-    // 合并型设置项（底层是多个键）用它们把读写落到正确的那一层。
-    Object? read(String settingKey) {
-      if (isEnabledSpecificSettings) {
-        return appdata.settings.getReaderSetting(comicId, sourceKey!, settingKey);
-      }
-      if (useDeviceSpecificSettings) {
-        return appdata.settings.getDeviceReaderSetting(settingKey);
-      }
-      return appdata.settings[settingKey];
-    }
-
-    void write(String settingKey, Object? value) {
-      if (isEnabledSpecificSettings) {
-        appdata.settings.setReaderSetting(
-          comicId,
-          sourceKey!,
-          settingKey,
-          value,
-        );
-      } else if (useDeviceSpecificSettings) {
-        appdata.settings.setDeviceReaderSetting(settingKey, value);
-      } else {
-        appdata.settings[settingKey] = value;
-      }
-    }
+    // 读写走同一套优先级：漫画专属 > 设备专属 > 全局。规则在
+    // [_ReaderSettingScope] 里，手势分组也用它，两边不会走偏。
+    final scope = _ReaderSettingScope(
+      comicId: comicId,
+      comicSource: sourceKey,
+    );
+    final isEnabledSpecificSettings = scope.comicSpecific;
+    final useDeviceSpecificSettings = scope.deviceSpecific;
+    final read = scope.read;
+    final write = scope.write;
 
     final specificComicId = isEnabledSpecificSettings ? widget.comicId : null;
     final specificComicSource =
@@ -134,7 +118,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           SliverMainAxisGroup(
             slivers: [
               SwitchListTile(
-                contentPadding: kSettingTilePaddingOf(context),
+                contentPadding: kSettingTilePadding,
                 title: Text("Enable comic specific settings".tl),
                 value: isEnabledSpecificSettings,
                 onChanged: (b) {
@@ -167,7 +151,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           SliverMainAxisGroup(
             slivers: [
               SwitchListTile(
-                contentPadding: kSettingTilePaddingOf(context),
+                contentPadding: kSettingTilePadding,
                 title: Text("Enable device specific settings".tl),
                 value: useDeviceSpecificSettings,
                 onChanged: (b) {
@@ -315,8 +299,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           ),
         ),
         SliverAnimatedVisibility(
-          visible:
-              appdata.settings['readerMode']!.startsWith('gallery') &&
+          visible: appdata.settings['readerMode']!.startsWith('gallery') &&
               (appdata.settings['readerScreenPicNumberForLandscape'] > 1 ||
                   appdata.settings['readerScreenPicNumberForPortrait'] > 1),
           child: _SwitchSetting(
@@ -344,9 +327,8 @@ class _ReaderSettingsState extends State<ReaderSettings> {
                 widget.onChanged?.call("readerScrollSpeed");
               },
               comicId: isEnabledSpecificSettings ? widget.comicId : null,
-              comicSource: isEnabledSpecificSettings
-                  ? widget.comicSource
-                  : null,
+              comicSource:
+                  isEnabledSpecificSettings ? widget.comicSource : null,
               useDeviceSettings: useDeviceSpecificSettings,
             ),
           ),
@@ -386,8 +368,7 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
         SliverAnimatedVisibility(
-          visible:
-              (appdata.settings['readerWarmFilter'] as num? ?? 0) > 0,
+          visible: (appdata.settings['readerWarmFilter'] as num? ?? 0) > 0,
           child: _SwitchSetting(
             title: "Only at night (20:00 - 07:00)".tl,
             settingKey: "readerWarmFilterAuto",
@@ -459,75 +440,14 @@ class _ReaderSettingsState extends State<ReaderSettings> {
           comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
           useDeviceSettings: useDeviceSpecificSettings,
         ).toSliver(),
-        _SettingPartTitle(
-          title: "Gestures".tl,
-          icon: Icons.gesture,
-        ),
-        _SwitchSetting(
-          title: 'Double tap to zoom'.tl,
-          settingKey: 'enableDoubleTapToZoom',
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call('enableDoubleTapToZoom');
-          },
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        // 原来是三项：长按动作（快捷面板/缩放）、是否允许长按缩放、
-        // 缩放位置。三者共同决定一件事，用户很容易配成「动作选了缩放、
-        // 开关却是关的」这种长按完全没反应的状态。合并成一项三选一。
-        SelectSetting(
-          title: "Long press in reader".tl,
-          settingKey: "longPressAction",
-          optionTranslation: {
-            "hud": "Quick panel".tl,
-            "zoomPress": "Zoom at press position".tl,
-            "zoomCenter": "Zoom at screen center".tl,
-          },
-          readValue: () => longPressOptionOf(
-            read("longPressAction"),
-            read("enableLongPressToZoom"),
-            read("longPressZoomPosition"),
+        if (widget.showGestures)
+          SliverToBoxAdapter(
+            child: ReaderGestureSettings(
+              comicId: widget.comicId,
+              comicSource: widget.comicSource,
+              onChanged: widget.onChanged,
+            ),
           ),
-          writeValue: (value) {
-            final keys = longPressKeysOf(value);
-            write("longPressAction", keys.action);
-            if (keys.zoomEnabled != null) {
-              write("enableLongPressToZoom", keys.zoomEnabled);
-            }
-            if (keys.position != null) {
-              write("longPressZoomPosition", keys.position);
-            }
-          },
-          onChanged: () {
-            setState(() {});
-            widget.onChanged?.call("longPressAction");
-            widget.onChanged?.call("enableLongPressToZoom");
-            widget.onChanged?.call("longPressZoomPosition");
-          },
-          comicId: specificComicId,
-          comicSource: specificComicSource,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
-        SelectSetting(
-          title: "Quick collect image".tl,
-          settingKey: "quickCollectImage",
-          optionTranslation: {
-            "No": "Not enable".tl,
-            "DoubleTap": "Double Tap".tl,
-            "Swipe": "Swipe".tl,
-          },
-          onChanged: () {
-            widget.onChanged?.call("quickCollectImage");
-          },
-          help:
-              "On the image browsing page, you can quickly collect images by sliding horizontally or vertically according to your reading mode"
-                  .tl,
-          comicId: isEnabledSpecificSettings ? widget.comicId : null,
-          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
-          useDeviceSettings: useDeviceSpecificSettings,
-        ).toSliver(),
         _SettingPartTitle(
           title: "Image & performance".tl,
           icon: Icons.image_outlined,
@@ -646,5 +566,163 @@ class __CustomImageProcessingState extends State<_CustomImageProcessing> {
         ],
       ),
     );
+  }
+}
+
+/// 「操作」分类里的手势分组。
+///
+/// 抽成独立组件是因为它有两个宿主：阅读器里的设置面板（和其余阅读设置一起
+/// 显示）和设置页的「操作」分类。读写的层级规则和 [ReaderSettings] 完全一致
+/// （漫画专属 > 设备专属 > 全局），所以两边共用 [_ReaderSettingScope]。
+class ReaderGestureSettings extends StatefulWidget {
+  const ReaderGestureSettings({
+    super.key,
+    this.comicId,
+    this.comicSource,
+    this.onChanged,
+  });
+
+  final String? comicId;
+
+  final String? comicSource;
+
+  final void Function(String key)? onChanged;
+
+  @override
+  State<ReaderGestureSettings> createState() => _ReaderGestureSettingsState();
+}
+
+class _ReaderGestureSettingsState extends State<ReaderGestureSettings> {
+  late final scope = _ReaderSettingScope(
+    comicId: widget.comicId,
+    comicSource: widget.comicSource,
+  );
+
+  @override
+  Widget build(BuildContext context) {
+    final read = scope.read;
+    final write = scope.write;
+    final useDeviceSpecificSettings = scope.deviceSpecific;
+    final isEnabledSpecificSettings = scope.comicSpecific;
+    final specificComicId = isEnabledSpecificSettings ? widget.comicId : null;
+    final specificComicSource =
+        isEnabledSpecificSettings ? widget.comicSource : null;
+
+    return Column(
+      children: [
+        _SettingPartTitleRow(title: "Gestures".tl, icon: Icons.gesture),
+        _SwitchSetting(
+          title: 'Double tap to zoom'.tl,
+          settingKey: 'enableDoubleTapToZoom',
+          onChanged: () {
+            setState(() {});
+            widget.onChanged?.call('enableDoubleTapToZoom');
+          },
+          comicId: isEnabledSpecificSettings ? widget.comicId : null,
+          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+          useDeviceSettings: useDeviceSpecificSettings,
+        ),
+        // 原来是三项：长按动作（快捷面板/缩放）、是否允许长按缩放、
+        // 缩放位置。三者共同决定一件事，用户很容易配成「动作选了缩放、
+        // 开关却是关的」这种长按完全没反应的状态。合并成一项三选一。
+        SelectSetting(
+          title: "Long press in reader".tl,
+          settingKey: "longPressAction",
+          optionTranslation: {
+            "hud": "Quick panel".tl,
+            "zoomPress": "Zoom at press position".tl,
+            "zoomCenter": "Zoom at screen center".tl,
+          },
+          readValue: () => longPressOptionOf(
+            read("longPressAction"),
+            read("enableLongPressToZoom"),
+            read("longPressZoomPosition"),
+          ),
+          writeValue: (value) {
+            final keys = longPressKeysOf(value);
+            write("longPressAction", keys.action);
+            if (keys.zoomEnabled != null) {
+              write("enableLongPressToZoom", keys.zoomEnabled);
+            }
+            if (keys.position != null) {
+              write("longPressZoomPosition", keys.position);
+            }
+          },
+          onChanged: () {
+            setState(() {});
+            widget.onChanged?.call("longPressAction");
+            widget.onChanged?.call("enableLongPressToZoom");
+            widget.onChanged?.call("longPressZoomPosition");
+          },
+          comicId: specificComicId,
+          comicSource: specificComicSource,
+          useDeviceSettings: useDeviceSpecificSettings,
+        ),
+        SelectSetting(
+          title: "Quick collect image".tl,
+          settingKey: "quickCollectImage",
+          optionTranslation: {
+            "No": "Not enable".tl,
+            "DoubleTap": "Double Tap".tl,
+            "Swipe": "Swipe".tl,
+          },
+          onChanged: () {
+            widget.onChanged?.call("quickCollectImage");
+          },
+          help:
+              "On the image browsing page, you can quickly collect images by sliding horizontally or vertically according to your reading mode"
+                  .tl,
+          comicId: isEnabledSpecificSettings ? widget.comicId : null,
+          comicSource: isEnabledSpecificSettings ? widget.comicSource : null,
+          useDeviceSettings: useDeviceSpecificSettings,
+        ),
+      ],
+    );
+  }
+}
+
+/// 阅读设置的读写层级：漫画专属 > 设备专属 > 全局。
+///
+/// 这段规则原来在 `_ReaderSettingsState.build` 里以闭包形式存在，手势分组
+/// 拆出去以后要再用一遍，就提成了对象——规则只有一份，不会两边走偏。
+class _ReaderSettingScope {
+  const _ReaderSettingScope({this.comicId, this.comicSource});
+
+  final String? comicId;
+
+  final String? comicSource;
+
+  bool get comicSpecific =>
+      comicId != null &&
+      comicSource != null &&
+      appdata.settings.isComicSpecificSettingsEnabled(comicId, comicSource);
+
+  bool get deviceSpecific =>
+      !comicSpecific && appdata.settings.isDeviceSpecificSettingsEnabled();
+
+  Object? read(String settingKey) {
+    if (comicSpecific) {
+      return appdata.settings
+          .getReaderSetting(comicId!, comicSource!, settingKey);
+    }
+    if (deviceSpecific) {
+      return appdata.settings.getDeviceReaderSetting(settingKey);
+    }
+    return appdata.settings[settingKey];
+  }
+
+  void write(String settingKey, Object? value) {
+    if (comicSpecific) {
+      appdata.settings.setReaderSetting(
+        comicId!,
+        comicSource!,
+        settingKey,
+        value,
+      );
+    } else if (deviceSpecific) {
+      appdata.settings.setDeviceReaderSetting(settingKey, value);
+    } else {
+      appdata.settings[settingKey] = value;
+    }
   }
 }
