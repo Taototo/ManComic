@@ -161,7 +161,14 @@ class _PopUpWidgetScaffoldState extends State<PopUpWidgetScaffold> {
 
   @override
   Widget build(BuildContext context) {
+    final liquid = LiquidTheme.isOn(context);
     return Material(
+      // 液态主题下这层不能是透明的：Popup 里的子页（各设置分类）都靠它当
+      // 底板，透明之后子页直接坐到玻璃外的色斑上，和首页面板的观感对不上。
+      // 给一个接近玻璃的浓度，两种情况都成立。
+      color: liquid
+          ? Theme.of(context).colorScheme.surface.withValues(alpha: 0.88)
+          : null,
       child: Column(
         children: [
           Container(
