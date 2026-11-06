@@ -456,6 +456,37 @@ class LiquidGlass extends StatelessWidget {
   }
 }
 
+/// 页面自己的那层背景（surface 底 + 色斑）。
+///
+/// 液态主题里所有页面都是透明的：`scaffoldBackgroundColor` 和 `canvasColor`
+/// 都被改成了透明，好让玻璃卡片透出底下的色斑。但「透明」意味着**能看穿到
+/// 下面那一页**——转场时两页同时存在，新页的空白处直接露出旧页的文字和封面，
+/// 用户看到的就是「两层内容叠在一起」。
+///
+/// 所以每一页都必须自己带一层**不透明**的视觉底。底是和全局背景一模一样的一套
+/// 色斑，看起来还是同一块背景，但它在页面内部，页面盖住页面时是实打实地盖住。
+///
+/// 这正是 iOS 液态玻璃的做法：玻璃只对「本页的内容」模糊，不是对「上一页」。
+class AppPageBackground extends StatelessWidget {
+  const AppPageBackground({super.key, required this.child});
+
+  final Widget child;
+
+  @override
+  Widget build(BuildContext context) {
+    if (!LiquidTheme.isOn(context)) {
+      return child;
+    }
+    return Stack(
+      fit: StackFit.expand,
+      children: [
+        const GlassPageBackdrop(),
+        child,
+      ],
+    );
+  }
+}
+
 /// 页面级的背景光斑，给液态玻璃提供「后面有东西」的环境。
 ///
 /// 玻璃的本质是模糊它下面的内容。如果页面底色是一块纯色，模糊完还是纯色，

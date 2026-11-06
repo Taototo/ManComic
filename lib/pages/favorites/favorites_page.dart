@@ -174,19 +174,39 @@ class _FavoritesPageState extends State<FavoritesPage> {
       opaque: false,
       barrierColor: Colors.black.toOpacity(0.36),
       pageBuilder: (context, animation, secondary) {
+        final width = min(300, context.width - 16).toDouble();
+        final panel = _LeftBar(
+          withAppbar: true,
+          favPage: this,
+          onSelected: () {
+            context.pop();
+          },
+        );
+        if (LiquidTheme.isOn(context)) {
+          // 抽屉是浮层，**必须自己带底**。
+          //
+          // 之前这里是一个不带 color 的 Material，它的底色来自 canvasColor；
+          // 液态主题把 canvasColor 改成了透明（为了让页面露出色斑），于是整块
+          // 抽屉没有任何底色，分类文字直接压在封面墙上——用户看到的就是
+          // 「两层内容重叠」。glass 的不透明度给到 0.94：透出来的那 6% 还是
+          // 糊过的，读起来是雾，不是另一页。
+          return Align(
+            alignment: Alignment.centerLeft,
+            child: LiquidGlass(
+              borderRadius: const BorderRadius.horizontal(
+                right: Radius.circular(28),
+              ),
+              opacity: 0.94,
+              blur: GlassConfig.blur,
+              borderWidth: 0,
+              child: SizedBox(width: width, child: panel),
+            ),
+          );
+        }
         return Align(
           alignment: Alignment.centerLeft,
           child: Material(
-            child: SizedBox(
-              width: min(300, context.width - 16),
-              child: _LeftBar(
-                withAppbar: true,
-                favPage: this,
-                onSelected: () {
-                  context.pop();
-                },
-              ),
-            ),
+            child: SizedBox(width: width, child: panel),
           ),
         );
       },

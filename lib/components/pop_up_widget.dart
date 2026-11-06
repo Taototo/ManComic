@@ -29,16 +29,21 @@ class PopUpWidget<T> extends PopupRoute<T> {
     // 说的「重影」。页面各自带着不透明玻璃，滑入才是「新页盖住旧页」。
     Widget pageShell(BuildContext context, Widget child) {
       if (!liquid) return child;
-      return LiquidGlass(
-        borderRadius: BorderRadius.zero,
-        // 0.92 是个折中：再低就能看穿到背后的漫画，再高就完全不像玻璃了。
-        // 模糊仍然开着，所以透过来的那 8% 是糊的，看起来是「雾」而不是
-        // 「漏出来的另一页」。
-        opacity: 0.92,
-        blur: GlassConfig.blur,
-        borderWidth: 0,
-        shadow: false,
-        child: child,
+      // 玻璃底下要垫**页面自己的背景**，不能让它去透背后的主页。
+      // 之前玻璃直接盖在当前页面上，透出来的是主页的封面和文字（糊掉的版本），
+      // 读起来仍然像「两层东西叠着」。垫一层同款色斑之后，透出来的就只是雾。
+      return AppPageBackground(
+        child: LiquidGlass(
+          borderRadius: BorderRadius.zero,
+          // 0.94 是个折中：再低就能看穿到背后的内容，再高就完全不像玻璃了。
+          // 模糊仍然开着，所以透过来的那 6% 是糊的，看起来是「雾」而不是
+          // 「漏出来的另一页」。
+          opacity: 0.94,
+          blur: GlassConfig.blur,
+          borderWidth: 0,
+          shadow: false,
+          child: child,
+        ),
       );
     }
 
@@ -102,24 +107,23 @@ class PopUpWidget<T> extends PopupRoute<T> {
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation,
       Animation<double> secondaryAnimation, Widget child) {
-    // 原来是一整块从 0 淡入。淡入到一半时面板只有 50% 不透明，背后的内容
-    // 清清楚楚——这就是「打开设置露出破绽」的另一半原因：玻璃面板还没成形，
-    // 底下那页就已经透上来了。
+    // 只有缩放，**不再整体淡入**。
     //
-    // 改成「轻微放大 + 淡入」：起点就有 94% 大小，视觉上是面板弹出来，而不
-    // 是从背景里浮出来。淡入仍然保留，但配合实体感的缩放，中途那几帧读起来
-    // 是「还在变透明」，不是「能看到别的页面」。
+    // 之前是 `FadeTransition + ScaleTransition`：打开和关闭的头几帧面板只有
+    // 50% 不透明，底下的主页清清楚楚地透上来；关闭时反过来又透一遍，用户在
+    // 两个方向上都看到「两层内容叠着」。玻璃面板的不透明度是它自己的属性，
+    // 不该由路由动画再乘一次。
+    //
+    // 保留缩放：0.94 → 1.0，起点已经是接近完整大小的面板，读起来是「弹出来」，
+    // 不是「从背景里长出来」。
     final curved = CurvedAnimation(
       parent: animation,
       curve: Curves.easeOutCubic,
       reverseCurve: Curves.easeInCubic,
     );
-    return FadeTransition(
-      opacity: curved,
-      child: ScaleTransition(
-        scale: Tween<double>(begin: 0.94, end: 1.0).animate(curved),
-        child: child,
-      ),
+    return ScaleTransition(
+      scale: Tween<double>(begin: 0.94, end: 1.0).animate(curved),
+      child: child,
     );
   }
 }

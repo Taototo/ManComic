@@ -328,13 +328,19 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               );
             }
             if (isLiquidTheme) {
-              // 全局色斑只铺一次，放在导航器之下：所有页面（含 push 进来的）
-              // 共用同一层背景，切页时色斑不跟着动，玻璃从上面经过才有折射感。
-              // 页面自己是透明的（scaffoldBackgroundColor / canvasColor），
-              // 所以这层能透上来。
+              // 全局只铺一块纯色，色斑交给**每一页自己**画（[AppPageBackground]）。
+              //
+              // 之前是全局铺一层色斑、所有页面共用。看着省事，但页面因此必须
+              // 保持透明，转场时新页的半透明区域会把旧页透出来——也就是用户
+              // 反复报的「重影」。现在每页自带同一套色斑：视觉上还是同一块背
+              // 景（渐变固定在屏幕坐标上，滚动和切页都不动），但页面盖住页面
+              // 时是真盖住。这层纯色负责兜住转场边缘和没有页面的瞬间。
               widget = Stack(
                 fit: StackFit.expand,
-                children: [const GlassPageBackdrop(), widget],
+                children: [
+                  ColoredBox(color: Theme.of(context).colorScheme.surface),
+                  widget,
+                ],
               );
             }
             return _SystemUiProvider(Material(

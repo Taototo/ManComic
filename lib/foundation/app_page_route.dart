@@ -4,6 +4,7 @@ import 'package:flutter/gestures.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/rendering.dart';
 import 'package:flutter/services.dart';
+import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 
 const double _kBackGestureWidth = 20.0;
@@ -882,15 +883,43 @@ class _FadePageTransitionState extends State<_FadePageTransition> {
 
   @override
   Widget build(BuildContext context) {
+    // 把整页内容固化成一层：转场期间只合成这一层，不必逐帧重绘页面里的图片
+    // 和文字。
+    //
+    // 外层再包一层页面背景：液态主题的页面是透明的，没有这层不透明底，转场
+    // 期间两页会互相透出（详见 [AppPageBackground]）。
+    final page = RepaintBoundary(
+      child: AppPageBackground(
+        child: Material(child: widget.child),
+      ),
+    );
+
+    if (LiquidTheme.isOn(context)) {
+      // 液态主题**不能淡入**。
+      //
+      // 页面底是半透明的，`FadeTransition` 一开就是整页不透明度从 0 涨到 1：
+      // 中间那几十帧旧页清清楚楚地透过新页露出来，用户描述成「重影」。把
+      // 缩放也去掉——0.94 → 1.0 的收缩会在四边漏出一圈底下的内容，同样是
+      // 破绽。改用一小段横向位移：新页从右侧推进来，旧页原地被盖住，全程
+      // 没有任何一帧是半透明的。
+      return AnimatedBuilder(
+        animation: widget.primaryAnimation,
+        child: page,
+        builder: (context, child) {
+          final dx = 1.0 - widget.primaryAnimation.value;
+          return Transform.translate(
+            offset: Offset(MediaQuery.of(context).size.width * 0.06 * dx, 0),
+            child: child,
+          );
+        },
+      );
+    }
+
     return FadeTransition(
       opacity: _opacity,
       child: ScaleTransition(
         scale: _scale,
-        child: RepaintBoundary(
-          // 把整页内容固化成一层：淡出期间只合成这一层，不必逐帧重绘
-          // 页面里的图片和文字。
-          child: Material(child: widget.child),
-        ),
+        child: page,
       ),
     );
   }

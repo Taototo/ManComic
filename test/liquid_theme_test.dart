@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/components/components.dart';
+import 'package:venera/foundation/app_page_route.dart';
 
 /// 液态主题的两条底线：
 ///
@@ -305,6 +306,69 @@ void main() {
       await tester.tap(find.byType(LiquidGlassButton));
       await tester.pumpAndSettle();
       expect(taps, 1);
+    });
+  });
+
+  group('页面背景与转场', () {
+    testWidgets('默认主题不加任何背景层', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(),
+          home: const AppPageBackground(
+            child: Scaffold(body: Text('page')),
+          ),
+        ),
+      );
+      expect(find.byType(GlassPageBackdrop), findsNothing);
+      expect(find.text('page'), findsOneWidget);
+    });
+
+    testWidgets('液态主题下每页自带色斑底', (tester) async {
+      await tester.pumpWidget(
+        MaterialApp(
+          theme: ThemeData(extensions: const [LiquidTheme.on]),
+          home: const AppPageBackground(
+            child: Scaffold(body: Text('page')),
+          ),
+        ),
+      );
+      expect(find.byType(GlassPageBackdrop), findsOneWidget);
+    });
+
+    testWidgets('液态转场途中新页不在任何淡入动画里', (tester) async {
+      // 这是「重影」的根因锁：页面底是半透明的，只要整页参与 opacity 动画，
+      // 中间那几十帧就一定能看到下一层的内容。新页的祖先链上不允许出现
+      // FadeTransition。
+      final navKey = GlobalKey<NavigatorState>();
+      await tester.pumpWidget(
+        MaterialApp(
+          navigatorKey: navKey,
+          theme: ThemeData(extensions: const [LiquidTheme.on]),
+          home: const AppPageBackground(
+            child: Scaffold(body: Center(child: Text('OLD'))),
+          ),
+        ),
+      );
+      await tester.pumpAndSettle();
+
+      navKey.currentState!.push(AppPageRoute(
+        builder: (_) => const AppPageBackground(
+          child: Scaffold(body: Center(child: Text('NEW'))),
+        ),
+      ));
+      await tester.pump();
+      await tester.pump(const Duration(milliseconds: 80));
+
+      expect(
+        find.ancestor(
+          of: find.text('NEW'),
+          matching: find.byType(FadeTransition),
+        ),
+        findsNothing,
+      );
+
+      await tester.pumpAndSettle();
+      expect(find.text('NEW'), findsOneWidget);
     });
   });
 }

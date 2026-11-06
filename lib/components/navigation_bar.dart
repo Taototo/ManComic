@@ -304,50 +304,71 @@ class NaviPaneState extends State<NaviPane>
     return widget.pageBuilder(currentPage);
   }
 
-  Widget buildTop() {
-    return Material(
-      child: Container(
-        padding: const EdgeInsets.only(left: 16, right: 8),
-        height: _kTopBarHeight,
-        width: double.infinity,
-        child: Row(
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.4),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
-                );
-              },
-              child: Text(
-                widget.paneItems[currentPage].label,
-                key: ValueKey(currentPage),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+  /// 顶部标题栏。
+  ///
+  /// 液态主题下玻璃要**盖住状态栏**：调用方原来用 `paddingTop` 把整条栏推到
+  /// 状态栏下面，状态栏那 24~40px 没有任何底，滚动的封面会从时间旁边穿过去。
+  /// 所以这时改由栏自己接收 [topPadding]，把它加进玻璃内部。
+  Widget buildTop({double topPadding = 0}) {
+    final liquid = LiquidTheme.isOn(context);
+    Widget content = Container(
+      padding: EdgeInsets.only(
+        top: liquid ? topPadding : 0,
+        left: 16,
+        right: 8,
+      ),
+      height: _kTopBarHeight + (liquid ? topPadding : 0),
+      width: double.infinity,
+      child: Row(
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.4),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
                 ),
+              );
+            },
+            child: Text(
+              widget.paneItems[currentPage].label,
+              key: ValueKey(currentPage),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const Spacer(),
-            for (var action in widget.paneActions)
-              _GlassActionButton(
-                icon: action.icon,
-                label: action.label,
-                onTap: action.onTap,
-              ),
-          ],
-        ),
+          ),
+          const Spacer(),
+          for (var action in widget.paneActions)
+            _GlassActionButton(
+              icon: action.icon,
+              label: action.label,
+              onTap: action.onTap,
+            ),
+        ],
       ),
     );
+    if (liquid) {
+      // 这里必须自带底：原来的裸 Material 读 canvasColor，液态下是透明的，
+      // 标题就直接浮在滚动内容上了。
+      return LiquidGlass(
+        borderRadius: BorderRadius.zero,
+        opacity: 0.94,
+        blur: GlassConfig.blur,
+        borderWidth: 0,
+        shadow: false,
+        child: content,
+      );
+    }
+    return Material(child: content);
   }
 
   Widget buildBottom() {
@@ -370,52 +391,63 @@ class NaviPaneState extends State<NaviPane>
 
   Widget buildLeft() {
     final value = controller.value;
+    final liquid = LiquidTheme.isOn(context);
     const paddingHorizontal = 12.0;
-    return Material(
-      child: Container(
-        width:
-            _kFoldedSideBarWidth +
-            (_kSideBarWidth - _kFoldedSideBarWidth) * ((value - 2).clamp(0, 1)),
-        height: double.infinity,
-        padding: const EdgeInsets.symmetric(horizontal: paddingHorizontal),
-        decoration: BoxDecoration(
-          border: Border(
-            right: BorderSide(
-              color: Theme.of(context).colorScheme.outlineVariant,
-              width: 1.0,
-            ),
+    Widget bar = Container(
+      width:
+          _kFoldedSideBarWidth +
+          (_kSideBarWidth - _kFoldedSideBarWidth) * ((value - 2).clamp(0, 1)),
+      height: double.infinity,
+      padding: const EdgeInsets.symmetric(horizontal: paddingHorizontal),
+      decoration: BoxDecoration(
+        border: Border(
+          right: BorderSide(
+            color: Theme.of(context).colorScheme.outlineVariant,
+            width: 1.0,
           ),
         ),
-        child: Column(
-          children: [
-            const SizedBox(height: 16),
-            SizedBox(height: MediaQuery.of(context).padding.top),
-            ...List<Widget>.generate(
-              widget.paneItems.length,
-              (index) => _SideNaviWidget(
-                enabled: currentPage == index,
-                entry: widget.paneItems[index],
-                showTitle: value == 3,
-                onTap: () {
-                  updatePage(index);
-                },
-                key: ValueKey(index),
-              ),
+      ),
+      child: Column(
+        children: [
+          const SizedBox(height: 16),
+          SizedBox(height: MediaQuery.of(context).padding.top),
+          ...List<Widget>.generate(
+            widget.paneItems.length,
+            (index) => _SideNaviWidget(
+              enabled: currentPage == index,
+              entry: widget.paneItems[index],
+              showTitle: value == 3,
+              onTap: () {
+                updatePage(index);
+              },
+              key: ValueKey(index),
             ),
-            const Spacer(),
-            ...List<Widget>.generate(
-              widget.paneActions.length,
-              (index) => _PaneActionWidget(
-                entry: widget.paneActions[index],
-                showTitle: value == 3,
-                key: ValueKey(index + widget.paneItems.length),
-              ),
+          ),
+          const Spacer(),
+          ...List<Widget>.generate(
+            widget.paneActions.length,
+            (index) => _PaneActionWidget(
+              entry: widget.paneActions[index],
+              showTitle: value == 3,
+              key: ValueKey(index + widget.paneItems.length),
             ),
-            const SizedBox(height: 16),
-          ],
-        ),
+          ),
+          const SizedBox(height: 16),
+        ],
       ),
     );
+    if (liquid) {
+      // 同 buildTop：裸 Material 在液态下没有底，侧栏图标会飘在内容上。
+      return LiquidGlass(
+        borderRadius: BorderRadius.zero,
+        opacity: 0.94,
+        blur: GlassConfig.blur,
+        borderWidth: 0,
+        shadow: false,
+        child: bar,
+      );
+    }
+    return Material(child: bar);
   }
 }
 
@@ -874,7 +906,11 @@ class _NaviMainViewState extends State<_NaviMainView> {
     );
     final content = Column(
       children: [
-        if (showBar) state.buildTop().paddingTop(mq.padding.top),
+        if (showBar)
+          LiquidTheme.isOn(context)
+              // 液态下由 buildTop 自己把状态栏高度算进玻璃里（见其注释）。
+              ? state.buildTop(topPadding: mq.padding.top)
+              : state.buildTop().paddingTop(mq.padding.top),
         Expanded(
           child: MediaQuery(
             data: pageData,
@@ -970,7 +1006,7 @@ class _TabTransitionState extends State<_TabTransition>
           if (liquid) return moved;
           return Opacity(opacity: 0.65 + 0.35 * t, child: moved);
         },
-        child: widget.child,
+        child: AppPageBackground(child: widget.child),
       ),
     );
   }
