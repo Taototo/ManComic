@@ -67,6 +67,9 @@ class ComicSourcePage extends StatelessWidget {
         rethrow;
       }
     }
+    // 源文件换了，之前的探测结果（延迟、返回条数）已经不能代表新版本，
+    // 留着会让卡片上挂一个和实际对不上的分数。
+    SourceHealthService.instance.forget(source.key);
     await ComicSourceManager().reload();
     if (showLoading) {
       App.forceRebuild();
