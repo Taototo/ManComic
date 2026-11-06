@@ -13,6 +13,7 @@ import 'package:venera/pages/splash_page.dart';
 import 'package:venera/utils/io.dart';
 import 'package:window_manager/window_manager.dart';
 import 'components/components.dart';
+import 'components/fps_overlay.dart';
 import 'components/window_frame.dart';
 import 'foundation/app.dart';
 import 'foundation/appdata.dart';
@@ -288,6 +289,11 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
               fit: StackFit.expand,
               children: [widget, const UpdateDownloadBanner()],
             );
+            // 帧率读数放最外层：它要能看到所有页面（含浮层）的实际出帧，
+            // 放在导航器里面会漏掉弹出页的开销。
+            if (appdata.settings['showFps'] == true) {
+              widget = FpsOverlay(child: widget);
+            }
             if (App.isDesktop) {
               widget = Shortcuts(
                 shortcuts: {

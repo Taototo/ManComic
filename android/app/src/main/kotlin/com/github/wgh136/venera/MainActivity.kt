@@ -12,6 +12,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.Settings
 import android.util.Log
+import android.view.Display
 import android.view.KeyEvent
 import androidx.activity.result.ActivityResultCallback
 import androidx.activity.result.ActivityResultLauncher
@@ -47,6 +48,10 @@ class MainActivity : FlutterFragmentActivity() {
 
     private var textShareHandler: ((String) -> Unit)? = null
 
+    /// 用户请求的帧率上限（null 表示跟随屏幕最高刷新率）。
+    /// 切到后台再回来时系统会重置窗口的帧率提示，所以这个值要记住以便重放。
+    private var frameRateTarget: Double? = null
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
@@ -71,6 +76,126 @@ class MainActivity : FlutterFragmentActivity() {
                     handleSharedText(text)
             }
         }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // 系统（尤其国产 ROM 的省电策略）会在切后台后把窗口帧率重置回 60，
+        // 回到前台重新申请一次，否则只有冷启动那一下是高刷。
+        applyFrameRate(frameRateTarget)
+    }
+
+    @Suppress("DEPRECATION")
+    private fun currentDisplay(): Display? {
+        return if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
+            display
+        } else {
+            windowManager.defaultDisplay
+        }
+    }
+
+    /// 与当前分辨率相同的模式里最高的刷新率。
+    ///
+    /// 只在同分辨率内挑，避免为了高刷把渲染分辨率也换掉（那会让界面发虚）。
+    private fun highestRefreshRate(display: Display): Double {
+        val current = display.mode
+        var best = current.refreshRate.toDouble()
+        for (mode in display.supportedModes) {
+            if (mode.physicalWidth == current.physicalWidth &&
+                mode.physicalHeight == current.physicalHeight &&
+                mode.refreshRate > best
+            ) {
+                best = mode.refreshRate.toDouble()
+            }
+        }
+        return best
+    }
+
+    /// 申请屏幕帧率。
+    ///
+    /// 三路一起走，覆盖不同年代的系统：
+    /// - `LayoutParams.preferredRefreshRate`（API 21+）最老的"我想跑这个帧率"
+    ///   提示，很多 ROM 的省电策略从这里取数；
+    /// - `preferredDisplayModeId`（API 23+）指定具体显示模式，那些只认模式、
+    ///   不看提示的 ROM 靠它；
+    /// - `View.setRequestedFrameRate`（较新的 API）是系统推荐的现代写法，
+    ///   但不同 SDK 版本未必存在，所以用反射调用，缺失就跳过。
+    ///
+    /// 三条都是"请求"而不是命令，系统可以因为省电/热控拒绝，最终以
+    /// [displayInfo] 回报的实际刷新率为准。
+    ///
+    /// [target] 为 null 表示用屏幕支持的最高值。
+    private fun applyFrameRate(target: Double?) {
+        frameRateTarget = target
+        try {
+            val display = currentDisplay() ?: return
+            val maxRate = highestRefreshRate(display)
+            val rate = (target ?: maxRate).coerceIn(30.0, maxRate)
+
+            val current = display.mode
+            val mode = display.supportedModes
+                .filter {
+                    it.physicalWidth == current.physicalWidth &&
+                        it.physicalHeight == current.physicalHeight
+                }
+                .minByOrNull { kotlin.math.abs(it.refreshRate - rate) }
+
+            val lp = window.attributes
+            var changed = false
+            if (lp.preferredRefreshRate != rate.toFloat()) {
+                lp.preferredRefreshRate = rate.toFloat()
+                changed = true
+            }
+            if (mode != null && lp.preferredDisplayModeId != mode.modeId) {
+                lp.preferredDisplayModeId = mode.modeId
+                changed = true
+            }
+            if (changed) {
+                window.attributes = lp
+            }
+
+            requestViewFrameRate(rate)
+        } catch (e: Exception) {
+            // 部分设备/ROM 会拒绝设置显示模式（例如固定 60Hz 的省电模式），
+            // 这里只记录，不影响应用运行。
+            Log.e("Venera", "applyFrameRate failed", e)
+        }
+    }
+
+    /// `View.setRequestedFrameRate` 只在较新的 SDK 上存在，且各版本签名一致，
+    /// 用反射调可以避免为它抬 minSdk；调不到就当作没有这个能力。
+    private fun requestViewFrameRate(rate: Double) {
+        try {
+            val view = window.decorView
+            val method = view.javaClass.getMethod(
+                "setRequestedFrameRate",
+                Float::class.javaPrimitiveType
+            )
+            method.invoke(view, rate.toFloat())
+        } catch (_: Throwable) {
+            // 老系统没有这个方法，前两路已经够用。
+        }
+    }
+
+    /// 当前显示信息，供设置页与实际帧率叠加层使用。
+    private fun displayInfo(): Map<String, Any> {
+        val display = currentDisplay()
+        if (display == null) {
+            return mapOf(
+                "refreshRate" to 60.0,
+                "maxRefreshRate" to 60.0,
+                "supported" to listOf(60.0),
+            )
+        }
+        val rates = display.supportedModes
+            .map { it.refreshRate.toDouble() }
+            .distinct()
+            .sorted()
+        return mapOf(
+            "refreshRate" to display.refreshRate.toDouble(),
+            "maxRefreshRate" to highestRefreshRate(display),
+            "supported" to rates,
+        )
     }
 
     private fun handleSharedText(text: String) {
@@ -234,6 +359,22 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
 
+                else -> res.notImplemented()
+            }
+        }
+
+        // 屏幕刷新率：Dart 侧读取实际值、按用户选择申请帧率。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "venera/display"
+        ).setMethodCallHandler { call, res ->
+            when (call.method) {
+                "applyFrameRate" -> {
+                    applyFrameRate(call.argument<Double>("target"))
+                    res.success(displayInfo())
+                }
+
+                "getDisplayInfo" -> res.success(displayInfo())
                 else -> res.notImplemented()
             }
         }

@@ -1,7 +1,5 @@
 import 'dart:async';
 
-import 'package:display_mode/display_mode.dart';
-import 'package:flutter/foundation.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_saf/flutter_saf.dart';
@@ -10,6 +8,7 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
+import 'package:venera/foundation/display_refresh.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
@@ -102,7 +101,10 @@ Future<void> init() async {
     await BackgroundTasks.initialize();
     await BackgroundTasks.syncSchedule();
     try {
-      await FlutterDisplayMode.setHighRefreshRate();
+      // 先读一次屏幕信息（档位、最高刷新率），再按用户选择申请。
+      // 申请失败不影响使用，Flutter 仍会跟随系统 vsync。
+      await DisplayRefresh.refreshInfo();
+      await DisplayRefresh.apply(appdata.settings['refreshRate'] ?? 'auto');
     } catch (e) {
       Log.error("Display Mode", "Failed to set high refresh rate: $e");
     }

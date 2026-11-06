@@ -179,6 +179,8 @@ class Settings with ChangeNotifier {
     'theme_mode': 'system', // light, dark, system
     'glassBlur': 26, // 0-40, 毛玻璃模糊半径
     'glassOpacity': 58, // 10-95, 毛玻璃不透明度百分比
+    'refreshRate': 'auto', // auto, 60, 90, 120
+    'showFps': false, // 右下角帧率读数（诊断用）
     'newFavoriteAddTo': 'end', // start, end
     'moveFavoriteAfterRead': 'none', // none, end, start
     'proxy': 'system', // direct, system, proxy string
