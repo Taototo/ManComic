@@ -19,6 +19,7 @@ import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/notification_service.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/update_check_policy.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/home_modules_page.dart';

@@ -509,11 +509,15 @@ void prewarmUpdateCheck() {
 
 Future<AppUpdateInfo?>? _prewarmedFetch;
 
-/// 自动检查已经弹过提示的版本号。
+/// 自动检查已经弹过提示的版本号与时间。
 ///
-/// 只在进程内有效：冷启动会清空，所以「关掉提示、退出 App、下次打开再问一次」
-/// 仍然成立；但过完节流窗口再切回前台，不会对着同一个版本反复弹。
+/// 只在进程内有效，冷启动会清空，所以「关掉提示、退出 App、下次打开再问一次」
+/// 一直成立；进程内也不是永久静音——同一个版本隔 [kUpdatePromptRepeatInterval]
+/// 再回到前台会重新提示，因为用户点「取消」通常只是「现在不想装」。
+/// 短时间内来回切前台则不会重复弹。
 String? _autoPromptedVersion;
+
+DateTime? _autoPromptedAt;
 
 /// 检查更新并在需要时弹窗引导下载。
 ///
@@ -570,14 +574,23 @@ Future<bool> checkUpdateUi([bool showMessageIfNoUpdate = true]) async {
       updateDownload.promptPendingInstall();
       return true;
     }
-    // 自动检查（冷启动、回到前台）同一个版本只弹一次：过了节流窗口再切回来
-    // 不该又弹一遍，用户已经在考虑要不要更新了。手动点「检查」仍旧每次都弹。
+    // 自动检查（冷启动、回到前台）对同一个版本不会每次都弹：刚弹过就别再
+    // 弹一遍，用户已经在考虑要不要更新了。但只静音一段时间——用户点「取消」
+    // 通常只是「现在不想装」，隔一阵子再打开 App 应该能再看到提示。
+    // 手动点「检查」不受影响，每次都弹。
     var isAutoCheck = !showMessageIfNoUpdate;
     if (isAutoCheck) {
-      if (_autoPromptedVersion == info.version) {
+      var now = DateTime.now();
+      if (!shouldPromptUpdateAgain(
+        version: info.version,
+        promptedVersion: _autoPromptedVersion,
+        promptedAt: _autoPromptedAt,
+        now: now,
+      )) {
         return true;
       }
       _autoPromptedVersion = info.version;
+      _autoPromptedAt = now;
     }
     showUpdateAvailableDialog(info);
     return true;

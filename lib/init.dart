@@ -57,15 +57,16 @@ class _LifecycleObserver with WidgetsBindingObserver {
 
 /// 回到前台时的静默检查。
 ///
-/// 与冷启动共用 [_checkAppUpdates] 的节流，所以短时间内反复切换不会连发
-/// 请求；仍在启动动画里时直接跳过——启动路径自己会查，别叠两次。
+/// 只有这条路会走节流（[_kUpdateCheckInterval]），避免一小时内进出十几次
+/// 反复发请求；冷启动那次一律查，见 [updateCheckSkipReason]。
+/// 仍在启动动画里时直接跳过——启动路径自己会查，别叠两次。
 void _checkAppUpdatesOnResume() {
   if (!isStartupReady) {
     return;
   }
   unawaited(() async {
     try {
-      await _checkAppUpdates();
+      await _checkAppUpdates(fromResume: true);
     } catch (e, s) {
       Log.error("Update Check", "Failed to check for updates on resume: $e\n$s");
     }
@@ -147,10 +148,12 @@ void _checkOldConfigs() {
 /// 频繁请求；反过来，应用更新的节流也不该把漫画源检查按在门外。
 const _kComicSourceCheckInterval = Duration(hours: 24);
 
-Future<void> _checkAppUpdates() async {
-  // 开关、刚升级、刚查过、刚失败过，全交给这个纯函数判，规则写在一处。
+Future<void> _checkAppUpdates({bool fromResume = false}) async {
+  // 开关、冷启动、刚升级、刚查过、刚失败过，全交给这个纯函数判，
+  // 规则写在一处。冷启动那次不做时间窗判断，切回前台才节流。
   var skip = updateCheckSkipReason(
     enabled: appdata.settings['checkUpdateOnStart'] == true,
+    fromResume: fromResume,
     // 刚升级完一定查一次：新版本里可能带了「更新检查」本身的修复，
     // 若还被上一版写下的节流挡住，用户只会觉得开关依然没用。
     versionChanged:
