@@ -31,12 +31,9 @@ class Select extends StatelessWidget {
           var size = renderBox.size;
           showMenu(
             elevation: 3,
-            // 液态主题下交给 popupMenuTheme 的磨砂色，别写死。
-            color: LiquidTheme.isOn(context)
-                ? null
-                : (context.brightness == Brightness.light
-                    ? const Color(0xFFF6F6F6)
-                    : const Color(0xFF1E1E1E)),
+            color: context.brightness == Brightness.light
+                ? const Color(0xFFF6F6F6)
+                : const Color(0xFF1E1E1E),
             context: context,
             useRootNavigator: true,
             constraints: BoxConstraints(

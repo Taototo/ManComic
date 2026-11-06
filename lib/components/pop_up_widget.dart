@@ -19,52 +19,11 @@ class PopUpWidget<T> extends PopupRoute<T> {
       Animation<double> secondaryAnimation) {
     var height = MediaQuery.of(context).size.height * 0.9;
     bool showPopUp = MediaQuery.of(context).size.width > 500;
-    final liquid = LiquidTheme.isOn(context);
-    // 变量名不能叫 navigator：那会遮蔽 PopupRoute.navigator（NavigatorState），
-    // 下面的 iOS 返回手势控制器就拿错了对象。
-    //
-    // 玻璃必须画在**每个页面自己**身上，不能只画在 Navigator 外面。
-    // 只包一层的话，Navigator 里的页面全是透明的（canvasColor 已改透明），
-    // 从分类页点进下级设置时，新页滑入的过程中两层内容同时可见——就是用户
-    // 说的「重影」。页面各自带着不透明玻璃，滑入才是「新页盖住旧页」。
-    Widget pageShell(BuildContext context, Widget child) {
-      if (!liquid) return child;
-      // 玻璃底下要垫**页面自己的背景**，不能让它去透背后的主页。
-      // 之前玻璃直接盖在当前页面上，透出来的是主页的封面和文字（糊掉的版本），
-      // 读起来仍然像「两层东西叠着」。垫一层同款色斑之后，透出来的就只是雾。
-      return AppPageBackground(
-        child: LiquidGlass(
-          borderRadius: BorderRadius.zero,
-          // 0.94 是个折中：再低就能看穿到背后的内容，再高就完全不像玻璃了。
-          // 模糊仍然开着，所以透过来的那 6% 是糊的，看起来是「雾」而不是
-          // 「漏出来的另一页」。
-          opacity: 0.94,
-          blur: GlassConfig.blur,
-          borderWidth: 0,
-          shadow: false,
-          child: child,
-        ),
-      );
-    }
-
-    Widget content = Navigator(
-      onGenerateRoute: (settings) => MaterialPageRoute(
-        builder: (context) => pageShell(context, widget),
-      ),
-    );
     Widget body = PopupIndicatorWidget(
       child: Container(
         decoration: showPopUp
             ? BoxDecoration(
                 borderRadius: BorderRadius.all(Radius.circular(12)),
-                // 液态下浮窗的玻璃边。玻璃本身画在页面里（见 pageShell），
-                // 外层只负责这一圈高光描边，不然页面是矩形、外面圆角也白留。
-                border: liquid
-                    ? Border.all(
-                        color: Colors.white.withValues(alpha: 0.16),
-                        width: 0.8,
-                      )
-                    : null,
                 boxShadow: context.brightness == ui.Brightness.dark ? [
                   BoxShadow(
                     color: Colors.white.withAlpha(50),
@@ -77,7 +36,13 @@ class PopUpWidget<T> extends PopupRoute<T> {
         clipBehavior: showPopUp ? Clip.antiAlias : Clip.none,
         width: showPopUp ? 500 : double.infinity,
         height: showPopUp ? height : double.infinity,
-        child: ClipRect(child: content),
+        child: ClipRect(
+          child: Navigator(
+            onGenerateRoute: (settings) => MaterialPageRoute(
+              builder: (context) => widget,
+            ),
+          ),
+        ),
       ),
     );
     if (App.isIOS) {
@@ -102,27 +67,15 @@ class PopUpWidget<T> extends PopupRoute<T> {
   }
 
   @override
-  Duration get transitionDuration => const Duration(milliseconds: 260);
+  Duration get transitionDuration => const Duration(milliseconds: 350);
 
   @override
   Widget buildTransitions(BuildContext context, Animation<double> animation,
       Animation<double> secondaryAnimation, Widget child) {
-    // 只有缩放，**不再整体淡入**。
-    //
-    // 之前是 `FadeTransition + ScaleTransition`：打开和关闭的头几帧面板只有
-    // 50% 不透明，底下的主页清清楚楚地透上来；关闭时反过来又透一遍，用户在
-    // 两个方向上都看到「两层内容叠着」。玻璃面板的不透明度是它自己的属性，
-    // 不该由路由动画再乘一次。
-    //
-    // 保留缩放：0.94 → 1.0，起点已经是接近完整大小的面板，读起来是「弹出来」，
-    // 不是「从背景里长出来」。
-    final curved = CurvedAnimation(
-      parent: animation,
-      curve: Curves.easeOutCubic,
-      reverseCurve: Curves.easeInCubic,
-    );
-    return ScaleTransition(
-      scale: Tween<double>(begin: 0.94, end: 1.0).animate(curved),
+    return FadeTransition(
+      opacity: animation.drive(
+        Tween(begin: 0.0, end: 1.0).chain(CurveTween(curve: Curves.ease)),
+      ),
       child: child,
     );
   }
@@ -161,14 +114,7 @@ class _PopUpWidgetScaffoldState extends State<PopUpWidgetScaffold> {
 
   @override
   Widget build(BuildContext context) {
-    final liquid = LiquidTheme.isOn(context);
     return Material(
-      // 液态主题下这层不能是透明的：Popup 里的子页（各设置分类）都靠它当
-      // 底板，透明之后子页直接坐到玻璃外的色斑上，和首页面板的观感对不上。
-      // 给一个接近玻璃的浓度，两种情况都成立。
-      color: liquid
-          ? Theme.of(context).colorScheme.surface.withValues(alpha: 0.88)
-          : null,
       child: Column(
         children: [
           Container(

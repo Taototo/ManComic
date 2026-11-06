@@ -58,10 +58,7 @@ class _MenuRoute<T> extends PopupRoute<T> {
           top: top,
           child: LiquidGlass(
             borderRadius: BorderRadius.circular(16),
-            // 菜单是压在内容上的浮层，读的是字：透太多会让背后的封面和菜单
-            // 文字叠在一起，看起来像重影。0.88 还能看出是高光玻璃，但背后
-            // 的内容只剩一层雾。
-            opacity: 0.88,
+            opacity: 0.74,
             child: Material(
               type: MaterialType.transparency,
               borderRadius: BorderRadius.circular(16),

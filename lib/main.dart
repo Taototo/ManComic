@@ -176,42 +176,16 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         'sans-serif'
       ];
     }
-    final scheme = SeedColorScheme.fromSeeds(
-      primaryKey: primary,
-      secondaryKey: secondary,
-      tertiaryKey: tertiary,
-      brightness: brightness,
-      tones: FlexTones.vividBackground(brightness),
-    );
-    final liquid = isLiquidTheme;
     return ThemeData(
-      colorScheme: liquid ? liquidColorScheme(scheme) : scheme,
+      colorScheme: SeedColorScheme.fromSeeds(
+        primaryKey: primary,
+        secondaryKey: secondary,
+        tertiaryKey: tertiary,
+        brightness: brightness,
+        tones: FlexTones.vividBackground(brightness),
+      ),
       fontFamily: font,
       fontFamilyFallback: fallback,
-      // 液态主题的页面背景必须透明，否则每页都会盖住全局色斑，玻璃就只剩描边。
-      // canvasColor 同理：Material 不带 color 时默认用它，留着不透明同样会挡。
-      scaffoldBackgroundColor: liquid ? Colors.transparent : null,
-      canvasColor: liquid ? Colors.transparent : null,
-      // 对话框不跟着透明到能看见底下内容：它的可读性比玻璃感重要。留 94%
-      // 不透明度，看起来是磨砂面板，文字仍然清楚。
-      dialogTheme: liquid
-          ? DialogThemeData(
-              backgroundColor: scheme.surface.withValues(alpha: 0.94),
-            )
-          : null,
-      // 下拉菜单同理：原来各处 showMenu 传的是写死的 F6F6F6 / 1E1E1E，
-      // 液态下那是两块不透明死色。这里给一个统一的磨砂色，两处调用改成
-      // 液态时不传 color（走这个主题值）。
-      popupMenuTheme: liquid
-          ? PopupMenuThemeData(
-              color: scheme.surface.withValues(alpha: 0.90),
-            )
-          : null,
-      // 这里**故意不改** filledButtonTheme / outlinedButtonTheme。
-      // 全局改会把 `FilledButton.tonal` 也一起改成主色（两者的 style 会合并），
-      // 详情页那种「下载是淡色、阅读是主色」的主次关系就没了。按钮的玻璃化
-      // 交给 LiquidGlassButton 逐个做，其余按钮保持在半透明容器上即可。
-      extensions: liquid ? const [LiquidTheme.on] : const [LiquidTheme.off],
     );
   }
 
@@ -327,26 +301,8 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                 ),
               );
             }
-            if (isLiquidTheme) {
-              // 全局只铺一块纯色，色斑交给**每一页自己**画（[AppPageBackground]）。
-              //
-              // 之前是全局铺一层色斑、所有页面共用。看着省事，但页面因此必须
-              // 保持透明，转场时新页的半透明区域会把旧页透出来——也就是用户
-              // 反复报的「重影」。现在每页自带同一套色斑：视觉上还是同一块背
-              // 景（渐变固定在屏幕坐标上，滚动和切页都不动），但页面盖住页面
-              // 时是真盖住。这层纯色负责兜住转场边缘和没有页面的瞬间。
-              widget = Stack(
-                fit: StackFit.expand,
-                children: [
-                  ColoredBox(color: Theme.of(context).colorScheme.surface),
-                  widget,
-                ],
-              );
-            }
             return _SystemUiProvider(Material(
-              color: (App.isLinux || isLiquidTheme)
-                  ? Colors.transparent
-                  : null,
+              color: App.isLinux ? Colors.transparent : null,
               child: widget,
             ));
           }

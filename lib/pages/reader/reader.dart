@@ -396,29 +396,22 @@ class _ReaderState extends State<Reader>
   @override
   Widget build(BuildContext context) {
     _checkImagesPerPageChange();
-    // 阅读器必须有自己的实心底色。它没有 Scaffold，背景一直靠根 Material 的
-    // canvasColor；液态主题把 canvasColor 改透明之后，彩色的环境色斑会直接
-    // 透到漫画页后面——留白处发蓝发紫，画面和背景糊成一片。这里固定用
-    // surface，和默认主题下的观感完全一致。
-    return ColoredBox(
-      color: Theme.of(context).colorScheme.surface,
-      child: KeyboardListener(
-        focusNode: focusNode,
-        autofocus: true,
-        onKeyEvent: onKeyEvent,
-        child: Overlay(
-          initialEntries: [
-            OverlayEntry(
-              builder: (context) {
-                return _ReaderScaffold(
-                  child: _ReaderGestureDetector(
-                    child: _ReaderImages(key: Key(chapter.toString())),
-                  ),
-                );
-              },
-            ),
-          ],
-        ),
+    return KeyboardListener(
+      focusNode: focusNode,
+      autofocus: true,
+      onKeyEvent: onKeyEvent,
+      child: Overlay(
+        initialEntries: [
+          OverlayEntry(
+            builder: (context) {
+              return _ReaderScaffold(
+                child: _ReaderGestureDetector(
+                  child: _ReaderImages(key: Key(chapter.toString())),
+                ),
+              );
+            },
+          ),
+        ],
       ),
     );
   }

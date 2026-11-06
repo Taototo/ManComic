@@ -177,8 +177,6 @@ class Settings with ChangeNotifier {
     'comicTileScale': 1.00, // 0.75-1.25
     'color': 'system', // red, pink, purple, green, orange, blue
     'theme_mode': 'system', // light, dark, system
-    // material = 默认外观；liquid = 液态主题（全站玻璃质感 + 页面背景色斑）
-    'themeStyle': 'material',
     'glassBlur': 26, // 0-40, 毛玻璃模糊半径
     'glassOpacity': 58, // 10-95, 毛玻璃不透明度百分比
     'newFavoriteAddTo': 'end', // start, end

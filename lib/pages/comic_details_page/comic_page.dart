@@ -614,18 +614,19 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
             Row(
               children: [
                 Expanded(
-                  child: LiquidGlassButton(
-                    tonal: true,
+                  child: FilledButton.tonal(
                     onPressed: download,
                     child: Text("Download".tl),
                   ),
                 ),
                 const SizedBox(width: 16),
                 Expanded(
-                  child: LiquidGlassButton(
-                    onPressed: hasHistory ? continueRead : read,
-                    child: Text(hasHistory ? "Continue".tl : "Read".tl),
-                  ),
+                  child: hasHistory
+                      ? FilledButton(
+                          onPressed: continueRead,
+                          child: Text("Continue".tl),
+                        )
+                      : FilledButton(onPressed: read, child: Text("Read".tl)),
                 ),
               ],
             ).paddingHorizontal(16).paddingVertical(8),
@@ -1005,90 +1006,59 @@ class _ActionButtonState extends State<_ActionButton> {
 
   @override
   Widget build(BuildContext context) {
-    final liquid = LiquidTheme.isOn(context);
-    final radius = BorderRadius.circular(18);
-    Widget body = InkWell(
-      onTap: () {
-        if (!(widget.isLoading ?? false)) {
-          widget.onPressed();
-        }
-      },
-      onLongPress: widget.onLongPressed,
-      onHighlightChanged: (v) {
-        if (_pressed != v) {
-          setState(() {
-            _pressed = v;
-          });
-        }
-      },
-      borderRadius: radius,
-      child: IconTheme.merge(
-        data: IconThemeData(size: 20, color: widget.iconColor),
-        child: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            // 加载中的 spinner 也必须放在 _BouncyActiveIcon 内部。
-            // 之前用 if/else 在外层切分支，请求开始会把图标整个卸载，
-            // 请求结束时再新建一个 State —— didUpdateWidget 不会触发，
-            // 于是「点赞成功」这一下的弹跳永远不会播。
-            _BouncyActiveIcon(
-              active: widget.isActive ?? false,
-              pressed: _pressed,
-              child: (widget.isLoading ?? false)
-                  ? const SizedBox(
-                      width: 20,
-                      height: 20,
-                      child: CircularProgressIndicator(strokeWidth: 1.8),
-                    )
-                  : ((widget.isActive ?? false)
-                        ? (widget.activeIcon ?? widget.icon)
-                        : widget.icon),
-            ),
-            const SizedBox(width: 8),
-            Text(widget.text),
-          ],
-        ).paddingHorizontal(16),
+    return Container(
+      margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
+      decoration: BoxDecoration(
+        borderRadius: BorderRadius.circular(18),
+        border: Border.all(
+          color: context.colorScheme.outlineVariant,
+          width: 0.6,
+        ),
+      ),
+      child: InkWell(
+        onTap: () {
+          if (!(widget.isLoading ?? false)) {
+            widget.onPressed();
+          }
+        },
+        onLongPress: widget.onLongPressed,
+        onHighlightChanged: (v) {
+          if (_pressed != v) {
+            setState(() {
+              _pressed = v;
+            });
+          }
+        },
+        borderRadius: BorderRadius.circular(18),
+        child: IconTheme.merge(
+          data: IconThemeData(size: 20, color: widget.iconColor),
+          child: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 加载中的 spinner 也必须放在 _BouncyActiveIcon 内部。
+              // 之前用 if/else 在外层切分支，请求开始会把图标整个卸载，
+              // 请求结束时再新建一个 State —— didUpdateWidget 不会触发，
+              // 于是「点赞成功」这一下的弹跳永远不会播。
+              _BouncyActiveIcon(
+                active: widget.isActive ?? false,
+                pressed: _pressed,
+                child: (widget.isLoading ?? false)
+                    ? const SizedBox(
+                        width: 20,
+                        height: 20,
+                        child: CircularProgressIndicator(strokeWidth: 1.8),
+                      )
+                    : ((widget.isActive ?? false)
+                          ? (widget.activeIcon ?? widget.icon)
+                          : widget.icon),
+              ),
+              const SizedBox(width: 8),
+              Text(widget.text),
+            ],
+          ).paddingHorizontal(16),
+        ),
       ),
     );
-
-    if (liquid) {
-      // 详情页的这几个操作块在液态下也应该是玻璃，不是一圈描边加透明底——
-      // 它们压在封面上，透出封面的颜色才像一块玻璃片。
-      //
-      // 但这里不做模糊：它们和缩略图、章节列表同时可见，逐个挂 BackdropFilter
-      // 会直接拖垮滚动帧率。静态玻璃（半透明 + 渐变底 + 内高光）在这个尺寸
-      // 上肉眼分辨不出来，却几乎不花钱。
-      body = LiquidPressable(
-        scale: 1.07,
-        enabled: !(widget.isLoading ?? false),
-        child: Padding(
-          padding: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-          child: LiquidGlass(
-            borderRadius: radius,
-            blur: 0,
-            opacity: 0.36,
-            shadow: false,
-            borderWidth: 0.8,
-            highlight: 0.7,
-            child: Material(type: MaterialType.transparency, child: body),
-          ),
-        ),
-      );
-    } else {
-      body = Container(
-        margin: const EdgeInsets.symmetric(horizontal: 4, vertical: 6),
-        decoration: BoxDecoration(
-          borderRadius: radius,
-          border: Border.all(
-            color: context.colorScheme.outlineVariant,
-            width: 0.6,
-          ),
-        ),
-        child: body,
-      );
-    }
-
-    return body;
   }
 }
 

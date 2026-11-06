@@ -43,20 +43,6 @@ class InterfaceSettings extends StatelessWidget {
             App.forceRebuild();
           },
         ).toSliver(),
-        SelectSetting(
-          title: "Theme Style".tl,
-          settingKey: "themeStyle",
-          optionTranslation: {
-            themeStyleMaterial: "Material".tl,
-            themeStyleLiquid: "Liquid".tl,
-          },
-          help: "Liquid turns the whole app into frosted glass panels over a "
-                  "coloured backdrop. Material keeps the plain solid surfaces."
-              .tl,
-          onChanged: () async {
-            App.forceRebuild();
-          },
-        ).toSliver(),
         _SettingPartTitle(
           title: "Glass effect".tl,
           icon: Icons.blur_on_rounded,

@@ -182,9 +182,7 @@ class FlyoutContent extends StatelessWidget {
     return IntrinsicWidth(
       child: LiquidGlass(
         borderRadius: BorderRadius.circular(18),
-        // 同菜单：这是一块会盖在列表上的面板，透出来的内容会和面板里的
-        // 文字叠在一起。给到 0.9，玻璃质感还在，但背后只剩雾。
-        opacity: 0.9,
+        opacity: 0.8,
         child: Material(
           borderRadius: BorderRadius.circular(18),
           type: MaterialType.transparency,
