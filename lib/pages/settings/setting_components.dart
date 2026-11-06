@@ -288,9 +288,12 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
         var rect = offset & size;
         showMenu(
           elevation: 3,
-          color: context.brightness == Brightness.light
-              ? const Color(0xFFF6F6F6)
-              : const Color(0xFF1E1E1E),
+          // 液态主题下交给 popupMenuTheme 的磨砂色，别写死。
+          color: LiquidTheme.isOn(context)
+              ? null
+              : (context.brightness == Brightness.light
+                  ? const Color(0xFFF6F6F6)
+                  : const Color(0xFF1E1E1E)),
           context: context,
           position: RelativeRect.fromRect(
             rect,

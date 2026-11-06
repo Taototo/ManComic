@@ -7,6 +7,7 @@ class ReaderSettings extends StatefulWidget {
     this.comicId,
     this.comicSource,
     this.showGestures = true,
+    this.showReports = false,
   });
 
   final void Function(String key)? onChanged;
@@ -18,6 +19,12 @@ class ReaderSettings extends StatefulWidget {
   /// 阅读器里弹出的设置面板要在一页里看全，所以默认画；设置页把它们拆到了
   /// 「操作」分类，那边传 false，避免同一个开关出现两遍。
   final bool showGestures;
+
+  /// 是否画「阅读统计」分组（年度报告，之后还有阅读时长）。
+  ///
+  /// 只有设置页传 true：阅读器面板是「调这本书怎么读」，把年度报告塞进去
+  /// 会让人以为它只统计当前这本。
+  final bool showReports;
 
   @override
   State<ReaderSettings> createState() => _ReaderSettingsState();
@@ -519,6 +526,21 @@ class _ReaderSettingsState extends State<ReaderSettings> {
             useDeviceSettings: useDeviceSpecificSettings,
           ),
         ),
+        if (widget.showReports) ...[
+          _SettingPartTitle(
+            title: "Reading stats".tl,
+            icon: Icons.insights_rounded,
+          ),
+          // 年度报告原来是挂在「功能 > 阅读与通知」下的，那个分组名本身就说
+          // 不清里面有什么。阅读报告属于阅读，之后加阅读时长统计也落在这里。
+          _CallbackSetting(
+            title: "Yearly Report".tl,
+            callback: () async {
+              context.to(() => const ReadingReportPage());
+            },
+            actionTitle: 'Open'.tl,
+          ).toSliver(),
+        ],
       ],
     );
   }

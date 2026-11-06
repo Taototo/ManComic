@@ -294,6 +294,7 @@ class LiquidGlass extends StatelessWidget {
     this.saturation = 1.4,
     this.shadow = true,
     this.borderWidth = 0.7,
+    this.highlight = 1.0,
   });
 
   final Widget child;
@@ -317,6 +318,13 @@ class LiquidGlass extends StatelessWidget {
   /// 渐变描边宽度，0 表示不描边（顶栏/底栏这类贴边的场景用 0）
   final double borderWidth;
 
+  /// 镜面高光的强度倍数。
+  ///
+  /// 顶栏/底栏浮在滚动内容上，高光重一点才「亮」；但列表里的普通卡片如果照
+  /// 这个强度打，两层白一叠就把底色洗成实心白，背后的色斑全被盖掉——玻璃感
+  /// 反而没了。所以给出这个旋钮，卡片用小值。
+  final double highlight;
+
   @override
   Widget build(BuildContext context) {
     final theme = Theme.of(context);
@@ -336,12 +344,16 @@ class LiquidGlass extends StatelessWidget {
                 end: Alignment.bottomRight,
                 colors: [
                   Color.alphaBlend(
-                    Colors.white.withValues(alpha: isDark ? 0.07 : 0.18),
+                    Colors.white.withValues(
+                      alpha: (isDark ? 0.07 : 0.18) * highlight,
+                    ),
                     tintColor,
                   ),
                   tintColor,
                   Color.alphaBlend(
-                    Colors.white.withValues(alpha: isDark ? 0.02 : 0.07),
+                    Colors.white.withValues(
+                      alpha: (isDark ? 0.02 : 0.07) * highlight,
+                    ),
                     tintColor,
                   ),
                 ],
@@ -358,7 +370,9 @@ class LiquidGlass extends StatelessWidget {
                   center: const Alignment(-0.75, -1.15),
                   radius: 1.6,
                   colors: [
-                    Colors.white.withValues(alpha: isDark ? 0.10 : 0.30),
+                    Colors.white.withValues(
+                      alpha: (isDark ? 0.10 : 0.30) * highlight,
+                    ),
                     Colors.transparent,
                   ],
                 ),
@@ -460,22 +474,28 @@ class GlassPageBackdrop extends StatelessWidget {
     final colors = Theme.of(context).colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
     final base = isDark ? 1.6 : 1.0;
+    // 色斑要「角落浓、中间空」，不能铺满一屏。
+    //
+    // 第一版按角落 alpha 0.28 + 超大半径铺，结果每个像素都被染了一点，整屏变成
+    // 一块均匀的灰蓝——看上去像配错了底色，而不是玻璃底下有光。玻璃成立的前提
+    // 是**同一屏里既有被染色区、又有干净区**，卡片跨过交界时才看得出「隔着玻璃」。
+    // 所以半径收到 1.0 附近让颜色在出来之前就衰减掉，浓度相应提到 0.6 才够显眼。
     return IgnorePointer(
       child: RepaintBoundary(
         child: Stack(
           children: [
+            Positioned.fill(child: ColoredBox(color: colors.surface)),
             Positioned.fill(
               child: DecoratedBox(
                 decoration: BoxDecoration(
-                  color: colors.surface,
                   gradient: RadialGradient(
-                    center: const Alignment(-1.05, -1.15),
-                    radius: 1.35,
+                    center: const Alignment(-1.0, -1.05),
+                    radius: 1.05,
                     colors: [
                       colors.primary.withValues(
-                        alpha: (isDark ? 0.30 : 0.28) * intensity * base,
+                        alpha: (isDark ? 0.55 : 0.44) * intensity * base,
                       ),
-                      Colors.transparent,
+                      colors.primary.withValues(alpha: 0.0),
                     ],
                   ),
                 ),
@@ -485,13 +505,13 @@ class GlassPageBackdrop extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
-                    center: const Alignment(1.15, 1.05),
-                    radius: 1.2,
+                    center: const Alignment(1.05, 1.0),
+                    radius: 1.0,
                     colors: [
                       colors.tertiary.withValues(
-                        alpha: (isDark ? 0.23 : 0.21) * intensity * base,
+                        alpha: (isDark ? 0.45 : 0.34) * intensity * base,
                       ),
-                      Colors.transparent,
+                      colors.tertiary.withValues(alpha: 0.0),
                     ],
                   ),
                 ),
@@ -501,13 +521,13 @@ class GlassPageBackdrop extends StatelessWidget {
               child: DecoratedBox(
                 decoration: BoxDecoration(
                   gradient: RadialGradient(
-                    center: const Alignment(0.9, -0.75),
-                    radius: 0.85,
+                    center: const Alignment(1.0, -0.85),
+                    radius: 0.72,
                     colors: [
                       colors.secondary.withValues(
-                        alpha: (isDark ? 0.17 : 0.15) * intensity * base,
+                        alpha: (isDark ? 0.38 : 0.26) * intensity * base,
                       ),
-                      Colors.transparent,
+                      colors.secondary.withValues(alpha: 0.0),
                     ],
                   ),
                 ),
@@ -553,5 +573,173 @@ class GlassConfig {
     return Theme.of(context).colorScheme.surface.withValues(
           alpha: (opacity * factor).clamp(0.0, 1.0),
         );
+  }
+}
+
+/// 界面风格。`material` 是默认外观（保持原样），`liquid` 是液态主题。
+const String themeStyleMaterial = 'material';
+
+const String themeStyleLiquid = 'liquid';
+
+/// 当前选中的界面风格。设置里写坏的值一律按默认外观处理。
+String get appThemeStyle =>
+    appdata.settings['themeStyle'] == themeStyleLiquid
+        ? themeStyleLiquid
+        : themeStyleMaterial;
+
+bool get isLiquidTheme => appThemeStyle == themeStyleLiquid;
+
+/// 液态主题开关，经 [ThemeExtension] 下发。
+///
+/// 为什么不用全局读 appdata：组件在 `Theme.of(context)` 里拿到的才是「当前这棵
+/// 树实际生效的」主题。设置页切换风格时 `App.forceRebuild()` 会重建整棵树，
+/// extension 跟着新 ThemeData 一起换掉；而直接读 appdata 的组件在动画/过渡期间
+/// 会读到新值却仍画在旧主题上，出现半玻璃半实心的瞬间。也方便测试里塞一个
+/// 假主题验证两种分支。
+@immutable
+class LiquidTheme extends ThemeExtension<LiquidTheme> {
+  const LiquidTheme({required this.enabled});
+
+  static const LiquidTheme off = LiquidTheme(enabled: false);
+
+  static const LiquidTheme on = LiquidTheme(enabled: true);
+
+  final bool enabled;
+
+  static bool isOn(BuildContext context) =>
+      Theme.of(context).extension<LiquidTheme>()?.enabled ?? false;
+
+  @override
+  LiquidTheme copyWith({bool? enabled}) =>
+      LiquidTheme(enabled: enabled ?? this.enabled);
+
+  @override
+  LiquidTheme lerp(covariant LiquidTheme? other, double t) {
+    if (other == null || other.enabled == enabled) {
+      return this;
+    }
+    return t < 0.5 ? this : other;
+  }
+}
+
+/// 液态主题的配色：把「容器」类表面改成半透明，让页面底下的色斑透上来。
+///
+/// 这么做而不是逐个改页面，是因为全站有 40 多处容器直接取
+/// `surfaceContainerLow`。改配色表一次，所有还没单独适配的地方立刻不再是
+/// 一块死色，观感统一；需要更精致玻璃的位置再逐个换成 [AppSurface]。
+///
+/// `surface` 本身保持不透明：贴边栏、遮罩层、图片占位底色都取它，一旦透掉
+/// 底下的内容会穿上来。层次越高的容器越不透明，维持原本的「浮起」关系。
+ColorScheme liquidColorScheme(ColorScheme base) {
+  Color glass(Color c, double alpha) => c.withValues(alpha: alpha);
+  return base.copyWith(
+    surfaceContainerLowest: glass(base.surfaceContainerLowest, 0.52),
+    surfaceContainerLow: glass(base.surfaceContainerLow, 0.62),
+    surfaceContainer: glass(base.surfaceContainer, 0.68),
+    surfaceContainerHigh: glass(base.surfaceContainerHigh, 0.74),
+    surfaceContainerHighest: glass(base.surfaceContainerHighest, 0.80),
+  );
+}
+
+/// 统一卡片表面。
+///
+/// 默认主题下就是原来到处在写的那块
+/// `surfaceContainerLow + outlineVariant 细边 + 圆角`；液态主题下换成**静态
+/// 玻璃**——半透明底 + 斜向高光 + 1px 渐变描边，但**不做 BackdropFilter**。
+///
+/// 这一点是关键：列表里同时可见的卡片可能十几张，每张都挂一个 BackdropFilter
+/// 就是每帧十几次全屏重采样，帧率立刻塌。玻璃观感来自「透出下面的色斑」，
+/// 静态玻璃同样能透（半透明底），只是不做实时模糊——iOS 自己的液态玻璃里，
+/// 只有盖在滚动内容上的浮层才真模糊，普通卡片也是静态材质。
+class AppSurface extends StatelessWidget {
+  const AppSurface({
+    super.key,
+    required this.child,
+    this.borderRadius = const BorderRadius.all(Radius.circular(16)),
+    this.padding,
+    this.margin,
+    this.color,
+    this.border,
+    this.onTap,
+    this.clip = false,
+    this.shadow = true,
+  });
+
+  final Widget child;
+
+  final BorderRadius borderRadius;
+
+  final EdgeInsetsGeometry? padding;
+
+  final EdgeInsetsGeometry? margin;
+
+  /// 覆盖底色。液态主题下会作为玻璃的着色层。
+  final Color? color;
+
+  /// 覆盖描边。默认是 outlineVariant 半透明细边。
+  final BoxBorder? border;
+
+  final VoidCallback? onTap;
+
+  final bool clip;
+
+  /// 液态主题下的投影。嵌套在别的卡片里的小块可以关掉。
+  final bool shadow;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = Theme.of(context).colorScheme;
+    final liquid = LiquidTheme.isOn(context);
+
+    Widget content = padding == null
+        ? child
+        : Padding(padding: padding!, child: child);
+
+    // 水波纹要画在玻璃之上。Material 必须是玻璃的**子节点**：外层 Material 的
+    // ink 会画在背景之下，隔着不透明（或半透明）玻璃完全看不见。
+    if (onTap != null) {
+      content = Material(
+        type: MaterialType.transparency,
+        child: InkWell(
+          borderRadius: borderRadius,
+          onTap: onTap,
+          child: content,
+        ),
+      );
+    }
+
+    Widget surface = liquid
+        ? LiquidGlass(
+            borderRadius: borderRadius,
+            blur: 0,
+            // 卡片不做模糊，但底要够透：0.62 时叠在白底上几乎是一块实心浅灰，
+            // 背景的色斑完全被盖住，看起来就是「换了个浅色主题」而不是玻璃。
+            // 0.42 时角落的蓝紫能明显透上来，字仍然清楚（底下是浅色环境）。
+            opacity: 0.42,
+            tint: color,
+            shadow: shadow,
+            highlight: 0.55,
+            child: content,
+          )
+        : Container(
+            decoration: BoxDecoration(
+              color: color ?? colors.surfaceContainerLow,
+              borderRadius: borderRadius,
+              border: border ??
+                  Border.all(
+                    color: colors.outlineVariant.withValues(alpha: 0.45),
+                    width: 0.6,
+                  ),
+            ),
+            child: content,
+          );
+
+    if (clip) {
+      surface = ClipRRect(borderRadius: borderRadius, child: surface);
+    }
+    if (margin != null) {
+      surface = Padding(padding: margin!, child: surface);
+    }
+    return surface;
   }
 }

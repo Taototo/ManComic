@@ -264,7 +264,7 @@ class _SettingsPageState extends State<SettingsPage> {
     return switch (pageIndex) {
       0 => const InterfaceSettings(),
       // 手势已经拆到「操作」分类，阅读页不再重复显示。
-      1 => const ReaderSettings(showGestures: false),
+      1 => const ReaderSettings(showGestures: false, showReports: true),
       2 => const ActionSettings(),
       3 => const FeatureSettings(),
       4 => const NetworkSettings(),
@@ -287,7 +287,7 @@ class _SettingsDetailPage extends StatelessWidget {
   Widget _buildPage() {
     return switch (pageIndex) {
       0 => const InterfaceSettings(),
-      1 => const ReaderSettings(showGestures: false),
+      1 => const ReaderSettings(showGestures: false, showReports: true),
       2 => const ActionSettings(),
       3 => const FeatureSettings(),
       4 => const NetworkSettings(),

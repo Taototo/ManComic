@@ -43,21 +43,20 @@ class InterfaceSettings extends StatelessWidget {
             App.forceRebuild();
           },
         ).toSliver(),
-        _SettingPartTitle(title: "App icon".tl, icon: Icons.apps_rounded),
-        SliverToBoxAdapter(
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Text(
-                "Pick the icon shown on your home screen. The change takes effect after the app restarts."
-                    .tl,
-                style: ts.s12,
-              ).paddingHorizontal(16).paddingTop(10),
-              const SizedBox(height: 2),
-              const _AppIconPicker(),
-            ],
-          ),
-        ),
+        SelectSetting(
+          title: "Theme Style".tl,
+          settingKey: "themeStyle",
+          optionTranslation: {
+            themeStyleMaterial: "Material".tl,
+            themeStyleLiquid: "Liquid".tl,
+          },
+          help: "Liquid turns the whole app into frosted glass panels over a "
+                  "coloured backdrop. Material keeps the plain solid surfaces."
+              .tl,
+          onChanged: () async {
+            App.forceRebuild();
+          },
+        ).toSliver(),
         _SettingPartTitle(
           title: "Glass effect".tl,
           icon: Icons.blur_on_rounded,
@@ -102,7 +101,34 @@ class InterfaceSettings extends StatelessWidget {
             style: ts.s12,
           ).paddingHorizontal(16).paddingBottom(12),
         ),
+        _SettingPartTitle(title: "App icon".tl, icon: Icons.apps_rounded),
+        SliverToBoxAdapter(
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                "Pick the icon shown on your home screen. The change takes effect after the app restarts."
+                    .tl,
+                style: ts.s12,
+              ).paddingHorizontal(16).paddingTop(10),
+              const SizedBox(height: 2),
+              const _AppIconPicker(),
+            ],
+          ),
+        ),
         _SettingPartTitle(title: "Home".tl, icon: Icons.home_outlined),
+        // 启动落在哪一页是首页的一部分，之前被塞在「功能 > 其他」里，
+        // 找的人不会想到去那儿。
+        SelectSetting(
+          title: "Initial Page".tl,
+          settingKey: "initialPage",
+          optionTranslation: {
+            '0': "Home Page".tl,
+            '1': "Explore Page".tl,
+            '2': "Categories Page".tl,
+            '3': "Favorites Page".tl,
+          },
+        ).toSliver(),
         _CallbackSetting(
           title: "Home Modules".tl,
           subtitle: "Reorder or hide sections on the home page".tl,
@@ -153,6 +179,25 @@ class InterfaceSettings extends StatelessWidget {
         _SwitchSetting(
           title: "Show history on comic tile".tl,
           settingKey: "showHistoryStatusOnTile",
+        ).toSliver(),
+        // 语言原来在「功能 > 其他」——那个分组是个垃圾桶，什么都能往里扔。
+        // 改界面上的文字属于界面，和主题、缩略图是同一类事。
+        _SettingPartTitle(
+          title: "Language".tl,
+          icon: Icons.translate_rounded,
+        ),
+        SelectSetting(
+          title: "Language".tl,
+          settingKey: "language",
+          optionTranslation: const {
+            "system": "System",
+            "zh-CN": "简体中文",
+            "zh-TW": "繁體中文",
+            "en-US": "English",
+          },
+          onChanged: () {
+            App.forceRebuild();
+          },
         ).toSliver(),
       ],
     );

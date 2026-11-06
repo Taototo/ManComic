@@ -245,106 +245,95 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
                 ),
               });
 
-    return Container(
+    return AppSurface(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: colors.surfaceContainerLow,
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.45),
-          width: 0.6,
-        ),
-      ),
-      clipBehavior: Clip.antiAlias,
-      child: InkWell(
-        onTap: _editGoal,
-        child: Padding(
-          padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
-          child: Row(
-            children: [
-              AchievementBadge(
-                icon: Icons.flag_rounded,
-                tier: tier,
-                size: 76,
-                ratio: goal <= 0 ? null : ratio,
-              ),
-              const SizedBox(width: 14),
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  mainAxisSize: MainAxisSize.min,
+      borderRadius: const BorderRadius.all(Radius.circular(20)),
+      padding: const EdgeInsets.fromLTRB(14, 14, 14, 16),
+      clip: true,
+      onTap: _editGoal,
+      child: Row(
+        children: [
+          AchievementBadge(
+            icon: Icons.flag_rounded,
+            tier: tier,
+            size: 76,
+            ratio: goal <= 0 ? null : ratio,
+          ),
+          const SizedBox(width: 14),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                Row(
                   children: [
-                    Row(
-                      children: [
-                        Text(
-                          'Monthly Goal'.tl,
-                          style: ts.s14.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(width: 8),
-                        if (reached)
-                          Container(
-                            padding: const EdgeInsets.symmetric(
-                              horizontal: 7,
-                              vertical: 2,
-                            ),
-                            decoration: BoxDecoration(
-                              color: AchievementTier.gold.base.withValues(
-                                alpha: 0.2,
-                              ),
-                              borderRadius: BorderRadius.circular(20),
-                            ),
-                            child: Text(
-                              'Goal reached'.tl,
-                              style: ts.s10.withColor(
-                                AchievementTier.gold.deep,
-                              ),
-                            ),
-                          ),
-                      ],
+                    Text(
+                      'Monthly Goal'.tl,
+                      style: ts.s14.copyWith(fontWeight: FontWeight.w600),
                     ),
-                    const SizedBox(height: 4),
-                    if (goal > 0)
-                      Text.rich(
-                        TextSpan(
-                          children: [
-                            TextSpan(
-                              text: '$read',
-                              style: ts.s24.copyWith(
-                                fontWeight: FontWeight.bold,
-                                color: accent,
-                              ),
-                            ),
-                            TextSpan(
-                              text: ' / $goal ${'min'.tl}',
-                              style: ts.s10.withColor(colors.onSurfaceVariant),
-                            ),
-                          ],
+                    const SizedBox(width: 8),
+                    if (reached)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 7,
+                          vertical: 2,
                         ),
-                      )
-                    else
-                      Text(
-                        'Set a goal'.tl,
-                        style: ts.s12.withColor(colors.onSurfaceVariant),
+                        decoration: BoxDecoration(
+                          color: AchievementTier.gold.base.withValues(
+                            alpha: 0.2,
+                          ),
+                          borderRadius: BorderRadius.circular(20),
+                        ),
+                        child: Text(
+                          'Goal reached'.tl,
+                          style: ts.s10.withColor(
+                            AchievementTier.gold.deep,
+                          ),
+                        ),
                       ),
-                    const SizedBox(height: 2),
-                    if (goal > 0)
-                      Text(
-                        subtitle,
-                        style: ts.s10.withColor(colors.onSurfaceVariant),
-                      ),
-                    const SizedBox(height: 10),
-                    _GoalBar(ratio: ratio, color: tier.base, base: colors),
                   ],
                 ),
-              ),
-              Icon(
-                Icons.chevron_right,
-                size: 20,
-                color: colors.onSurfaceVariant,
-              ),
-            ],
+                const SizedBox(height: 4),
+                if (goal > 0)
+                  Text.rich(
+                    TextSpan(
+                      children: [
+                        TextSpan(
+                          text: '$read',
+                          style: ts.s24.copyWith(
+                            fontWeight: FontWeight.bold,
+                            color: accent,
+                          ),
+                        ),
+                        TextSpan(
+                          text: ' / $goal ${'min'.tl}',
+                          style: ts.s10.withColor(colors.onSurfaceVariant),
+                        ),
+                      ],
+                    ),
+                  )
+                else
+                  Text(
+                    'Set a goal'.tl,
+                    style: ts.s12.withColor(colors.onSurfaceVariant),
+                  ),
+                const SizedBox(height: 2),
+                if (goal > 0)
+                  Text(
+                    subtitle,
+                    style: ts.s10.withColor(colors.onSurfaceVariant),
+                  ),
+                const SizedBox(height: 10),
+                _GoalBar(ratio: ratio, color: tier.base, base: colors),
+              ],
+            ),
           ),
-        ),
+          Icon(
+            Icons.chevron_right,
+            size: 20,
+            color: colors.onSurfaceVariant,
+          ),
+        ],
       ),
     );
   }
@@ -352,17 +341,10 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
   Widget _buildWeek(ColorScheme colors) {
     final week = _week;
     final change = week.changeRatio;
-    return Container(
+    return AppSurface(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       padding: const EdgeInsets.fromLTRB(16, 14, 16, 14),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: colors.surfaceContainerLow,
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.45),
-          width: 0.6,
-        ),
-      ),
+      borderRadius: const BorderRadius.all(Radius.circular(20)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -431,17 +413,10 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
   Widget _buildAchievements(ColorScheme colors) {
     final progress = Achievements.progress();
     final summary = Achievements.summary(progress);
-    return Container(
+    return AppSurface(
       margin: const EdgeInsets.fromLTRB(16, 12, 16, 4),
       padding: const EdgeInsets.fromLTRB(12, 14, 12, 10),
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(20),
-        color: colors.surfaceContainerLow,
-        border: Border.all(
-          color: colors.outlineVariant.withValues(alpha: 0.45),
-          width: 0.6,
-        ),
-      ),
+      borderRadius: const BorderRadius.all(Radius.circular(20)),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
@@ -546,7 +521,12 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
     showModalBottomSheet(
       context: context,
       showDragHandle: true,
-      backgroundColor: context.colorScheme.surfaceContainerLow,
+      // 液态主题下底部弹层用不透明 surface：它下面只有一层纯色遮罩，模糊
+      // 过去还是同一个纯色，真透明反而会让字压在漫画封面的杂色上。可读性
+      // 优先，和对话框同一个策略。
+      backgroundColor: LiquidTheme.isOn(context)
+          ? context.colorScheme.surface
+          : context.colorScheme.surfaceContainerLow,
       builder: (context) => _AchievementSheet(progress: p),
     );
   }

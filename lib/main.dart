@@ -176,16 +176,38 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
         'sans-serif'
       ];
     }
+    final scheme = SeedColorScheme.fromSeeds(
+      primaryKey: primary,
+      secondaryKey: secondary,
+      tertiaryKey: tertiary,
+      brightness: brightness,
+      tones: FlexTones.vividBackground(brightness),
+    );
+    final liquid = isLiquidTheme;
     return ThemeData(
-      colorScheme: SeedColorScheme.fromSeeds(
-        primaryKey: primary,
-        secondaryKey: secondary,
-        tertiaryKey: tertiary,
-        brightness: brightness,
-        tones: FlexTones.vividBackground(brightness),
-      ),
+      colorScheme: liquid ? liquidColorScheme(scheme) : scheme,
       fontFamily: font,
       fontFamilyFallback: fallback,
+      // 液态主题的页面背景必须透明，否则每页都会盖住全局色斑，玻璃就只剩描边。
+      // canvasColor 同理：Material 不带 color 时默认用它，留着不透明同样会挡。
+      scaffoldBackgroundColor: liquid ? Colors.transparent : null,
+      canvasColor: liquid ? Colors.transparent : null,
+      // 对话框不跟着透明到能看见底下内容：它的可读性比玻璃感重要。留 94%
+      // 不透明度，看起来是磨砂面板，文字仍然清楚。
+      dialogTheme: liquid
+          ? DialogThemeData(
+              backgroundColor: scheme.surface.withValues(alpha: 0.94),
+            )
+          : null,
+      // 下拉菜单同理：原来各处 showMenu 传的是写死的 F6F6F6 / 1E1E1E，
+      // 液态下那是两块不透明死色。这里给一个统一的磨砂色，两处调用改成
+      // 液态时不传 color（走这个主题值）。
+      popupMenuTheme: liquid
+          ? PopupMenuThemeData(
+              color: scheme.surface.withValues(alpha: 0.90),
+            )
+          : null,
+      extensions: liquid ? const [LiquidTheme.on] : const [LiquidTheme.off],
     );
   }
 
@@ -301,8 +323,20 @@ class _MyAppState extends State<MyApp> with WidgetsBindingObserver {
                 ),
               );
             }
+            if (isLiquidTheme) {
+              // 全局色斑只铺一次，放在导航器之下：所有页面（含 push 进来的）
+              // 共用同一层背景，切页时色斑不跟着动，玻璃从上面经过才有折射感。
+              // 页面自己是透明的（scaffoldBackgroundColor / canvasColor），
+              // 所以这层能透上来。
+              widget = Stack(
+                fit: StackFit.expand,
+                children: [const GlassPageBackdrop(), widget],
+              );
+            }
             return _SystemUiProvider(Material(
-              color: App.isLinux ? Colors.transparent : null,
+              color: (App.isLinux || isLiquidTheme)
+                  ? Colors.transparent
+                  : null,
               child: widget,
             ));
           }

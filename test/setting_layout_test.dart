@@ -19,11 +19,12 @@ void main() {
   test('每个设置页都有分组标题', () {
     // 页面文件 → 至少需要几个分组标题
     const pages = {
-      'interface_settings.dart': 4,
+      'interface_settings.dart': 5,
       'action_settings.dart': 2,
       'feature_settings.dart': 4,
       'reader.dart': 4,
-      'network.dart': 2,
+      // 下载线程搬去「功能」后，网络页只剩「连接」一组。
+      'network.dart': 1,
       'about.dart': 2,
     };
     for (final entry in pages.entries) {

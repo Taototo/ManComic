@@ -19,6 +19,10 @@ class _ActionSettingsState extends State<ActionSettings> {
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("Actions".tl)),
+        // 阅读器里的手势排在最前：这一页的主题就是「手怎么用」，手势是其中
+        // 用得最频繁的一项。它们和阅读页共用同一套开关，放这里是因为关注点
+        // 是「怎么操作」而不是「画面怎么显示」。
+        SliverToBoxAdapter(child: const ReaderGestureSettings()),
         _SettingPartTitle(
           title: "Favorites".tl,
           icon: Icons.bookmark_border_rounded,
@@ -80,7 +84,6 @@ class _ActionSettingsState extends State<ActionSettings> {
         ).toSliver(),
         // 阅读器里的手势：和阅读页共用同一套开关，放在这里是因为它们都是
         // 「手怎么操作」，而不是「画面怎么显示」。
-        SliverToBoxAdapter(child: const ReaderGestureSettings()),
         _SettingPartTitle(
           title: "Privacy & security".tl,
           icon: Icons.lock_outline_rounded,

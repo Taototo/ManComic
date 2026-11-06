@@ -19,6 +19,25 @@ class PopUpWidget<T> extends PopupRoute<T> {
       Animation<double> secondaryAnimation) {
     var height = MediaQuery.of(context).size.height * 0.9;
     bool showPopUp = MediaQuery.of(context).size.width > 500;
+    // 变量名不能叫 navigator：那会遮蔽 PopupRoute.navigator（NavigatorState），
+    // 下面的 iOS 返回手势控制器就拿错了对象。
+    Widget content = Navigator(
+      onGenerateRoute: (settings) => MaterialPageRoute(
+        builder: (context) => widget,
+      ),
+    );
+    // 液态主题下这一层是真正的模糊玻璃：弹出页浮在遮罩之上，背后的内容就在
+    // 那里，模糊它才是「液态」该有的样子。页面自己是透明的（canvasColor 已
+    // 改透明），所以玻璃必须画在 Navigator **下面**。
+    if (LiquidTheme.isOn(context)) {
+      content = LiquidGlass(
+        borderRadius: showPopUp
+            ? const BorderRadius.all(Radius.circular(12))
+            : BorderRadius.zero,
+        opacity: 0.72,
+        child: content,
+      );
+    }
     Widget body = PopupIndicatorWidget(
       child: Container(
         decoration: showPopUp
@@ -36,13 +55,7 @@ class PopUpWidget<T> extends PopupRoute<T> {
         clipBehavior: showPopUp ? Clip.antiAlias : Clip.none,
         width: showPopUp ? 500 : double.infinity,
         height: showPopUp ? height : double.infinity,
-        child: ClipRect(
-          child: Navigator(
-            onGenerateRoute: (settings) => MaterialPageRoute(
-              builder: (context) => widget,
-            ),
-          ),
-        ),
+        child: ClipRect(child: content),
       ),
     );
     if (App.isIOS) {

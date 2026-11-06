@@ -46,6 +46,21 @@ class _FeatureSettingsState extends State<FeatureSettings> {
     return SmoothCustomScrollView(
       slivers: [
         SliverAppbar(title: Text("Features".tl)),
+        _SettingPartTitle(title: "Content".tl, icon: Icons.dns_outlined),
+        // 漫画源是一个完整的管理页（源列表、导入、调试），单独一行跳过去，
+        // 比在一堆开关中间塞「管理源」按钮清楚。
+        ListTile(
+          contentPadding: kSettingTilePadding,
+          title: Text("Comic Sources".tl),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const ComicSourcePage());
+          },
+        ).toSliver(),
+        ...contentSourceSlivers(),
+        // 「屏蔽哪些词」和「从哪些源取内容」是同一件事的两面：都是在决定
+        // 内容边界。以前分两个分组标题，中间只隔三行，属于为了分组而分组。
+        ...keywordFilterSlivers(),
         _SettingPartTitle(
           title: "Data & backup".tl,
           icon: Icons.storage_rounded,
@@ -129,17 +144,20 @@ class _FeatureSettingsState extends State<FeatureSettings> {
           },
           actionTitle: 'Set'.tl,
         ).toSliver(),
-        _SettingPartTitle(
-          title: "Reading & notifications".tl,
-          icon: Icons.auto_stories_outlined,
-        ),
-        _CallbackSetting(
-          title: "Yearly Report".tl,
-          callback: () async {
-            context.to(() => const ReadingReportPage());
-          },
-          actionTitle: 'Open'.tl,
+        // 下载线程原本挂在「网络」页——用户想调下载不会去点网络。并发数
+        // 也是「功能」的一部分，和存储路径、缓存限额放在一起才找得到。
+        _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
+        _SliderSetting(
+          title: "Download Threads".tl,
+          settingsIndex: 'downloadThreads',
+          interval: 1,
+          min: 1,
+          max: 16,
         ).toSliver(),
+        _SettingPartTitle(
+          title: "Notifications".tl,
+          icon: Icons.notifications_none_rounded,
+        ),
         _SwitchSetting(
           title: "Follow update notifications".tl,
           subtitle: "Notify when followed comics have new chapters".tl,
@@ -154,47 +172,6 @@ class _FeatureSettingsState extends State<FeatureSettings> {
               }
             }
             await BackgroundTasks.syncSchedule();
-          },
-        ).toSliver(),
-        _SettingPartTitle(title: "Content".tl, icon: Icons.dns_outlined),
-        // 漫画源是一个完整的管理页（源列表、导入、调试），单独一行跳过去，
-        // 比在一堆开关中间塞「管理源」按钮清楚。
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          title: Text("Comic Sources".tl),
-          trailing: const Icon(Icons.arrow_right),
-          onTap: () {
-            context.to(() => const ComicSourcePage());
-          },
-        ).toSliver(),
-        ...contentSourceSlivers(),
-        _SettingPartTitle(
-          title: "Filters & keywords".tl,
-          icon: Icons.filter_alt_outlined,
-        ),
-        ...keywordFilterSlivers(),
-        _SettingPartTitle(title: "Other".tl, icon: Icons.tune_rounded),
-        SelectSetting(
-          title: "Initial Page".tl,
-          settingKey: "initialPage",
-          optionTranslation: {
-            '0': "Home Page".tl,
-            '1': "Explore Page".tl,
-            '2': "Categories Page".tl,
-            '3': "Favorites Page".tl,
-          },
-        ).toSliver(),
-        SelectSetting(
-          title: "Language".tl,
-          settingKey: "language",
-          optionTranslation: const {
-            "system": "System",
-            "zh-CN": "简体中文",
-            "zh-TW": "繁體中文",
-            "en-US": "English",
-          },
-          onChanged: () {
-            App.forceRebuild();
           },
         ).toSliver(),
       ],
