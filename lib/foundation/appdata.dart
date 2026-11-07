@@ -115,7 +115,7 @@ class Appdata with Init {
 
   var implicitData = <String, dynamic>{};
 
-  void writeImplicitData() async {
+  Future<void> writeImplicitData() async {
     while (_isSavingData) {
       await Future.delayed(const Duration(milliseconds: 20));
     }
@@ -163,6 +163,28 @@ class Appdata with Init {
       var implicitDataFile = File(FilePath.join(dataPath, 'implicitData.json'));
       implicitDataFile.deleteIgnoreError();
     }
+    await _migrateUpdateCheckDefault();
+  }
+
+  /// 把老用户「启动时检查更新」的默认值从关翻到开，只翻一次。
+  ///
+  /// 光改 `Settings._create()` 里的默认值没用：`saveData` 序列化的是整张
+  /// `_data` 表（含默认值），所以从 1.2.x 起每个用户的 appdata.json 里都
+  /// 明明白白写着 `checkUpdateOnStart: false`，加载时会被原样覆盖回来。
+  ///
+  /// 迁移标记放在 implicitData 而不是 settings：后者会随坚果云同步到别的
+  /// 设备，一台机器翻过之后另一台就再也不翻了。
+  Future<void> _migrateUpdateCheckDefault() async {
+    if (implicitData['updateCheckDefaultOnMigrated'] == true) {
+      return;
+    }
+    implicitData['updateCheckDefaultOnMigrated'] = true;
+    if (settings._data['checkUpdateOnStart'] != true) {
+      settings._data['checkUpdateOnStart'] = true;
+      // 只管本地文件：迁移不是用户操作，不该顺手触发一次云端上传。
+      saveData(false);
+    }
+    await writeImplicitData();
   }
 }
 
@@ -214,7 +236,10 @@ class Settings with ChangeNotifier {
     'longPressAction': 'hud', // hud, zoom —— HUD 为长按呼出快捷面板
     'longPressZoomPosition': "press", // press, center
     'enableFollowUpdateNotification': true,
-    'checkUpdateOnStart': false,
+    // 默认开启：本应用只通过 GitHub Release 分发 APK，没有应用商店代劳，
+    // 默认关闭等于绝大多数用户永远收不到更新提示。查询失败的分支不会打扰
+    // 用户（静默检查），冷启动最多发一次请求，代价可以接受。
+    'checkUpdateOnStart': true,
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
     "disableSyncFields": "", // "field1, field2, ..."
