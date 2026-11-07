@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/reading_report_page.dart';
 import 'package:venera/pages/search_page.dart';
 import 'package:venera/pages/settings/settings_page.dart';
@@ -172,6 +173,16 @@ class _MainPageState extends State<MainPage> {
             label: "Reading Report".tl,
             onTap: () {
               to(() => const ReadingReportPage(), preventDuplicate: true);
+            },
+          ),
+        // 源设置放在首页顶栏：源挂了是「打开首页发现什么都刷不出来」的第一
+        // 嫌疑人，而原先进源管理要绕三层（设置 → 内容 → 漫画源）。
+        if (index == _tabHome)
+          PaneActionEntry(
+            icon: Icons.dns_outlined,
+            label: "Comic Sources".tl,
+            onTap: () {
+              to(() => const ComicSourcePage(), preventDuplicate: true);
             },
           ),
         PaneActionEntry(

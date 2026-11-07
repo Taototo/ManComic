@@ -72,7 +72,7 @@ class ComicTile extends StatelessWidget {
   /// 长按菜单里保留哪些通用动作，默认全部保留
   final Set<ComicMenuAction> builtInMenuActions;
 
-  /// 在缩略图左上角显示最近更新时间（数据不可知时不显示）
+  /// 在缩略图右上角显示最近更新时间（数据不可知时不显示）
   final bool showUpdateTime;
 
   final String? badge;
@@ -316,49 +316,53 @@ class ComicTile extends StatelessWidget {
               ),
             ),
           ),
-        // 更新时间放在左下角。
+        // 更新时间 + 追更红点，一起放在右上角。
         //
-        // 它原来在左上角（left 4 / top 4），而「已收藏」和「阅读进度」那组
-        // 角标画在 left 6 / top 8 的另一层 Stack 里——两块都是描左上角，
-        // 进度角标一出现就把更新时间整块盖住，等于有阅读记录的漫画永远看不
-        // 到更新时间。挪到底部、压在进度条上方，两边的角标各占一个角。
-        if (updateText != null)
+        // 这块角标换过三次位置：最早在左上（被「已收藏／阅读进度」那组盖死），
+        // 后来挪到左下（又和瀑布流模式的描述浮层打架）。右上角原本是追更红点
+        // 独占的，而红点只是个 9px 的圆点，和更新时间并排放在同一行就好——两者
+        // 本来就是同一件事的两面：「有新章节」和「上次什么时候更新」。
+        if (hasUpdate || updateText != null)
           Positioned(
-            left: 4,
-            bottom: 7,
-            child: Container(
-              padding: const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
-              decoration: BoxDecoration(
-                color: Colors.black.withValues(alpha: 0.55),
-                borderRadius: BorderRadius.circular(6),
-              ),
-              child: Text(
-                updateText,
-                style: const TextStyle(
-                  fontSize: 9,
-                  height: 1.25,
-                  color: Colors.white,
-                ),
-              ),
-            ),
-          ),
-        if (hasUpdate)
-          Positioned(
-            right: 6,
-            top: 6,
-            child: Container(
-              width: 9,
-              height: 9,
-              decoration: BoxDecoration(
-                color: Colors.redAccent,
-                shape: BoxShape.circle,
-                boxShadow: [
-                  BoxShadow(
-                    color: Colors.black.withValues(alpha: 0.35),
-                    blurRadius: 3,
+            right: 5,
+            top: 5,
+            child: Row(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                if (hasUpdate)
+                  Container(
+                    width: 9,
+                    height: 9,
+                    decoration: BoxDecoration(
+                      color: Colors.redAccent,
+                      shape: BoxShape.circle,
+                      boxShadow: [
+                        BoxShadow(
+                          color: Colors.black.withValues(alpha: 0.35),
+                          blurRadius: 3,
+                        ),
+                      ],
+                    ),
                   ),
-                ],
-              ),
+                if (hasUpdate && updateText != null) const SizedBox(width: 3),
+                if (updateText != null)
+                  Container(
+                    padding:
+                        const EdgeInsets.symmetric(horizontal: 5, vertical: 1),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.55),
+                      borderRadius: BorderRadius.circular(6),
+                    ),
+                    child: Text(
+                      updateText,
+                      style: const TextStyle(
+                        fontSize: 9,
+                        height: 1.25,
+                        color: Colors.white,
+                      ),
+                    ),
+                  ),
+              ],
             ),
           ),
       ],

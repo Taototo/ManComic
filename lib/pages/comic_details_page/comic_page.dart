@@ -11,6 +11,7 @@ import 'package:venera/components/rich_comment_content.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_details_cache.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/favorites.dart';
@@ -95,6 +96,12 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   bool showFAB = false;
 
   bool _fallbackHandled = false;
+
+  /// 当前页面是用本地详情快照渲染的（还没拿到在线数据）。
+  ///
+  /// 用来挡住 [onDataLoaded] 里的网络请求——断网时那一步会把缓存秒开拖成
+  /// 几十秒骨架屏。只有首次加载走 onDataLoaded，后台刷新不会重置它。
+  bool _showingCache = false;
 
   /// 故障转移后按章节序号对齐的目标话数
   int? _pendingAlignEp;
@@ -289,31 +296,91 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     if (comicSource == null) {
       return const Res.error('Comic source not found');
     }
-    isAddToLocalFav = LocalFavoritesManager().isExist(
-      widget.id,
-      ComicType(widget.sourceKey.hashCode),
-    );
-    history = HistoryManager().find(
-      widget.id,
-      ComicType(widget.sourceKey.hashCode),
-    );
-    final res = await comicSource.loadComicInfo!(widget.id);
-    if (!res.error) {
-      // 记录更新时间到本地缓存：很多源的列表接口不给时间，
-      // 进过详情页之后，发现页角标就能显示出来。
-      final updateTime = res.data.findUpdateTime();
-      if (updateTime != null) {
-        ComicUpdateTimeCache.instance.put(
-          widget.sourceKey,
-          widget.id,
-          updateTime,
-        );
-      }
+    final type = ComicType(widget.sourceKey.hashCode);
+    isAddToLocalFav = LocalFavoritesManager().isExist(widget.id, type);
+    history = HistoryManager().find(widget.id, type);
+
+    // 已下载的漫画：目录里有一份下载时写下的详情快照，先拿它渲染，再在后台
+    // 静默刷新。
+    //
+    // 之前这里一律先请求源站，断网就只剩一张错误页——整本漫画都在手机里，
+    // 却连章节列表都看不到，只能退出去另找「阅读」。缓存优先之后，离线打开
+    // 是即时的，联网时新旧章节会在几百毫秒内悄悄补上。
+    final cached = ComicDetailsCache.load(widget.id, type);
+    if (cached != null) {
+      _showingCache = true;
+      _refreshInBackground(comicSource);
+      return Res<ComicDetails>(cached);
     }
-    if (res.error) {
+
+    final load = comicSource.loadComicInfo;
+    if (load == null) {
+      return const Res.error('Comic source not supported');
+    }
+    final res = await load(widget.id);
+    if (!res.error) {
+      _rememberComic(res.data);
+    } else {
       _handleFallback();
     }
     return res;
+  }
+
+  /// 记下更新时间（发现页角标用）并把详情写成本地快照。
+  ///
+  /// save 只在确实有本地漫画目录时才落盘，所以未下载的漫画不会占用空间。
+  void _rememberComic(ComicDetails details) {
+    final updateTime = details.findUpdateTime();
+    if (updateTime != null) {
+      ComicUpdateTimeCache.instance.put(
+        widget.sourceKey,
+        widget.id,
+        updateTime,
+      );
+    }
+    ComicDetailsCache.save(details, ComicType(widget.sourceKey.hashCode));
+  }
+
+  /// 用缓存渲染之后，在后台安静地拉一次最新详情。
+  ///
+  /// 失败就维持缓存内容——离线时这里必然失败，不该弹错、也不该跳备用源。
+  void _refreshInBackground(ComicSource source) {
+    final load = source.loadComicInfo;
+    if (load == null) {
+      return;
+    }
+    Future.microtask(() async {
+      final res = await load(widget.id);
+      if (!mounted || res.error) {
+        return;
+      }
+      final fresh = res.data;
+      _rememberComic(fresh);
+      // 只换 data，不再跑一遍 onDataLoaded：那里会按源站返回重写收藏/点赞
+      // 状态，而用户这会儿可能已经在页面上动过手了。
+      if (!_chaptersOrCoverChanged(fresh)) {
+        return;
+      }
+      setState(() {
+        data = fresh;
+      });
+    });
+  }
+
+  /// 章节表、封面、简介有变化才值得重建整页；只更新了点赞数之类的就没必要，
+  /// 那会让正在滚动的列表跳一下。
+  bool _chaptersOrCoverChanged(ComicDetails fresh) {
+    final old = data;
+    if (old == null) {
+      return true;
+    }
+    return old.comicId != fresh.comicId ||
+        old.title != fresh.title ||
+        old.cover != fresh.cover ||
+        old.description != fresh.description ||
+        old.updateTime != fresh.updateTime ||
+        old.chapters?.length != fresh.chapters?.length ||
+        old.chapters?.isGrouped != fresh.chapters?.isGrouped;
   }
 
   /// 主源加载失败时，自动切到已绑定的第一个备用源。
@@ -370,7 +437,13 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     isFavorite = comic.isFavorite ?? false;
     // For sources with multi-folder favorites, prefer querying folders to get accurate favorite status
     // Some sources may not set isFavorite reliably when multi-folder is enabled
-    if (comicSource.favoriteData?.loadFolders != null && comicSource.isLogged) {
+    //
+    // 用缓存渲染时跳过这一步：这里是一次真实网络请求，而 onDataLoaded 是
+    // await 在首帧之前的，断网时它会把「缓存秒开」硬生生拖成几十秒的骨架屏。
+    // 收藏状态先用快照里的值，后台刷新成功（说明网络确实通了）再补查。
+    if (!_showingCache &&
+        comicSource.favoriteData?.loadFolders != null &&
+        comicSource.isLogged) {
       var res = await comicSource.favoriteData!.loadFolders!(comic.id);
       if (!res.error) {
         if (res.subData is List) {
@@ -464,6 +537,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
                       widget.cover ?? comic.cover,
                       sourceKey: comic.sourceKey,
                       cid: comic.id,
+                      // 断网时退回下载时存在漫画目录里的封面。既然详情内容
+                      // 都能从快照出来，封面不该是唯一一块空白。
+                      fallbackToLocalCover: true,
                     ),
                     // 与列表封面同一解码尺寸，Hero 飞行时直接命中缓存
                     cacheWidth: kCoverDecodeWidth,

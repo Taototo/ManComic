@@ -198,7 +198,9 @@ class ComicDetails with HistoryMixin {
 
   ComicDetails.fromJson(Map<String, dynamic> json)
       : title = json["title"],
-        subTitle = json["subtitle"],
+        // toJson 早先写的是 "subTitle"（首字母大写），老缓存和老下载任务里都是
+        // 这个拼法，读的时候两种都认，否则副标题会静默丢失。
+        subTitle = json["subtitle"] ?? json["subTitle"],
         cover = json["cover"],
         description = json["description"],
         tags = _generateMap(json["tags"]),
@@ -227,11 +229,11 @@ class ComicDetails with HistoryMixin {
   Map<String, dynamic> toJson() {
     return {
       "title": title,
-      "subTitle": subTitle,
+      "subtitle": subTitle,
       "cover": cover,
       "description": description,
       "tags": tags,
-      "chapters": chapters,
+      "chapters": chapters?.toJson(),
       "thumbnails": thumbnails,
       "recommend": null,
       "sourceKey": sourceKey,
@@ -240,11 +242,15 @@ class ComicDetails with HistoryMixin {
       "subId": subId,
       "isLiked": isLiked,
       "likesCount": likesCount,
-      "commentsCount": commentCount,
+      "commentCount": commentCount,
       "uploader": uploader,
       "uploadTime": uploadTime,
       "updateTime": updateTime,
       "url": url,
+      // maxPage / stars 也要带上：详情快照被用来离线渲染整页，少了它们
+      // 阅读进度条和评分会凭空消失。
+      "maxPage": maxPage,
+      "stars": stars,
     };
   }
 

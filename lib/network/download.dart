@@ -6,6 +6,7 @@ import 'package:flutter_saf/flutter_saf.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
+import 'package:venera/foundation/comic_details_cache.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -286,6 +287,12 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         return;
       }
     }
+
+    // 详情页也一起存下去。已下载的漫画在列表里点封面打开的是在线源详情页，
+    // 断网时那页只会显示错误页——章节明明都在本地。这里在目录刚建好时就把
+    // ComicDetails 写进 <漫画目录>/details.json，取消下载时目录被删，快照
+    // 跟着消失，不需要额外的清理逻辑。
+    ComicDetailsCache.save(comic!, comicType, directory: path);
 
     await LocalManager().saveCurrentDownloadingTasks();
 
@@ -756,6 +763,9 @@ class ArchiveDownloadTask extends DownloadTask {
       }
       path = dir.path;
     }
+
+    // 同 ImagesDownloadTask：详情快照跟着漫画目录走，离线时详情页才有东西可画。
+    ComicDetailsCache.save(comic, comicType, directory: path);
 
     var archiveFile =
         File(FilePath.join(App.dataPath, "archive_downloading.zip"));
