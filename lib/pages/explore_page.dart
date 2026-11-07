@@ -242,10 +242,15 @@ class _ExplorePageState extends State<ExplorePage>
 
   Widget buildExploreTabBar() {
     return Material(
+      // 透明 Material 只为了给 InkWell 一个挂靠点：铺底色的话这条页签栏
+      // 会在玻璃顶栏下面再压一条实色，顶上就看不到内容从玻璃后面穿过去了。
+      type: MaterialType.transparency,
       child: AppTabBar(
         key: PageStorageKey("explore_tabs_${pages.join('|')}"),
         tabs: pages.map((e) => buildTab(e)).toList(),
         controller: exploreController,
+        // 选中页签背后跟一块会滑动的玻璃，和「推荐 / 分类」同一套动效语言。
+        glass: LiquidGlassEngine.enabled,
         // 双击已选页签：滚回顶部
         onTabReselect: _toTopCurrentGroup,
         actionButton: TabActionButton(
@@ -259,6 +264,7 @@ class _ExplorePageState extends State<ExplorePage>
 
   Widget buildCategoryTabBar() {
     return Material(
+      type: MaterialType.transparency,
       child: AppTabBar(
         key: PageStorageKey("category_tabs_${categories.join('|')}"),
         tabs: categories.map((e) {
@@ -271,6 +277,7 @@ class _ExplorePageState extends State<ExplorePage>
           return Tab(text: title, key: Key(e));
         }).toList(),
         controller: categoryController,
+        glass: LiquidGlassEngine.enabled,
         onTabReselect: _toTopCurrentGroup,
         actionButton: TabActionButton(
           icon: const Icon(Icons.add),

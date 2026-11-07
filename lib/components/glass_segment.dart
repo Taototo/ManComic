@@ -27,52 +27,67 @@ class GlassGroupSwitcher extends StatelessWidget {
 
   final ValueChanged<int> onChanged;
 
-  static const _height = 32.0;
+  static const _height = 30.0;
 
-  static const _segmentExtent = 74.0;
+  /// 单段宽度、内边距都沿用页内那版分段控件（76 × 2 + 3 × 2 = 158）。
+  ///
+  /// `GlassSegmentedControl` 的水平模式**不认 segmentExtent**（那个参数只对
+  /// 竖排生效），宽度完全由文字撑开——所以搬到顶栏之后整块缩成一小坨，比
+  /// 原来窄了一截。这里显式给死宽度，内部每段是 Expanded，自然均分。
+  static const _segmentExtent = 76.0;
+
+  static const _padding = 3.0;
+
+  static const _width = _segmentExtent * 2 + _padding * 2;
 
   @override
   Widget build(BuildContext context) {
     final cs = context.colorScheme;
     final isDark = Theme.of(context).brightness == Brightness.dark;
 
-    return lg.GlassSegmentedControl(
-      segments: [
-        for (final label in labels) lg.GlassSegment(label: label.tl),
-      ],
-      selectedIndex: index,
-      onSegmentSelected: onChanged,
-      height: _height,
-      segmentExtent: _segmentExtent,
-      padding: const EdgeInsets.all(3),
-      borderRadius: _height / 2,
-      // 轨道：在玻璃顶栏上再压半档，让「当前有两个选项」看得出来。
-      backgroundColor: cs.onSurface.withValues(alpha: isDark ? 0.24 : 0.07),
-      // 滑块交给玻璃自己画：不指定实色，否则会在玻璃上面再糊一层死色。
-      indicatorColor: LiquidGlassEngine.enabled ? null : cs.surface,
-      indicatorSettings: LiquidGlassEngine.enabled
-          ? LiquidGlassEngine.settings(context, tintAlpha: isDark ? 0.42 : 0.5)
-          : null,
-      // 只有这一层玻璃，档位压到 standard：实时采样，不会闪黑。
-      quality: lg.GlassQuality.standard,
-      // 滑块比轨道内沿略微外扩，边缘的折射才露得出来。
-      indicatorExpansion: const EdgeInsets.symmetric(
-        horizontal: 1,
-        vertical: 1,
-      ),
-      indicatorPinchStrength: 0.45,
-      // 包内默认 snappy(350ms) 快到看不出滑行，和底栏一样放慢到 bouncy。
-      springDescription: LiquidGlassEngine.indicatorSpring,
-      // 文字压在玻璃上，颜色必须显式给：不依赖着色器猜亮度。
-      selectedTextStyle: TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w600,
-        color: cs.primary,
-      ),
-      unselectedTextStyle: TextStyle(
-        fontSize: 13,
-        fontWeight: FontWeight.w500,
-        color: cs.onSurface.withValues(alpha: 0.62),
+    return SizedBox(
+      width: _width,
+      child: lg.GlassSegmentedControl(
+        segments: [
+          for (final label in labels) lg.GlassSegment(label: label.tl),
+        ],
+        selectedIndex: index,
+        onSegmentSelected: onChanged,
+        height: _height,
+        segmentExtent: _segmentExtent,
+        padding: const EdgeInsets.all(_padding),
+        borderRadius: _height / 2,
+        // 轨道：在玻璃顶栏上再压半档，让「当前有两个选项」看得出来。
+        backgroundColor: cs.onSurface.withValues(alpha: isDark ? 0.24 : 0.07),
+        // 滑块交给玻璃自己画：不指定实色，否则会在玻璃上面再糊一层死色。
+        indicatorColor: LiquidGlassEngine.enabled ? null : cs.surface,
+        indicatorSettings: LiquidGlassEngine.enabled
+            ? LiquidGlassEngine.settings(
+                context,
+                tintAlpha: isDark ? 0.42 : 0.5,
+              )
+            : null,
+        // 只有这一层玻璃，档位压到 standard：实时采样，不会闪黑。
+        quality: lg.GlassQuality.standard,
+        // 滑块比轨道内沿略微外扩，边缘的折射才露得出来。
+        indicatorExpansion: const EdgeInsets.symmetric(
+          horizontal: 1,
+          vertical: 1,
+        ),
+        indicatorPinchStrength: 0.45,
+        // 包内默认 snappy(350ms) 快到看不出滑行，和底栏一样放慢到 bouncy。
+        springDescription: LiquidGlassEngine.indicatorSpring,
+        // 文字压在玻璃上，颜色必须显式给：不依赖着色器猜亮度。
+        selectedTextStyle: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+          color: cs.primary,
+        ),
+        unselectedTextStyle: TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+          color: cs.onSurface.withValues(alpha: 0.62),
+        ),
       ),
     );
   }

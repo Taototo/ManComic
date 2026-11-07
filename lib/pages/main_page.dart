@@ -83,8 +83,9 @@ class _MainPageState extends State<MainPage> {
         group: _exploreGroup,
       ),
       const HomePage(),
-      const FavoritesPage(
-        key: PageStorageKey('favorites'),
+      FavoritesPage(
+        key: const PageStorageKey('favorites'),
+        folders: _favoritesFolders,
       ),
     ];
     super.initState();
@@ -93,6 +94,9 @@ class _MainPageState extends State<MainPage> {
   /// 「推荐 / 分类」分组。切换控件在顶栏标题位上，状态放在这里，
   /// 顶栏和推荐页都能看到同一份。
   final _exploreGroup = ExploreGroupController();
+
+  /// 收藏夹抽屉的入口，由收藏页注册（见 [FavoritesFolderController]）。
+  final _favoritesFolders = FavoritesFolderController();
 
   late final List<Widget> _pages;
 
@@ -110,11 +114,11 @@ class _MainPageState extends State<MainPage> {
       initialPage: index,
       observer: _observer,
       navigatorKey: _navigatorKey!,
-      // 推荐页不再显示「推荐」标题：那个位置让给分段控件，省一行高度，
-      // 也顺手把「标题 + 分段」两组字挤在一起的视觉噪声去掉。
+      // 主页和收藏不再显示标题字：顶栏只剩一块玻璃，内容直接长在它下面，
+      // 和主页的观感统一。推荐页把标题位让给「推荐 / 分类」分段控件。
       titleBuilder: (page, context) {
         if (page != _tabExplore) {
-          return null;
+          return const SizedBox.shrink();
         }
         return AnimatedBuilder(
           animation: _exploreGroup,
@@ -150,6 +154,14 @@ class _MainPageState extends State<MainPage> {
         });
       },
       paneActions: [
+        // 收藏夹抽屉的入口。原来它长在收藏页自己的标题栏里（那一栏已经
+        // 去掉，页面顶部才能和主页一致），现在提到顶栏图标位上。
+        if (index == _tabFavorites)
+          PaneActionEntry(
+            icon: Icons.folder_outlined,
+            label: "Folders".tl,
+            onTap: () => _favoritesFolders.open?.call(),
+          ),
         if (index != _tabHome)
           PaneActionEntry(
             icon: Icons.search,

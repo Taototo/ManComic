@@ -281,6 +281,7 @@ class AppTabBar extends StatefulWidget {
     this.actionButton,
     this.withUnderLine = true,
     this.onTabReselect,
+    this.glass = false,
   });
 
   final TabController? controller;
@@ -294,6 +295,12 @@ class AppTabBar extends StatefulWidget {
   /// 再次点击（双击）已选中的页签时触发，用于让内容滚回顶部。
   /// 第一击正常切换页签，第二击落在已选页签上时回调这里。
   final VoidCallback? onTabReselect;
+
+  /// 液态玻璃模式：去掉底部下划线，改成「玻璃滑块跟在选中的页签后面滑动」。
+  ///
+  /// 只给推荐页的源页签用。其它地方（详情页章节、设置分组）的页签是长列表
+  /// 里的一行文字，底下就是内容本身，加玻璃滑块反而抢视线。
+  final bool glass;
 
   @override
   State<AppTabBar> createState() => _AppTabBarState();
@@ -379,13 +386,89 @@ class _AppTabBarState extends State<AppTabBar> {
 
   void _tabLayoutCallback(List<double> offsets, double itemHeight) {
     painter!.update(offsets, itemHeight);
+    bool changed = offsets.length != this.offsets.length;
+    if (!changed) {
+      for (var i = 0; i < offsets.length; i++) {
+        if ((offsets[i] - this.offsets[i]).abs() > 0.5) {
+          changed = true;
+          break;
+        }
+      }
+    }
     this.offsets = offsets;
+    // 玻璃滑块的位置要靠 offsets 算出来，而 offsets 是布局阶段才拿到的。
+    // 首帧（以及页签增减、文字长度变化之后）得补一次重建，否则滑块要等到
+    // 用户第一次点页签、动画开始刷帧时才出现。
+    if (changed && widget.glass && mounted) {
+      WidgetsBinding.instance.addPostFrameCallback((_) {
+        if (mounted) setState(() {});
+      });
+    }
+  }
+
+  /// 选中页签背后那块玻璃的位置（相对于页签行，跟随横向滚动）。
+  Rect? _glassPillRect() {
+    final offsets = this.offsets;
+    if (offsets.length < 2) {
+      return null;
+    }
+    final animation = _controller.animation;
+    if (animation == null) {
+      return null;
+    }
+    final maxIndex = offsets.length - 2;
+    final value = animation.value;
+    final from = value.floor().clamp(0, maxIndex);
+    final to = value.ceil().clamp(0, maxIndex);
+    final t = from == to ? 0.0 : (value - from).abs();
+    Rect rectAt(int i) => Rect.fromLTWH(
+          offsets[i] + tabPadding.left,
+          tabPadding.top,
+          (offsets[i + 1] - offsets[i]) - tabPadding.horizontal,
+          _kTabHeight - tabPadding.vertical,
+        );
+    return Rect.lerp(rectAt(from), rectAt(to), t);
+  }
+
+  Widget _buildGlassPill(BuildContext context, Rect rect) {
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    // standard 档：页签行的滑块每帧都在动，premium 的采样纹理在动画里会
+    // 抓空、闪黑；standard 走实时 BackdropFilter，滑到哪儿都读到当前背景。
+    return Positioned.fromRect(
+      rect: rect,
+      child: LiquidGlassPanel(
+        borderRadius: BorderRadius.circular(rect.height / 2),
+        quality: lg.GlassQuality.standard,
+        tintAlpha: isDark ? 0.34 : 0.5,
+        child: const SizedBox.expand(),
+      ),
+    );
   }
 
   Widget buildTabBar(BuildContext context, Widget? _) {
     var child = SmoothScrollProvider(
       controller: scrollController,
       builder: (context, controller, physics) {
+        Widget row = CustomPaint(
+          // 玻璃模式不要下划线：那 3px 的实色条会从滑块底下露出来。
+          painter: widget.glass ? null : painter,
+          child: _TabRow(
+            callback: _tabLayoutCallback,
+            children: List.generate(widget.tabs.length, buildTab)
+              ..addIfNotNull(widget.actionButton?.padding(tabPadding)),
+          ),
+        );
+        if (widget.glass) {
+          // 玻璃滑块压在页签文字下面：先画滑块、再画文字，文字保持清晰，
+          // 滑块负责把底下的内容模糊 + 折一下。
+          final rect = _glassPillRect();
+          row = Stack(
+            children: [
+              if (rect != null) _buildGlassPill(context, rect),
+              row,
+            ],
+          );
+        }
         return SingleChildScrollView(
           key: const PageStorageKey('scroll'),
           scrollDirection: Axis.horizontal,
@@ -394,14 +477,7 @@ class _AppTabBarState extends State<AppTabBar> {
           physics: physics is BouncingScrollPhysics
               ? const ClampingScrollPhysics()
               : physics,
-          child: CustomPaint(
-            painter: painter,
-            child: _TabRow(
-              callback: _tabLayoutCallback,
-              children: List.generate(widget.tabs.length, buildTab)
-                ..addIfNotNull(widget.actionButton?.padding(tabPadding)),
-            ),
-          ).paddingHorizontal(4),
+          child: row.paddingHorizontal(4),
         );
       },
     );
@@ -409,7 +485,8 @@ class _AppTabBarState extends State<AppTabBar> {
       key: tabBarKey,
       height: _kTabHeight,
       width: double.infinity,
-      decoration: widget.withUnderLine
+      // 玻璃模式下滑块自己就是指示器，再留一条下划线等于两套指示器打架。
+      decoration: widget.withUnderLine && !widget.glass
           ? BoxDecoration(
               border: Border(
                 bottom: BorderSide(

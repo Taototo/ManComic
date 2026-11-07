@@ -41,8 +41,21 @@ const _kLeftBarWidth = 256.0;
 
 const _kTwoPanelChangeWidth = 720.0;
 
+/// 收藏夹抽屉的开关入口。
+///
+/// 收藏页自己的标题栏（原来那个「未选择 / 文件夹名」的 SliverAppbar）已经
+/// 去掉了——它压在玻璃顶栏下面，等于又多一条实色横杠。抽屉的入口因此提到
+/// 了顶栏的图标位上，顶栏和页面是两棵子树，只能由上层把「点一下」这件事
+/// 转发进来，和推荐页的分段控件是同一个套路。
+class FavoritesFolderController {
+  VoidCallback? open;
+}
+
 class FavoritesPage extends StatefulWidget {
-  const FavoritesPage({super.key});
+  const FavoritesPage({super.key, this.folders});
+
+  /// 抽屉入口。为 null 时页面自己把入口留在页面里（测试或独立使用）。
+  final FavoritesFolderController? folders;
 
   @override
   State<FavoritesPage> createState() => _FavoritesPageState();
@@ -129,12 +142,16 @@ class _FavoritesPageState extends State<FavoritesPage> {
     folder = restored.$1;
     isNetwork = restored.$2;
     locked = Privacy.isFavoritesLocked;
+    widget.folders?.open = showFolderSelector;
     appdata.settings.addListener(onSettingsChanged);
     super.initState();
   }
 
   @override
   void dispose() {
+    if (widget.folders?.open == showFolderSelector) {
+      widget.folders?.open = null;
+    }
     appdata.settings.removeListener(onSettingsChanged);
     super.dispose();
   }
@@ -175,12 +192,14 @@ class _FavoritesPageState extends State<FavoritesPage> {
       opaque: false,
       barrierColor: Colors.black.toOpacity(0.36),
       pageBuilder: (context, animation, secondary) {
-        // 液态开启时抽屉换成磨砂玻璃面板：底下的收藏页透出来，
-        // 关闭时还能隐约看到刚才的位置。
+        // 液态开启时抽屉换成磨砂玻璃面板。
         //
-        // 底色必须给足（readableTintAlpha）：抽屉里全是长文字，而收藏页
-        // 背后是一屏彩色封面，底色一淡文字就跟着背景一起花。档位用
-        // standard——抽屉是滑入动画，standard 走实时 BackdropFilter，
+        // 磨砂的要点是**强模糊 + 淡底色**，而不是把底色加白：底色一浓，
+        // 后面的封面看不见了，模糊也就白做了——那只是一块半透明白板。
+        // 这里 blur 给到 44（引擎按 sigma/3.5 折算成 12.6 的模糊强度），
+        // 底色只留 0.45，身后的封面化成一团有颜色的雾，文字依然是满色。
+        //
+        // 档位用 standard：抽屉是滑入动画，standard 走实时 BackdropFilter，
         // 每一帧都在重新模糊下面的内容；premium 会把背景采样成一张静态
         // 纹理，滑的那两三百毫秒里看起来像贴在屏幕上一块浆糊。
         final surface = LiquidGlassEngine.enabled
@@ -189,7 +208,8 @@ class _FavoritesPageState extends State<FavoritesPage> {
                   right: Radius.circular(18),
                 ),
                 quality: lg.GlassQuality.standard,
-                tintAlpha: LiquidGlassPanel.readableTintAlpha,
+                blur: 44,
+                tintAlpha: 0.45,
                 child: Material(
                   type: MaterialType.transparency,
                   child: SizedBox(
@@ -236,30 +256,48 @@ class _FavoritesPageState extends State<FavoritesPage> {
     ));
   }
 
-  Widget buildBody() {
-    if (folder == null) {
-      return CustomScrollView(
-        slivers: [
-          SliverAppbar(
-            leading: Tooltip(
-              message: "Folders".tl,
-              child: context.width <= _kTwoPanelChangeWidth
-                  ? IconButton(
-                      icon: const Icon(Icons.menu),
-                      color: context.colorScheme.primary,
-                      onPressed: showFolderSelector,
-                    )
-                  : null,
-            ),
-            title: GestureDetector(
-              onTap: context.width < _kTwoPanelChangeWidth
-                  ? showFolderSelector
-                  : null,
-              child: Text("Unselected".tl),
+  /// 还没选收藏夹时的占位。
+  ///
+  /// 这里原来是一条「未选择」标题栏 + 目录按钮。那条栏压在玻璃顶栏下面，
+  /// 顶上等于多出一条实色横杠，和主页那种「内容从玻璃底下穿过去」完全不是
+  /// 一个观感。入口已经挪到顶栏的图标位上，页面里只留一句提示和一个按钮。
+  /// 宽屏走双栏，左侧目录一直可见，不需要这个占位。
+  Widget buildNoFolderSelected() {
+    if (context.width > _kTwoPanelChangeWidth) {
+      return const SizedBox();
+    }
+    final cs = context.colorScheme;
+    return Center(
+      child: Column(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          Icon(
+            Icons.collections_bookmark_outlined,
+            size: 46,
+            color: cs.onSurfaceVariant.toOpacity(0.45),
+          ),
+          const SizedBox(height: 14),
+          Text(
+            "No folder selected".tl,
+            style: TextStyle(
+              color: cs.onSurfaceVariant,
+              fontSize: 14,
             ),
           ),
+          const SizedBox(height: 16),
+          FilledButton.tonalIcon(
+            onPressed: showFolderSelector,
+            icon: const Icon(Icons.folder_outlined, size: 18),
+            label: Text("Folders".tl),
+          ),
         ],
-      );
+      ),
+    );
+  }
+
+  Widget buildBody() {
+    if (folder == null) {
+      return buildNoFolderSelected();
     }
     if (!isNetwork) {
       return _LocalFavoritesPage(

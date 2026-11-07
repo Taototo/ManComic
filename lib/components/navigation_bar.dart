@@ -401,7 +401,16 @@ class NaviPaneState extends State<NaviPane>
           // 外层 Padding 已负责与屏幕边缘的距离，内部别再留一圈。
           horizontalPadding: 0,
           verticalPadding: 0,
-          quality: lg.GlassQuality.premium,
+          // standard，不是 premium。
+          //
+          // 切页的那一帧，底栏的玻璃要把「刚换上去、还没画完」的页面当背景
+          // 去采样：premium 走的是 `toImageSync` 抓纹理，这时候抓到的是一张
+          // 空图，直接画成黑底；而且这张黑图会一直挂在那儿，直到有别的绘制
+          // 把它顶掉——这就是「进一遍设置页面就正常了」的原因。
+          // standard 是实时 BackdropFilter，永远读当前帧的帧缓冲，没有这张
+          // 会过期的纹理。底栏的果冻滑块本来就走实时路径，观感差别只在边缘
+          // 那道多 pass 的厚度，换来的是切换时绝不闪黑。
+          quality: lg.GlassQuality.standard,
           // 底栏压在任意内容上（漫画封面经常是深色大块），玻璃底色必须
           // 比浮层默认值实一截，图标和文字才不会陷进背景里。
           settings: LiquidGlassEngine.settings(context, tintAlpha: 0.55),
@@ -966,7 +975,12 @@ class _NaviMainViewState extends State<_NaviMainView> {
     return lg.GlassBackdropGroup(
       child: Stack(
         children: [
-          Positioned.fill(child: page),
+          // 页面单独一层。切页时页面正处在 `_TabTransition` 的 Opacity 里，
+          // 那是要开 save layer 的；玻璃栏在同一帧去读背景时，如果页面还
+          // 没被合成到这一趟 pass 里，读到的就是空的——顶栏底色淡看不出来，
+          // 底栏底色实，直接显示成一块黑。加一层 RepaintBoundary 让页面先
+          // 落成自己的层，玻璃再去读就一定读得到。
+          Positioned.fill(child: RepaintBoundary(child: page)),
           Positioned(
             left: 0,
             right: 0,
