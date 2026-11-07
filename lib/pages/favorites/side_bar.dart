@@ -1,13 +1,25 @@
 part of 'favorites_page.dart';
 
 class _LeftBar extends StatefulWidget {
-  const _LeftBar({this.favPage, this.onSelected, this.withAppbar = false});
+  const _LeftBar({
+    this.favPage,
+    this.onSelected,
+    this.withAppbar = false,
+    this.onGlassBackground = false,
+  });
 
   final _FavoritesPageState? favPage;
 
   final VoidCallback? onSelected;
 
   final bool withAppbar;
+
+  /// 侧栏是浮在玻璃上的抽屉（而不是贴着页面的实色栏）。
+  ///
+  /// 玻璃再实也是半透的，默认继承来的文字颜色在浅色主题下只有 87%
+  /// alpha，压到背后的封面上就散了。这个开关把这里所有前景色提到满值，
+  /// 并给选中态加重底色，保证字和图标始终压在自家的底板上。
+  final bool onGlassBackground;
 
   @override
   State<_LeftBar> createState() => _LeftBarState();
@@ -129,7 +141,12 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
         children: [
           Icon(Icons.local_activity, color: context.colorScheme.secondary),
           const SizedBox(width: 12),
-          Text("Local".tl),
+          Text(
+            "Local".tl,
+            style: widget.onGlassBackground
+                ? TextStyle(color: context.colorScheme.onSurface)
+                : null,
+          ),
           const Spacer(),
           MenuButton(
             entries: [
@@ -178,7 +195,12 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
         children: [
           Icon(Icons.cloud, color: context.colorScheme.secondary),
           const SizedBox(width: 12),
-          Text("Network".tl),
+          Text(
+            "Network".tl,
+            style: widget.onGlassBackground
+                ? TextStyle(color: context.colorScheme.onSurface)
+                : null,
+          ),
           const Spacer(),
           IconButton(
             icon: const Icon(Icons.settings),
@@ -215,15 +237,23 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       _localReadFolderLabel => Icons.done_all,
       _ => Icons.folder_outlined,
     };
-    // 选中时图标与文字都用主题色；未选中时图标用次要色
-    var fgColor = isSelected
-        ? context.colorScheme.primary
-        : (isRead ? context.colorScheme.onSurfaceVariant : null);
+    // 选中时图标与文字都用主题色；未选中时图标用次要色。
+    // 玻璃抽屉上未选中项也要给实色，否则半透明黑字压在背后的封面上会散。
+    Color? fgColor;
+    if (isSelected) {
+      fgColor = context.colorScheme.primary;
+    } else if (isRead) {
+      fgColor = context.colorScheme.onSurfaceVariant;
+    } else if (widget.onGlassBackground) {
+      fgColor = context.colorScheme.onSurface;
+    }
     var iconColor = isSelected
         ? context.colorScheme.primary
         : (isRead
               ? context.colorScheme.onSurfaceVariant.toOpacity(0.8)
               : context.colorScheme.onSurfaceVariant);
+    // 玻璃上的选中底板要比贴页面时重一档，否则「选中了哪一项」看不出来
+    final selectedAlpha = widget.onGlassBackground ? 0.72 : 0.36;
     return Padding(
       padding: EdgeInsets.only(top: withTopGap ? 4 : 0),
       child: InkWell(
@@ -239,7 +269,7 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
           alignment: Alignment.centerLeft,
           decoration: BoxDecoration(
             color: isSelected
-                ? context.colorScheme.primaryContainer.toOpacity(0.36)
+                ? context.colorScheme.primaryContainer.toOpacity(selectedAlpha)
                 : null,
             border: Border(
               left: BorderSide(
@@ -308,7 +338,8 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
         alignment: Alignment.centerLeft,
         decoration: BoxDecoration(
           color: isSelected
-              ? context.colorScheme.primaryContainer.toOpacity(0.36)
+              ? context.colorScheme.primaryContainer
+                  .toOpacity(widget.onGlassBackground ? 0.72 : 0.36)
               : null,
           border: Border(
             left: BorderSide(
@@ -320,7 +351,12 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
           ),
         ),
         padding: const EdgeInsets.only(left: 16),
-        child: Text(data.title),
+        child: Text(
+          data.title,
+          style: widget.onGlassBackground
+              ? TextStyle(color: context.colorScheme.onSurface)
+              : null,
+        ),
       ),
     );
   }

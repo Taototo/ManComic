@@ -6,6 +6,7 @@ import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/utils/image.dart';
+import 'package:venera/utils/file_type.dart';
 
 import 'app_dio.dart';
 
@@ -16,13 +17,17 @@ abstract class ImageDownloader {
     final cacheKey = "$url@$sourceKey${cid != null ? '@$cid' : ''}";
     final cache = await CacheManager().findCache(cacheKey);
 
+    // 缓存里也可能躺着半张图（旧版本就是这么写进去的），先用再说等于
+    // 一直修不好。不完整就当没有，走网络重下并覆盖掉这份坏缓存。
     if (cache != null) {
       var data = await cache.readAsBytes();
-      yield ImageDownloadProgress(
-        currentBytes: data.length,
-        totalBytes: data.length,
-        imageBytes: data,
-      );
+      if (isCompleteImageBytes(data)) {
+        yield ImageDownloadProgress(
+          currentBytes: data.length,
+          totalBytes: data.length,
+          imageBytes: data,
+        );
+      }
     }
 
     var configs = <String, dynamic>{};
@@ -73,6 +78,8 @@ abstract class ImageDownloader {
         );
       }
     }
+
+    _ensureCompleteBody(buffer.length, expectedBytes, requestUrl);
 
     if (configs['onResponse'] is JSInvokable) {
       final uint8List = Uint8List.fromList(buffer);
@@ -128,11 +135,14 @@ abstract class ImageDownloader {
 
     if (cache != null) {
       var data = await cache.readAsBytes();
-      yield ImageDownloadProgress(
-        currentBytes: data.length,
-        totalBytes: data.length,
-        imageBytes: data,
-      );
+      // 同上：半张图留在缓存里会让「断点续传」永远补不回来。
+      if (isCompleteImageBytes(data)) {
+        yield ImageDownloadProgress(
+          currentBytes: data.length,
+          totalBytes: data.length,
+          imageBytes: data,
+        );
+      }
     }
 
     Future<Map<String, dynamic>?> Function()? onLoadFailed;
@@ -183,6 +193,12 @@ abstract class ImageDownloader {
             totalBytes: expectedBytes,
           );
         }
+
+        _ensureCompleteBody(
+          buffer.length,
+          expectedBytes,
+          '${configs['url'] ?? imageKey}',
+        );
 
         if (configs['onResponse'] is JSInvokable) {
           dynamic result = (configs['onResponse'] as JSInvokable)([Uint8List.fromList(buffer)]);
@@ -321,4 +337,22 @@ class ImageDownloadProgress {
     required this.totalBytes,
     this.imageBytes,
   });
+}
+
+/// 拦截「响应流提前结束但没报错」的响应。
+///
+/// 断线、代理掐连接、服务端限速踢人时，dio 的流可能只是干净地结束，缓冲区
+/// 里留半张图。上层看到有 imageBytes 就当成功，把半张图写进磁盘和缓存，
+/// 之后就再也修不好了：封面一直是加载失败，而且任务记录已记成下过，恢复
+/// 下载时会整个跳过封面。
+///
+/// 只判「少」不判「多」：开了 gzip 的响应，contentLength 是压缩后的长度，
+/// 解压后的字节数会比它大，那不是截断。
+void _ensureCompleteBody(int received, int? expected, String url) {
+  if (expected == null || expected <= 0) {
+    return;
+  }
+  if (received < expected) {
+    throw "Error: Incomplete response ($received/$expected bytes) for $url";
+  }
 }

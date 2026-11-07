@@ -404,6 +404,26 @@ class _RandomPickDialogState extends State<RandomPickDialog>
             alignment: Alignment.center,
             clipBehavior: Clip.none,
             children: [
+              // 牌背后的常驻光晕：玻璃只有在**有东西可折射**时才看得出来。
+              // 翻牌光效（下面那层 CustomPaint）只在中途亮，静止时这里要是
+              // 空的，透明玻璃压在弹窗白底上就约等于没有。
+              Positioned.fill(
+                child: IgnorePointer(
+                  child: DecoratedBox(
+                    decoration: BoxDecoration(
+                      gradient: RadialGradient(
+                        colors: [
+                          colors.primary.withValues(alpha: 0.18),
+                          colors.tertiary.withValues(alpha: 0.06),
+                          Colors.transparent,
+                        ],
+                        stops: const [0, 0.55, 1],
+                        radius: 0.62,
+                      ),
+                    ),
+                  ),
+                ),
+              ),
               Positioned.fill(
                 child: IgnorePointer(
                   child: CustomPaint(
@@ -439,26 +459,67 @@ class _RandomPickDialogState extends State<RandomPickDialog>
 
   Widget _buildCardBack(BuildContext context) {
     final colors = context.colorScheme;
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    final radius = BorderRadius.circular(16);
     return Semantics(
       label: (_picked == null ? "Tap to draw" : "Comic card back").tl,
-      // 牌背换成液态玻璃：半透的卡片悬在弹窗上，后面的界面能透过
-      // 玻璃隐约弯折出来。翻转过程中玻璃随 Transform 一起转。
+      // 牌背是液态玻璃。这里有两个必须守住的点：
+      //
+      // 1. 档位只能到 standard。牌背包在 rotateY 的 Transform 里、还在弹窗
+      //    的对话框底板上，premium 那套 toImageSync 采样在这种情况下拿不到
+      //    背景，玻璃会整个消失——之前「抽一本没有玻璃效果」就是这个原因。
+      // 2. 底下必须**有东西可折射**。弹窗底板是纯 surface，透明白玻璃压上去
+      //    和白底上一块白色没有区别，所以卡片后面垫了一层彩色光晕（见
+      //    _buildAnimatedCard），玻璃边缘才有东西可以弯。
       child: LiquidGlassPanel(
-        borderRadius: BorderRadius.circular(16),
-        quality: lg.GlassQuality.premium,
+        borderRadius: radius,
+        quality: lg.GlassQuality.standard,
+        // 底色比默认实一档：牌背要有「一块牌」的体积感，
+        // 上面的图标和文字也得压得住背后的光晕。
+        tintAlpha: isDark ? 0.5 : 0.42,
         child: SizedBox(
           width: _cardWidth,
           height: _cardHeight,
           child: Stack(
             alignment: Alignment.center,
             children: [
+              // 斜向高光：白底上全靠这两道光把「玻璃」和「白纸」区分开。
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: radius,
+                    gradient: LinearGradient(
+                      begin: Alignment.topLeft,
+                      end: Alignment.bottomRight,
+                      colors: [
+                        Colors.white.withValues(alpha: isDark ? 0.16 : 0.62),
+                        Colors.white.withValues(alpha: 0.02),
+                        Colors.white.withValues(alpha: isDark ? 0.10 : 0.34),
+                      ],
+                      stops: const [0, 0.46, 1],
+                    ),
+                  ),
+                ),
+              ),
+              // 边缘描边：一圈比底色亮一线、比背景暗一线的细边，
+              // 是玻璃「有厚度」最省事也最有效的暗示。
+              Positioned.fill(
+                child: DecoratedBox(
+                  decoration: BoxDecoration(
+                    borderRadius: radius,
+                    border: Border.all(
+                      color: colors.onSurface.withValues(alpha: 0.14),
+                    ),
+                  ),
+                ),
+              ),
               Positioned(
                 top: 14,
                 left: 14,
                 child: Icon(
                   Icons.auto_awesome,
                   size: 18,
-                  color: colors.primary.withValues(alpha: 0.5),
+                  color: colors.primary.withValues(alpha: 0.6),
                 ),
               ),
               Positioned(
@@ -467,7 +528,7 @@ class _RandomPickDialogState extends State<RandomPickDialog>
                 child: Icon(
                   Icons.auto_awesome,
                   size: 18,
-                  color: colors.tertiary.withValues(alpha: 0.5),
+                  color: colors.tertiary.withValues(alpha: 0.6),
                 ),
               ),
               Container(
@@ -476,7 +537,7 @@ class _RandomPickDialogState extends State<RandomPickDialog>
                 decoration: BoxDecoration(
                   borderRadius: BorderRadius.circular(52),
                   border: Border.all(
-                    color: colors.onSurface.withValues(alpha: 0.25),
+                    color: colors.onSurface.withValues(alpha: 0.28),
                     width: 2,
                   ),
                 ),

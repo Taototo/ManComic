@@ -332,6 +332,15 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
 
     await LocalManager().saveCurrentDownloadingTasks();
 
+    // 上次中断可能把半张封面留在了磁盘上：记录里写着「封面已下载」，文件
+    // 却解不出来。这里先验一遍，不通过就当没下过——否则 `_cover != null`
+    // 会让封面下载被整个跳过，用户看到的永远是「封面加载失败」，重下也
+    // 修不回来（这正是「下载断开后封面消失、下完还是错」的根因）。
+    if (_cover != null && !await _coverFileIsUsable(_cover!)) {
+      _cover = null;
+      await LocalManager().saveCurrentDownloadingTasks();
+    }
+
     if (_cover == null) {
       _message = "Downloading cover...";
       notifyListeners();
@@ -343,12 +352,22 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             data = progress.imageBytes;
           }
         }
-        if (data == null) {
+        if (data == null || data.isEmpty) {
           throw "Failed to download cover";
         }
+        // 半张图不能落地：宁可重试，也不要留下一个永远打不开的封面文件。
+        if (!isCompleteImageBytes(data)) {
+          throw "Incomplete cover image";
+        }
         var fileType = detectFileType(data);
+        if (fileType.ext.isEmpty) {
+          // 认不出格式说明拿到的多半不是图片（错误页 HTML 之类），
+          // 存成没有扩展名的 cover 还会被当成正文页遍历到。
+          throw "Failed to detect cover file type";
+        }
         var file = File(FilePath.join(path!, "cover${fileType.ext}"));
         file.writeAsBytesSync(data);
+        _deleteStaleCovers(file.name);
         return "file://${file.path}";
       });
       if (res.error) {
@@ -467,6 +486,44 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _message = message;
     notifyListeners();
     stopRecorder();
+  }
+
+  /// 记录里的封面还能不能用。
+  ///
+  /// 只认「文件在 + 是一张完整的图」。中断时写了一半的文件、0 字节文件
+  /// 都会在这里被否掉，交给下面重新下载。
+  Future<bool> _coverFileIsUsable(String url) async {
+    try {
+      if (!url.startsWith("file://")) {
+        return false;
+      }
+      var file = File(url.substring(7));
+      if (!file.existsSync()) {
+        return false;
+      }
+      var bytes = await file.readAsBytes();
+      return isCompleteImageBytes(bytes);
+    } catch (_) {
+      return false;
+    }
+  }
+
+  /// 换扩展名重下封面时，把旧的 `cover.*` 清掉。
+  ///
+  /// 不清也不影响显示（本地记录里存的是新文件名），但目录里会堆出
+  /// cover.jpg / cover.webp 两份互不相同的东西，导出和排查都很迷惑。
+  void _deleteStaleCovers(String keepName) {
+    try {
+      for (var entity in Directory(path!).listSync()) {
+        if (entity is File &&
+            entity.name.startsWith('cover') &&
+            entity.name != keepName) {
+          entity.deleteIgnoreError();
+        }
+      }
+    } catch (e) {
+      Log.error("Download", "Failed to clean stale covers: $e");
+    }
   }
 
   @override
@@ -646,6 +703,11 @@ class _ImageDownloadWrapper {
         task.onData(p.currentBytes - lastBytes);
         lastBytes = p.currentBytes;
         if (p.imageBytes != null) {
+          // 半张图不落地：断线时流可能干净地结束，字节数不够就是截断，
+          // 丢给 catch 走重试，别让一张坏图占住这个页码。
+          if (!isCompleteImageBytes(p.imageBytes!)) {
+            throw "Incomplete image data for page $index";
+          }
           var fileType = detectFileType(p.imageBytes!);
           var file = saveTo.joinFile("$index${fileType.ext}");
           await file.writeAsBytes(p.imageBytes!);

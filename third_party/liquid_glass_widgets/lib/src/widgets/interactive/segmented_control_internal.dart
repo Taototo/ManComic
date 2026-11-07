@@ -58,6 +58,7 @@ class SegmentedControlContent extends StatefulWidget {
     this.interactionBehavior = GlassInteractionBehavior.full,
     this.glowColor,
     this.glowRadius = 1.5,
+    this.springDescription,
     super.key,
   });
 
@@ -84,6 +85,10 @@ class SegmentedControlContent extends StatefulWidget {
   final GlassInteractionBehavior interactionBehavior;
   final Color? glowColor;
   final double glowRadius;
+
+  /// Overrides the pill's settle spring (default `snappy(350ms)`).
+  /// Local patch — see PATCHES.md.
+  final SpringDescription? springDescription;
 
   @override
   State<SegmentedControlContent> createState() =>
@@ -335,9 +340,10 @@ class SegmentedControlContentState extends State<SegmentedControlContent> {
         child: VelocitySpringBuilder(
           value: _mainAlign,
           springWhenActive: GlassSpring.interactive(),
-          springWhenReleased: GlassSpring.snappy(
-            duration: const Duration(milliseconds: 350),
-          ),
+          springWhenReleased: widget.springDescription ??
+              GlassSpring.snappy(
+                duration: const Duration(milliseconds: 350),
+              ),
           active: _isDragging,
           builder: (context, value, velocity, child) {
             final alignment = widget.direction == Axis.horizontal

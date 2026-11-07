@@ -214,6 +214,7 @@ class GlassSegmentedControl extends StatefulWidget {
     this.interactionBehavior = GlassInteractionBehavior.full,
     this.glowColor,
     this.glowRadius = 1.5,
+    this.springDescription,
     // Scrollable-mode fields — unused in fixed mode.
     this.isScrollable = false,
     this.iconSize = 24.0,
@@ -289,6 +290,7 @@ class GlassSegmentedControl extends StatefulWidget {
     this.maskingQuality = MaskingQuality.high,
     this.dividerSettings,
     this.indicatorShadow,
+    this.springDescription,
   })  : isScrollable = true,
         direction = Axis.horizontal,
         segmentExtent = null,
@@ -347,6 +349,12 @@ class GlassSegmentedControl extends StatefulWidget {
   ///
   /// Defaults to [height], producing square segments.
   final double? segmentExtent;
+
+  /// Overrides the pill's settle spring, so an in-app segmented control can
+  /// match the motion of the rest of the app instead of the 350 ms default.
+  ///
+  /// Local patch — see PATCHES.md.
+  final SpringDescription? springDescription;
 
   // ===========================================================================
   // Layout Properties
@@ -702,6 +710,7 @@ class _GlassSegmentedControlState extends State<GlassSegmentedControl> {
             indicatorExpansion: widget.indicatorExpansion,
             borderRadius: widget.borderRadius,
             indicatorBorderRadius: widget.indicatorBorderRadius,
+            springDescription: widget.springDescription,
             quality: effectiveQuality,
             backgroundKey: widget.backgroundKey,
             interactionBehavior: widget.interactionBehavior,

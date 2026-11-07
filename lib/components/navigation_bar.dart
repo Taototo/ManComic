@@ -49,6 +49,7 @@ class NaviPane extends StatefulWidget {
     required this.paneItems,
     required this.paneActions,
     required this.pageBuilder,
+    this.titleBuilder,
     this.initialPage = 0,
     this.onPageChanged,
     required this.observer,
@@ -61,6 +62,13 @@ class NaviPane extends StatefulWidget {
   final List<PaneActionEntry> paneActions;
 
   final Widget Function(int page) pageBuilder;
+
+  /// 替换标题位的内容，返回 null 时回落到 [paneItems] 里的文字标题。
+  ///
+  /// 推荐页要把「推荐 / 分类」分段控件放在标题的位置。分段控件的状态住在
+  /// 页面里，顶栏和页面又是两棵子树，所以只能由上层把「造控件」这件事
+  /// 交给顶栏，而不是反过来让页面往顶栏里塞 widget。
+  final Widget? Function(int index, BuildContext context)? titleBuilder;
 
   final void Function(int index)? onPageChanged;
 
@@ -118,6 +126,13 @@ class NaviPaneState extends State<NaviPane>
 
   double get bottomBarHeight =>
       _kBottomBarHeight + _kBottomBarMargin + MediaQuery.of(context).padding.bottom;
+
+  /// 当前是否显示顶栏。
+  ///
+  /// 宽屏（侧栏模式）没有顶栏，页面拿到的 [MediaQuery.padding.top] 就是真实
+  /// 状态栏高度，页面自己那一行标题/控件得自己画。推荐页的分段控件就靠这个
+  /// 决定是长在顶栏里，还是退回页面顶部。
+  bool get hasTopBar => controller.value < 2;
 
   void onNavigatorStateChange() {
     onRebuild(context);
@@ -330,13 +345,16 @@ class NaviPaneState extends State<NaviPane>
                 ),
               );
             },
-            child: Text(
-              widget.paneItems[currentPage].label,
+            child: KeyedSubtree(
               key: ValueKey(currentPage),
-              style: const TextStyle(
-                fontSize: 18,
-                fontWeight: FontWeight.bold,
-              ),
+              child: widget.titleBuilder?.call(currentPage, context) ??
+                  Text(
+                    widget.paneItems[currentPage].label,
+                    style: const TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
             ),
           ),
           const Spacer(),

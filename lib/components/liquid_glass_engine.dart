@@ -98,6 +98,7 @@ class LiquidGlassPanel extends StatelessWidget {
     this.saturation = 1.4,
     this.shadow = true,
     this.quality,
+    this.tintAlpha,
   });
 
   final Widget child;
@@ -120,6 +121,19 @@ class LiquidGlassPanel extends StatelessWidget {
   /// 覆盖全局档位。顶栏和底栏都是固定表面，可以单独调高。
   final lg.GlassQuality? quality;
 
+  /// 直接指定底色 alpha，盖掉默认的「opacity×0.35」折算。
+  ///
+  /// 浮在**内容之上**且有长文字的表面（收藏分类抽屉就是典型）必须调高：
+  /// 默认那一档是给卡片、按钮这类「玻璃本身才是主体」的地方配的，压在
+  /// 一屏漫画封面上时字会直接糊掉。
+  final double? tintAlpha;
+
+  /// 抽屉一类需要「看得清」的玻璃用的底色强度。
+  ///
+  /// 0.35 的折算在浅色下约等于 0.15，压在白底上几乎看不出有底板；
+  /// 0.8 才等于给了文字一块稳的底，后面的封面仍然透得出来。
+  static const double readableTintAlpha = 0.8;
+
   @override
   Widget build(BuildContext context) {
     // 回退分支：和引入新引擎之前的渲染完全一致。
@@ -127,7 +141,9 @@ class LiquidGlassPanel extends StatelessWidget {
       return LiquidGlass(
         borderRadius: borderRadius,
         blur: blur,
-        opacity: opacity,
+        // 自研实现的 opacity 就是底色强度，把「可读档」折算过去，
+        // 否则关掉液态玻璃后抽屉又变回看不清。
+        opacity: opacity ?? tintAlpha,
         tint: tint,
         saturation: saturation,
         shadow: shadow,
@@ -149,6 +165,7 @@ class LiquidGlassPanel extends StatelessWidget {
         tint: tint,
         saturation: saturation,
         shadow: shadow,
+        tintAlpha: tintAlpha,
       ),
       child: child,
     );

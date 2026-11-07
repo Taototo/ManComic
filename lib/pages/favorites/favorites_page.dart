@@ -176,20 +176,27 @@ class _FavoritesPageState extends State<FavoritesPage> {
       barrierColor: Colors.black.toOpacity(0.36),
       pageBuilder: (context, animation, secondary) {
         // 液态开启时抽屉换成磨砂玻璃面板：底下的收藏页透出来，
-        // 关闭时还能隐约看到刚才的位置。列表文字颜色不变，
-        // 玻璃底色（surface 调过 alpha）保证可读。
+        // 关闭时还能隐约看到刚才的位置。
+        //
+        // 底色必须给足（readableTintAlpha）：抽屉里全是长文字，而收藏页
+        // 背后是一屏彩色封面，底色一淡文字就跟着背景一起花。档位用
+        // standard——抽屉是滑入动画，standard 走实时 BackdropFilter，
+        // 每一帧都在重新模糊下面的内容；premium 会把背景采样成一张静态
+        // 纹理，滑的那两三百毫秒里看起来像贴在屏幕上一块浆糊。
         final surface = LiquidGlassEngine.enabled
             ? LiquidGlassPanel(
                 borderRadius: const BorderRadius.horizontal(
                   right: Radius.circular(18),
                 ),
-                quality: lg.GlassQuality.premium,
+                quality: lg.GlassQuality.standard,
+                tintAlpha: LiquidGlassPanel.readableTintAlpha,
                 child: Material(
                   type: MaterialType.transparency,
                   child: SizedBox(
                     width: min(300, context.width - 16),
                     child: _LeftBar(
                       withAppbar: true,
+                      onGlassBackground: true,
                       favPage: this,
                       onSelected: () {
                         context.pop();

@@ -1,5 +1,4 @@
 import 'package:flutter/material.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
@@ -12,9 +11,46 @@ import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 
+/// 「推荐 / 分类」分组的共享状态。
+///
+/// 这个切换控件现在长在顶栏的标题位上，而顶栏和页面是两棵互不相干的子树，
+/// 分组状态必须提到它们共同的上层（[MainPage]）才不会被拆成两份。
+///
+/// 只做成一个 int + 监听，是因为页面真正需要的只有「现在是哪一组」：
+/// 滚动控制器、页签控制器都还留在页面里。
+class ExploreGroupController extends ChangeNotifier {
+  ExploreGroupController({int group = 0}) : _group = group;
+
+  int _group;
+
+  int get group => _group;
+
+  /// 再次点击当前页签时的回调（滚回顶部），由页面注入。
+  ///
+  /// 放在这里而不是让顶栏去翻页面的 GlobalState，是因为「回到顶部」对分类
+  /// 和推荐两组各有一套逻辑，只有页面自己知道当前该滚哪个控制器。
+  VoidCallback? onReselect;
+
+  /// 点页签：切换分组，或（点到当前页签时）回到顶部。
+  void select(int value) {
+    if (value == _group) {
+      onReselect?.call();
+      return;
+    }
+    _group = value;
+    notifyListeners();
+  }
+}
+
 /// 发现页。分类页也并入这里，通过顶部的分段控件在「发现 / 分类」之间切换。
 class ExplorePage extends StatefulWidget {
-  const ExplorePage({super.key});
+  const ExplorePage({
+    super.key,
+    this.group,
+  });
+
+  /// 分组状态。为 null 时页面自己在内部维护一份（供测试或独立使用）。
+  final ExploreGroupController? group;
 
   @override
   State<ExplorePage> createState() => _ExplorePageState();
@@ -36,6 +72,17 @@ class _ExplorePageState extends State<ExplorePage>
 
   /// 0 = 发现页，1 = 分类页
   int group = 0;
+
+  /// 分组状态的上游（顶栏里的分段控件改的是它），页面只做镜像。
+  void onGroupChanged() {
+    if (!mounted) return;
+    final value = widget.group?.group ?? group;
+    if (value == group) return;
+    setState(() {
+      group = value;
+      showFB = true;
+    });
+  }
 
   void onSettingsChanged() {
     var explorePages = List<String>.from(appdata.settings["explore_pages"]);
@@ -120,6 +167,9 @@ class _ExplorePageState extends State<ExplorePage>
   @override
   void initState() {
     super.initState();
+    group = widget.group?.group ?? 0;
+    widget.group?.addListener(onGroupChanged);
+    widget.group?.onReselect = _toTopCurrentGroup;
     pages = List<String>.from(appdata.settings["explore_pages"]);
     var all = ComicSource.all()
         .map((e) => e.explorePages)
@@ -145,6 +195,11 @@ class _ExplorePageState extends State<ExplorePage>
     categoryController.dispose();
     for (var c in _categoryControllers.values) {
       c.dispose();
+    }
+    widget.group?.removeListener(onGroupChanged);
+    // 只有自己还是当前注入的回调时才清，避免把后来者的覆盖掉。
+    if (widget.group?.onReselect == _toTopCurrentGroup) {
+      widget.group?.onReselect = null;
     }
     appdata.settings.removeListener(onSettingsChanged);
     naviPane?.removeNaviItemTapListener(onNaviItemTapped);
@@ -184,29 +239,6 @@ class _ExplorePageState extends State<ExplorePage>
           controller: _categoryController(key),
         ),
       );
-
-  Widget buildSegment() {
-    return Padding(
-      padding: const EdgeInsets.fromLTRB(12, 6, 12, 4),
-      child: Center(
-        child: _GroupSwitcher(
-          index: group,
-          labels: const ["Explore", "Categories"],
-          onChanged: (i) {
-            if (i == group) {
-              // 再次点击当前页签：滚回顶部
-              _toTopCurrentGroup();
-              return;
-            }
-            setState(() {
-              group = i;
-              showFB = true;
-            });
-          },
-        ),
-      ),
-    );
-  }
 
   Widget buildExploreTabBar() {
     return Material(
@@ -370,6 +402,40 @@ class _ExplorePageState extends State<ExplorePage>
     }
   }
 
+  /// 切换分组。控制器在场时交给它（顶栏的分段控件和这里共用一份状态），
+  /// 不在场（单独使用本页）时退回内部状态。
+  void selectGroup(int value) {
+    final controller = widget.group;
+    if (controller != null) {
+      controller.select(value);
+      return;
+    }
+    if (value == group) {
+      _toTopCurrentGroup();
+      return;
+    }
+    setState(() {
+      group = value;
+      showFB = true;
+    });
+  }
+
+  /// 宽屏（侧栏模式）没有顶栏，分段控件得自己画在页面顶部。
+  bool get _needsInlineSwitcher => naviPane == null || !naviPane!.hasTopBar;
+
+  Widget buildInlineSwitcher() {
+    return Padding(
+      padding: EdgeInsets.fromLTRB(12, 6 + context.padding.top, 12, 4),
+      child: Center(
+        child: GlassGroupSwitcher(
+          index: group,
+          labels: const ["Explore", "Categories"],
+          onChanged: selectGroup,
+        ),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     super.build(context);
@@ -378,18 +444,27 @@ class _ExplorePageState extends State<ExplorePage>
     }
 
     var hasContent = group == 0 ? pages.isNotEmpty : categories.isNotEmpty;
+    final inlineSwitcher = _needsInlineSwitcher;
 
     return Stack(
       children: [
         Positioned.fill(
           child: Column(
             children: [
-              buildSegment().paddingTop(context.padding.top),
-              AnimatedSwitcher(
-                duration: const Duration(milliseconds: 180),
-                switchInCurve: Curves.easeOut,
-                switchOutCurve: Curves.easeIn,
-                child: buildTabBar(),
+              // 有顶栏时「推荐 / 分类」长在顶栏标题位上，这一行只剩页签栏；
+              // 顶栏高度仍然由 padding.top 补给我们，所以页签栏自己吃掉它，
+              // 否则整块内容会往上钻到玻璃顶栏底下。
+              if (inlineSwitcher) buildInlineSwitcher(),
+              Padding(
+                padding: EdgeInsets.only(
+                  top: inlineSwitcher ? 0 : context.padding.top,
+                ),
+                child: AnimatedSwitcher(
+                  duration: const Duration(milliseconds: 180),
+                  switchInCurve: Curves.easeOut,
+                  switchOutCurve: Curves.easeIn,
+                  child: buildTabBar(),
+                ),
               ),
               Expanded(
                 child: hasContent ? buildContent() : buildEmpty(),
@@ -422,132 +497,6 @@ class _ExplorePageState extends State<ExplorePage>
 
   @override
   bool get wantKeepAlive => true;
-}
-
-/// 「发现 / 分类」分段切换控件。
-class _GroupSwitcher extends StatelessWidget {
-  const _GroupSwitcher({
-    required this.index,
-    required this.labels,
-    required this.onChanged,
-  });
-
-  final int index;
-
-  final List<String> labels;
-
-  final void Function(int) onChanged;
-
-  static const _itemWidth = 76.0;
-
-  static const _height = 30.0;
-
-  static const _padding = 3.0;
-
-  @override
-  Widget build(BuildContext context) {
-    final cs = context.colorScheme;
-    final itemHeight = _height - _padding * 2;
-    // 液态开启时用包的 inline 分段：玻璃轨道 + 会折射文字的果冻滑块，
-    // 和底栏同一套动效语言。回退分支保持原有的实色药丸。
-    if (LiquidGlassEngine.enabled) {
-      return lg.GlassTabBar.inline(
-        tabs: [
-          for (final label in labels) lg.GlassTab(label: label.tl),
-        ],
-        selectedIndex: index,
-        onTabSelected: onChanged,
-        barHeight: _height,
-        tabWidth: _itemWidth,
-        quality: lg.GlassQuality.premium,
-        settings: LiquidGlassEngine.settings(context),
-        springDescription: LiquidGlassEngine.indicatorSpring,
-        selectedLabelColor: cs.primary,
-        unselectedLabelColor: cs.onSurface.toOpacity(0.6),
-        selectedLabelStyle: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w600,
-        ),
-        unselectedLabelStyle: const TextStyle(
-          fontSize: 13,
-          fontWeight: FontWeight.w500,
-        ),
-        indicatorExpansion: const EdgeInsets.symmetric(
-          horizontal: 4,
-          vertical: 2,
-        ),
-      );
-    }
-    return Container(
-      height: _height,
-      padding: const EdgeInsets.all(_padding),
-      decoration: BoxDecoration(
-        color: cs.onSurface.toOpacity(0.06),
-        borderRadius: BorderRadius.circular(_height / 2),
-      ),
-      child: Stack(
-        children: [
-          Positioned.fill(
-            child: AnimatedAlign(
-              duration: const Duration(milliseconds: 260),
-              curve: Curves.easeOutCubic,
-              alignment:
-                  index == 0 ? Alignment.centerLeft : Alignment.centerRight,
-              child: Container(
-                width: _itemWidth,
-                height: itemHeight,
-                decoration: BoxDecoration(
-                  color: cs.surface,
-                  borderRadius: BorderRadius.circular(itemHeight / 2),
-                  border: Border.all(
-                    color: cs.outlineVariant.toOpacity(0.6),
-                    width: 0.6,
-                  ),
-                  boxShadow: [
-                    BoxShadow(
-                      color: Colors.black.toOpacity(0.08),
-                      blurRadius: 6,
-                      offset: const Offset(0, 2),
-                    ),
-                  ],
-                ),
-              ),
-            ),
-          ),
-          Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              for (var i = 0; i < labels.length; i++)
-                GestureDetector(
-                  behavior: HitTestBehavior.opaque,
-                  onTap: () => onChanged(i),
-                  child: SizedBox(
-                    width: _itemWidth,
-                    height: itemHeight,
-                    child: Center(
-                      child: AnimatedDefaultTextStyle(
-                        duration: const Duration(milliseconds: 220),
-                        curve: Curves.easeOut,
-                        style: TextStyle(
-                          fontSize: 13,
-                          fontWeight: i == index
-                              ? FontWeight.w600
-                              : FontWeight.w500,
-                          color: i == index
-                              ? cs.onSurface
-                              : cs.onSurface.toOpacity(0.6),
-                        ),
-                        child: Text(labels[i].tl),
-                      ),
-                    ),
-                  ),
-                ),
-            ],
-          ),
-        ],
-      ),
-    );
-  }
 }
 
 class _SingleExplorePage extends StatefulWidget {

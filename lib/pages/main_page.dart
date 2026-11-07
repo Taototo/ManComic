@@ -77,18 +77,30 @@ class _MainPageState extends State<MainPage> {
     _navigatorKey = GlobalKey();
     App.mainNavigatorKey = _navigatorKey;
     index = resolveInitialPage();
+    _pages = [
+      ExplorePage(
+        key: const PageStorageKey('explore'),
+        group: _exploreGroup,
+      ),
+      const HomePage(),
+      const FavoritesPage(
+        key: PageStorageKey('favorites'),
+      ),
+    ];
     super.initState();
   }
 
-  final _pages = [
-    const ExplorePage(
-      key: PageStorageKey('explore'),
-    ),
-    const HomePage(),
-    const FavoritesPage(
-      key: PageStorageKey('favorites'),
-    ),
-  ];
+  /// 「推荐 / 分类」分组。切换控件在顶栏标题位上，状态放在这里，
+  /// 顶栏和推荐页都能看到同一份。
+  final _exploreGroup = ExploreGroupController();
+
+  late final List<Widget> _pages;
+
+  @override
+  void dispose() {
+    _exploreGroup.dispose();
+    super.dispose();
+  }
 
   var index = 0;
 
@@ -98,6 +110,23 @@ class _MainPageState extends State<MainPage> {
       initialPage: index,
       observer: _observer,
       navigatorKey: _navigatorKey!,
+      // 推荐页不再显示「推荐」标题：那个位置让给分段控件，省一行高度，
+      // 也顺手把「标题 + 分段」两组字挤在一起的视觉噪声去掉。
+      titleBuilder: (page, context) {
+        if (page != _tabExplore) {
+          return null;
+        }
+        return AnimatedBuilder(
+          animation: _exploreGroup,
+          builder: (context, _) {
+            return GlassGroupSwitcher(
+              index: _exploreGroup.group,
+              labels: const ["Explore", "Categories"],
+              onChanged: _exploreGroup.select,
+            );
+          },
+        );
+      },
       paneItems: [
         PaneItemEntry(
           label: 'Explore'.tl,
