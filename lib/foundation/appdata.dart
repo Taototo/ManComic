@@ -213,6 +213,10 @@ class Settings with ChangeNotifier {
     'checkUpdateOnStart': false,
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
+    // 漫画备份专用的 WebDAV 配置，和数据备份那套分开。
+    // 数据备份（坚果云之类）只放几 MB 的收藏与历史；漫画动辄几百 MB，
+    // 走同一个目录会把免费额度和月流量瞬间吃光，所以必须各用各的。
+    'comicWebdav': [],
     "disableSyncFields": "", // "field1, field2, ..."
     'dataVersion': 0,
     'quickFavorite': null,

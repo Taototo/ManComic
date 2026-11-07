@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/cloud_library.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -437,6 +438,28 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
 
   List<MenuEntry> exportActions(List<LocalComic> comics) {
     return [
+      // 备份放在导出之后：导出是「拿走给别人」，备份是「留在自己网盘」，
+      // 两者都作用于选中的漫画，但目的不同，不该混进同一个子菜单。
+      MenuEntry(
+        icon: Icons.cloud_upload_outlined,
+        text: "Back up to cloud".tl,
+        onClick: () {
+          final library = CloudLibrary();
+          if (!library.isConfigured) {
+            context.showMessage(
+              message: "Comic Cloud is not configured yet".tl,
+            );
+            return;
+          }
+          for (final comic in comics) {
+            library.enqueue(comic);
+          }
+          context.showMessage(
+            message: "@n added to the upload queue"
+                .tlParams({"n": comics.length}),
+          );
+        },
+      ),
       MenuEntry(
         icon: Icons.outbox_outlined,
         text: "Export as cbz".tl,

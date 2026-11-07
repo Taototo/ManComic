@@ -212,6 +212,27 @@ class _DataSettingsState extends State<DataSettings> {
           },
           actionTitle: 'Set'.tl,
         ).toSliver(),
+        // 和数据同步并列、但配置完全独立：上面那个放收藏与历史（几 MB），
+        // 这个放漫画本体（几百 MB），额度与流量都不该混在一起。
+        _CallbackSetting(
+          title: "Comic Cloud".tl,
+          subtitle:
+              "Mirror downloaded comics to a WebDAV folder and read them from"
+                  " there when a source is unavailable"
+                  .tl,
+          callback: () async {
+            showPopUpWidget(context, const _ComicWebdavSetting());
+          },
+          actionTitle: 'Set'.tl,
+        ).toSliver(),
+        _CallbackSetting(
+          title: "Upload Queue".tl,
+          subtitle: "Progress, failures and retries".tl,
+          callback: () async {
+            showPopUpWidget(context, const _CloudUploadPage());
+          },
+          actionTitle: 'Open'.tl,
+        ).toSliver(),
         _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
         _SliderSetting(
           title: "Download Threads".tl,
@@ -693,6 +714,278 @@ class _WebdavSettingState extends State<_WebdavSetting> {
             ),
           ],
         ).paddingHorizontal(16),
+      ),
+    );
+  }
+}
+
+/// 漫画网盘的连接配置。
+///
+/// 和数据同步那套 WebDAV 长得几乎一样，但刻意做成两个入口、两个配置项：
+/// 用户很容易在同一个网盘里同时放收藏和漫画，几百 MB 一进去，免费额度
+/// 或月流量立刻见底，然后「数据备份失败」和「漫画传不上去」会一起报，
+/// 排查起来非常费劲。分开以后两边互不影响。
+class _ComicWebdavSetting extends StatefulWidget {
+  const _ComicWebdavSetting();
+
+  @override
+  State<_ComicWebdavSetting> createState() => _ComicWebdavSettingState();
+}
+
+class _ComicWebdavSettingState extends State<_ComicWebdavSetting> {
+  late final TextEditingController _url;
+  late final TextEditingController _user;
+  late final TextEditingController _pass;
+
+  bool _testing = false;
+
+  @override
+  void initState() {
+    super.initState();
+    final config = CloudLibrary().config ?? const ["", "", ""];
+    _url = TextEditingController(text: config[0]);
+    _user = TextEditingController(text: config[1]);
+    _pass = TextEditingController(text: config[2]);
+  }
+
+  @override
+  void dispose() {
+    _url.dispose();
+    _user.dispose();
+    _pass.dispose();
+    super.dispose();
+  }
+
+  Future<void> _save() async {
+    final url = _url.text.trim();
+    final user = _user.text.trim();
+    final pass = _pass.text;
+    if (url.isEmpty && user.isEmpty && pass.isEmpty) {
+      appdata.settings['comicWebdav'] = [];
+      appdata.saveData();
+      context.showMessage(message: "Saved".tl);
+      App.rootPop();
+      return;
+    }
+    if (url.isEmpty) {
+      context.showMessage(message: "Folder URL is required".tl);
+      return;
+    }
+    setState(() {
+      _testing = true;
+    });
+    // 必须真的连一次再保存：地址写错、账号错、目录没写权限，这三种情况
+    // 光看输入框都看不出来，等到上传时才发现就太晚了。
+    final error = await CloudLibrary().testConnection([url, user, pass]);
+    if (!mounted) {
+      return;
+    }
+    setState(() {
+      _testing = false;
+    });
+    if (error != null) {
+      context.showMessage(message: error);
+      return;
+    }
+    appdata.settings['comicWebdav'] = [url, user, pass];
+    appdata.saveData();
+    context.showMessage(message: "Saved".tl);
+    App.rootPop();
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return PopUpWidgetScaffold(
+      title: "Comic Cloud".tl,
+      body: SingleChildScrollView(
+        padding: const EdgeInsets.symmetric(horizontal: 16),
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            const SizedBox(height: 12),
+            Text(
+              "Downloaded comics are mirrored into this folder file by file,"
+                      " so they can be read straight from the cloud when a"
+                      " source is down."
+                  .tl,
+              style: ts.s12,
+            ),
+            const SizedBox(height: 8),
+            Text(
+              "Use a folder of its own. Comic files are large, so do not share"
+                      " it with the data sync above."
+                  .tl,
+              style: ts.s12,
+            ),
+            const SizedBox(height: 16),
+            TextField(
+              controller: _url,
+              decoration: InputDecoration(
+                labelText: "Folder URL".tl,
+                hintText: "https://example.com/dav/comics/".tl,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _user,
+              decoration: InputDecoration(
+                labelText: "Username".tl,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 12),
+            TextField(
+              controller: _pass,
+              obscureText: true,
+              decoration: InputDecoration(
+                labelText: "Password".tl,
+                border: const OutlineInputBorder(),
+              ),
+            ),
+            const SizedBox(height: 20),
+            Center(
+              child: Button.filled(
+                isLoading: _testing,
+                onPressed: () {
+                  if (!_testing) {
+                    _save();
+                  }
+                },
+                child: Text("Test and Save".tl),
+              ),
+            ),
+            const SizedBox(height: 24),
+          ],
+        ),
+      ),
+    );
+  }
+}
+
+/// 上传队列：进度、失败原因、重试。
+class _CloudUploadPage extends StatelessWidget {
+  const _CloudUploadPage();
+
+  @override
+  Widget build(BuildContext context) {
+    return PopUpWidgetScaffold(
+      title: "Upload Queue".tl,
+      body: AnimatedBuilder(
+        animation: CloudLibrary(),
+        builder: (context, _) {
+          final library = CloudLibrary();
+          final tasks = library.tasks;
+          if (tasks.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(32),
+                child: Text(
+                  "Nothing queued yet. Back up a comic from the local library."
+                      .tl,
+                  textAlign: TextAlign.center,
+                  style: ts.s12,
+                ),
+              ),
+            );
+          }
+          final failed = library.failedCount;
+          return Column(
+            children: [
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 6),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Text(
+                        library.isRunning
+                            ? "Uploading...".tl
+                            : (failed > 0
+                                ? "@n failed".tlParams({"n": failed})
+                                : "Idle".tl),
+                        style: ts.s12,
+                      ),
+                    ),
+                    if (failed > 0)
+                      TextButton(
+                        onPressed: library.retryFailed,
+                        child: Text("Retry".tl),
+                      ),
+                  ],
+                ),
+              ),
+              Expanded(
+                child: ListView.builder(
+                  itemCount: tasks.length,
+                  itemBuilder: (context, index) {
+                    final task = tasks[index];
+                    return _CloudTaskTile(
+                      task: task,
+                      onRemove: () => library.removeTask(task),
+                    );
+                  },
+                ),
+              ),
+            ],
+          );
+        },
+      ),
+    );
+  }
+}
+
+class _CloudTaskTile extends StatelessWidget {
+  const _CloudTaskTile({required this.task, required this.onRemove});
+
+  final CloudUploadTask task;
+
+  final VoidCallback onRemove;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    final failed = task.status == CloudUploadStatus.failed;
+    return ListTile(
+      contentPadding: const EdgeInsets.symmetric(horizontal: 16),
+      title: Text(
+        task.title,
+        maxLines: 1,
+        overflow: TextOverflow.ellipsis,
+      ),
+      subtitle: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          const SizedBox(height: 4),
+          if (task.status == CloudUploadStatus.uploading)
+            ClipRRect(
+              borderRadius: BorderRadius.circular(2),
+              child: LinearProgressIndicator(
+                value: task.progress,
+                minHeight: 3,
+              ),
+            ),
+          const SizedBox(height: 4),
+          Text(
+            switch (task.status) {
+              CloudUploadStatus.pending => "Waiting".tl,
+              CloudUploadStatus.uploading =>
+                "${task.uploaded} / ${task.total}",
+              CloudUploadStatus.done => "Backed up".tl,
+              CloudUploadStatus.failed => task.error ?? "Failed".tl,
+            },
+            maxLines: 2,
+            overflow: TextOverflow.ellipsis,
+            style: ts.s10.withColor(
+              failed ? colors.error : colors.onSurfaceVariant,
+            ),
+          ),
+        ],
+      ),
+      trailing: IconButton(
+        tooltip: "Remove".tl,
+        icon: const Icon(Icons.close_rounded, size: 18),
+        onPressed: onRemove,
       ),
     );
   }

@@ -10,6 +10,8 @@ import 'package:venera/components/components.dart';
 import 'package:venera/components/rich_comment_content.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/cloud_library.dart';
+import 'package:venera/foundation/cloud_source.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_details_cache.dart';
 import 'package:venera/foundation/comic_type.dart';
@@ -177,7 +179,50 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   @override
   void initState() {
     scrollController.addListener(onScroll);
+    _loadCloudBackup();
     super.initState();
+  }
+
+  /// 网盘上的目录名。非空表示这本既下载过、也备份过，可以直接从网盘线路读。
+  String? _cloudDirectory;
+
+  void _loadCloudBackup() {
+    // 已经是从网盘线路打开的页面，没有「切到网盘」这回事。
+    if (widget.sourceKey == CloudSource.key) {
+      return;
+    }
+    try {
+      final local = LocalManager().find(
+        widget.id,
+        ComicType.fromKey(widget.sourceKey),
+      );
+      if (local == null) {
+        return;
+      }
+      if (!CloudLibrary().isBackedUp(widget.id, widget.sourceKey)) {
+        return;
+      }
+      _cloudDirectory = local.directory;
+    } catch (_) {
+      // 本地库还没初始化（冷启动早期）时查不到，下次进页面再说。
+    }
+  }
+
+  void _openFromCloud() {
+    final directory = _cloudDirectory;
+    if (directory == null) {
+      return;
+    }
+    context.to(
+      () => ComicPage(
+        id: directory,
+        sourceKey: CloudSource.key,
+        title: comic.title,
+        cover: comic.cover,
+        autoFallback: false,
+        alignEp: history?.ep,
+      ),
+    );
   }
 
   @override
@@ -389,6 +434,39 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
       return;
     }
     _fallbackHandled = true;
+
+    // 网盘备份优先于别的在线源。
+    // 网盘上的章节表是从本地镜像上去的，和本地一一对应，切过来不用重新
+    // 对齐章节；而换一个在线源，章节编号与排序都可能不一样，跳过去经常
+    // 落在错误的一话。这里只在「确实下过、也确实传上去了」时才走。
+    final local = LocalManager().find(
+      widget.id,
+      ComicType.fromKey(widget.sourceKey),
+    );
+    if (local != null &&
+        CloudLibrary().isBackedUp(widget.id, widget.sourceKey)) {
+      final ep = history?.ep;
+      Future.microtask(() {
+        if (!mounted) {
+          return;
+        }
+        context.toReplacement(
+          () => ComicPage(
+            id: local.directory,
+            sourceKey: CloudSource.key,
+            title: local.title,
+            cover: local.cover,
+            autoFallback: false,
+            alignEp: ep,
+          ),
+        );
+        App.rootContext.showMessage(
+          message: "Source unavailable, switched to the cloud backup".tl,
+        );
+      });
+      return;
+    }
+
     final list = SourceBindingManager.alternatives(widget.sourceKey, widget.id);
     if (list.isEmpty) {
       return;
@@ -483,6 +561,14 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
         child: Text(comic.title),
       ),
       actions: [
+        // 手动切到网盘线路。自动回退只在「真的加载失败」时触发，可网络差
+        // 常常只是慢、并不报错，用户需要能自己切过去。
+        if (_cloudDirectory != null)
+          IconButton(
+            tooltip: "Open from the cloud backup".tl,
+            icon: const Icon(Icons.cloud_outlined),
+            onPressed: _openFromCloud,
+          ),
         IconButton(
           onPressed: showMoreActions,
           icon: const Icon(Icons.more_horiz),
