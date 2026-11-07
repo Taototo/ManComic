@@ -401,16 +401,19 @@ class NaviPaneState extends State<NaviPane>
           // 外层 Padding 已负责与屏幕边缘的距离，内部别再留一圈。
           horizontalPadding: 0,
           verticalPadding: 0,
-          // standard，不是 premium。
+          // premium：底栏的「液态」感全在这一档上。
           //
-          // 切页的那一帧，底栏的玻璃要把「刚换上去、还没画完」的页面当背景
-          // 去采样：premium 走的是 `toImageSync` 抓纹理，这时候抓到的是一张
-          // 空图，直接画成黑底；而且这张黑图会一直挂在那儿，直到有别的绘制
-          // 把它顶掉——这就是「进一遍设置页面就正常了」的原因。
-          // standard 是实时 BackdropFilter，永远读当前帧的帧缓冲，没有这张
-          // 会过期的纹理。底栏的果冻滑块本来就走实时路径，观感差别只在边缘
-          // 那道多 pass 的厚度，换来的是切换时绝不闪黑。
-          quality: lg.GlassQuality.standard,
+          // standard 走的是 2D 磨砂着色器（LightweightLiquidGlass），没有
+          // 厚度、没有折射、没有边缘高光 —— 看起来就是一块半透明的白胶片，
+          // 和顶栏那块玻璃完全不是一回事。之前为了压掉切页闪黑把它降到
+          // standard，代价就是把液态效果也一起丢了。
+          //
+          // 闪黑的真凶不是 premium 本身，是外面那层 GlassBackdropGroup：
+          // 它让顶栏和底栏共用一次背景读取，页签切换时页面整棵子树被替换，
+          // 这次「共享读取」还停在旧的画面/空画面上，玻璃就照着它画成了
+          // 黑底；路由切换（进一遍设置再退回来）会把 group 重建一次，所以
+          // 那样「碰一下」就恢复正常。现在两条栏各自读各自的背景，不再共享。
+          quality: lg.GlassQuality.premium,
           // 底栏压在任意内容上（漫画封面经常是深色大块），玻璃底色必须
           // 比浮层默认值实一截，图标和文字才不会陷进背景里。
           settings: LiquidGlassEngine.settings(context, tintAlpha: 0.55),
@@ -969,32 +972,30 @@ class _NaviMainViewState extends State<_NaviMainView> {
       // 宽屏走侧栏模式，没有外层顶栏，页面拿到的就是真实状态栏高度。
       return page;
     }
-    // 顶栏和底栏都是 premium 档玻璃，各自采样一次背景等于每帧截两次屏。
-    // GlassBackdropGroup 让它们共用同一次背景读取——这正是官方给
-    //「app bar + tab bar」的推荐组合。
-    return lg.GlassBackdropGroup(
-      child: Stack(
-        children: [
-          // 页面单独一层。切页时页面正处在 `_TabTransition` 的 Opacity 里，
-          // 那是要开 save layer 的；玻璃栏在同一帧去读背景时，如果页面还
-          // 没被合成到这一趟 pass 里，读到的就是空的——顶栏底色淡看不出来，
-          // 底栏底色实，直接显示成一块黑。加一层 RepaintBoundary 让页面先
-          // 落成自己的层，玻璃再去读就一定读得到。
-          Positioned.fill(child: RepaintBoundary(child: page)),
-          Positioned(
-            left: 0,
-            right: 0,
-            top: 0,
-            child: state.buildTop(),
-          ),
-          Positioned(
-            left: 0,
-            right: 0,
-            bottom: 0,
-            child: state.buildBottom(),
-          ),
-        ],
-      ),
+    // 顶栏和底栏各自读自己的背景，**不共享** GlassBackdropGroup。
+    //
+    // 共享那次读取看起来省了一次全屏拷贝，但它是在「组里第一块玻璃画的时候」
+    // 取一次快照，之后所有成员都按这张快照算折射。切页那一帧页面整棵子树被
+    // 换掉，快照还是旧的/空的，两条栏就跟着画成黑底——而且会一直黑着，直到
+    // 路由切换把 group 重建（所以「进一遍设置再退回来」就好了）。
+    // 代价是每帧多一次背景读取，换的是切页再也不会闪黑。
+    return Stack(
+      children: [
+        // 页面单独一层，先落成自己的 composited layer，玻璃去读时一定读得到。
+        Positioned.fill(child: RepaintBoundary(child: page)),
+        Positioned(
+          left: 0,
+          right: 0,
+          top: 0,
+          child: state.buildTop(),
+        ),
+        Positioned(
+          left: 0,
+          right: 0,
+          bottom: 0,
+          child: state.buildBottom(),
+        ),
+      ],
     );
   }
 }
