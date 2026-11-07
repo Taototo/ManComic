@@ -2,6 +2,7 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/context.dart';
@@ -440,64 +441,55 @@ class _RandomPickDialogState extends State<RandomPickDialog>
     final colors = context.colorScheme;
     return Semantics(
       label: (_picked == null ? "Tap to draw" : "Comic card back").tl,
-      child: Container(
-        decoration: BoxDecoration(
-          borderRadius: BorderRadius.circular(16),
-          gradient: LinearGradient(
-            begin: Alignment.topLeft,
-            end: Alignment.bottomRight,
-            colors: [colors.primaryContainer, colors.tertiaryContainer],
-          ),
-          border: Border.all(
-            color: colors.primary.withValues(alpha: 0.65),
-            width: 2,
-          ),
-          boxShadow: [
-            BoxShadow(
-              color: colors.primary.withValues(alpha: 0.22),
-              blurRadius: 22,
-              spreadRadius: 1,
-            ),
-          ],
-        ),
-        child: Stack(
-          alignment: Alignment.center,
-          children: [
-            Positioned(
-              top: 14,
-              left: 14,
-              child: Icon(
-                Icons.auto_awesome,
-                size: 18,
-                color: colors.onPrimaryContainer.withValues(alpha: 0.5),
-              ),
-            ),
-            Positioned(
-              right: 14,
-              bottom: 14,
-              child: Icon(
-                Icons.auto_awesome,
-                size: 18,
-                color: colors.onTertiaryContainer.withValues(alpha: 0.5),
-              ),
-            ),
-            Container(
-              width: 104,
-              height: 156,
-              decoration: BoxDecoration(
-                borderRadius: BorderRadius.circular(52),
-                border: Border.all(
-                  color: colors.onPrimaryContainer.withValues(alpha: 0.32),
-                  width: 2,
+      // 牌背换成液态玻璃：半透的卡片悬在弹窗上，后面的界面能透过
+      // 玻璃隐约弯折出来。翻转过程中玻璃随 Transform 一起转。
+      child: LiquidGlassPanel(
+        borderRadius: BorderRadius.circular(16),
+        quality: lg.GlassQuality.premium,
+        child: SizedBox(
+          width: _cardWidth,
+          height: _cardHeight,
+          child: Stack(
+            alignment: Alignment.center,
+            children: [
+              Positioned(
+                top: 14,
+                left: 14,
+                child: Icon(
+                  Icons.auto_awesome,
+                  size: 18,
+                  color: colors.primary.withValues(alpha: 0.5),
                 ),
               ),
-              child: Icon(
-                _preparing ? Icons.hourglass_top_rounded : Icons.style_rounded,
-                size: 50,
-                color: colors.onPrimaryContainer,
+              Positioned(
+                right: 14,
+                bottom: 14,
+                child: Icon(
+                  Icons.auto_awesome,
+                  size: 18,
+                  color: colors.tertiary.withValues(alpha: 0.5),
+                ),
               ),
-            ),
-          ],
+              Container(
+                width: 104,
+                height: 156,
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(52),
+                  border: Border.all(
+                    color: colors.onSurface.withValues(alpha: 0.25),
+                    width: 2,
+                  ),
+                ),
+                child: Icon(
+                  _preparing
+                      ? Icons.hourglass_top_rounded
+                      : Icons.style_rounded,
+                  size: 50,
+                  color: colors.onSurface.withValues(alpha: 0.75),
+                ),
+              ),
+            ],
+          ),
         ),
       ),
     );

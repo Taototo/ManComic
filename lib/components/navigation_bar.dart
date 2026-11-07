@@ -362,6 +362,7 @@ class NaviPaneState extends State<NaviPane>
     // 切换时滑块按弹簧曲线滑过去，途中横向拉伸、到站回弹——这正是
     // iOS 26 标签栏的那个动效，自绘的渐变色药丸做不出折射。
     if (LiquidGlassEngine.enabled) {
+      final colors = context.colorScheme;
       return Padding(
         padding: outer,
         child: lg.GlassTabBar.bottom(
@@ -383,7 +384,17 @@ class NaviPaneState extends State<NaviPane>
           horizontalPadding: 0,
           verticalPadding: 0,
           quality: lg.GlassQuality.premium,
-          settings: LiquidGlassEngine.settings(context),
+          // 底栏压在任意内容上（漫画封面经常是深色大块），玻璃底色必须
+          // 比浮层默认值实一截，图标和文字才不会陷进背景里。
+          settings: LiquidGlassEngine.settings(context, tintAlpha: 0.55),
+          // 弹簧放慢：默认 snappy(350ms) 快到看不出滑行，果冻感没展开
+          // 就到站了。bouncy(550ms) 才有 iOS 26 那种滑过去再弹一下的节奏。
+          springDescription: LiquidGlassEngine.indicatorSpring,
+          // 显式给色：不依赖着色器自动判亮，深色封面上也保证可读。
+          selectedIconColor: colors.primary,
+          selectedLabelColor: colors.primary,
+          unselectedIconColor: colors.onSurface.toOpacity(0.78),
+          unselectedLabelColor: colors.onSurface.toOpacity(0.78),
         ),
       );
     }

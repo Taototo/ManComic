@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
@@ -447,6 +448,36 @@ class _GroupSwitcher extends StatelessWidget {
   Widget build(BuildContext context) {
     final cs = context.colorScheme;
     final itemHeight = _height - _padding * 2;
+    // 液态开启时用包的 inline 分段：玻璃轨道 + 会折射文字的果冻滑块，
+    // 和底栏同一套动效语言。回退分支保持原有的实色药丸。
+    if (LiquidGlassEngine.enabled) {
+      return lg.GlassTabBar.inline(
+        tabs: [
+          for (final label in labels) lg.GlassTab(label: label.tl),
+        ],
+        selectedIndex: index,
+        onTabSelected: onChanged,
+        barHeight: _height,
+        tabWidth: _itemWidth,
+        quality: lg.GlassQuality.premium,
+        settings: LiquidGlassEngine.settings(context),
+        springDescription: LiquidGlassEngine.indicatorSpring,
+        selectedLabelColor: cs.primary,
+        unselectedLabelColor: cs.onSurface.toOpacity(0.6),
+        selectedLabelStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w600,
+        ),
+        unselectedLabelStyle: const TextStyle(
+          fontSize: 13,
+          fontWeight: FontWeight.w500,
+        ),
+        indicatorExpansion: const EdgeInsets.symmetric(
+          horizontal: 4,
+          vertical: 2,
+        ),
+      );
+    }
     return Container(
       height: _height,
       padding: const EdgeInsets.all(_padding),

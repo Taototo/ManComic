@@ -2,7 +2,7 @@ name: venera
 description: "A comic app."
 publish_to: 'none'
 
-version: 1.4.35+308
+version: 1.4.36+309
 
 environment:
   sdk: '>=3.8.0 <4.0.0'
@@ -108,3 +108,10 @@ flutter:
     - assets/opencc.txt
     - assets/animations/
 # fonts:
+
+# 本地 vendor 版：给 GlassTabBar.bottom 补了 springDescription 参数，
+# 见 third_party/liquid_glass_widgets/PATCHES.md。上游发新版本、补丁
+# 被合并后可以删掉这段回归 hosted 依赖。
+dependency_overrides:
+  liquid_glass_widgets:
+    path: third_party/liquid_glass_widgets

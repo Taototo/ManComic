@@ -5,6 +5,7 @@ import 'dart:ui' show ImageFilter;
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_reorderable_grid_view/widgets/reorderable_builder.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
@@ -174,20 +175,44 @@ class _FavoritesPageState extends State<FavoritesPage> {
       opaque: false,
       barrierColor: Colors.black.toOpacity(0.36),
       pageBuilder: (context, animation, secondary) {
+        // 液态开启时抽屉换成磨砂玻璃面板：底下的收藏页透出来，
+        // 关闭时还能隐约看到刚才的位置。列表文字颜色不变，
+        // 玻璃底色（surface 调过 alpha）保证可读。
+        final surface = LiquidGlassEngine.enabled
+            ? LiquidGlassPanel(
+                borderRadius: const BorderRadius.horizontal(
+                  right: Radius.circular(18),
+                ),
+                quality: lg.GlassQuality.premium,
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: SizedBox(
+                    width: min(300, context.width - 16),
+                    child: _LeftBar(
+                      withAppbar: true,
+                      favPage: this,
+                      onSelected: () {
+                        context.pop();
+                      },
+                    ),
+                  ),
+                ),
+              )
+            : Material(
+                child: SizedBox(
+                  width: min(300, context.width - 16),
+                  child: _LeftBar(
+                    withAppbar: true,
+                    favPage: this,
+                    onSelected: () {
+                      context.pop();
+                    },
+                  ),
+                ),
+              );
         return Align(
           alignment: Alignment.centerLeft,
-          child: Material(
-            child: SizedBox(
-              width: min(300, context.width - 16),
-              child: _LeftBar(
-                withAppbar: true,
-                favPage: this,
-                onSelected: () {
-                  context.pop();
-                },
-              ),
-            ),
-          ),
+          child: surface,
         );
       },
       transitionsBuilder: (context, animation, secondary, child) {

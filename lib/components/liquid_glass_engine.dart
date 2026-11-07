@@ -49,10 +49,16 @@ class LiquidGlassEngine {
     Color? tint,
     double saturation = 1.4,
     bool shadow = true,
+
+    /// 直接指定底色 alpha，盖掉默认的「opacity×0.35」折算。
+    /// 底栏这类压在任意内容上的表面需要更实的底色保文字可读；
+    /// 折射主要靠边缘（thickness/refractiveIndex），不受影响。
+    double? tintAlpha,
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
-    final alpha = ((opacity ?? GlassConfig.opacity) * 0.35).clamp(0.0, 0.6);
+    final alpha = tintAlpha ??
+        ((opacity ?? GlassConfig.opacity) * 0.35).clamp(0.0, 0.6);
     final tintColor =
         (tint ?? theme.colorScheme.surface).withValues(alpha: alpha);
     return lg.LiquidGlassSettings(
@@ -67,6 +73,14 @@ class LiquidGlassEngine {
       shadowElevation: shadow ? 1.0 : 0.0,
     );
   }
+
+  /// 底栏滑块的弹簧：上游默认 snappy(350ms) 太快，果冻还没展开就到位了。
+  /// bouncy(550ms) 让滑块有明显的滑行和回弹，接近 iOS 26 的节奏。
+  static SpringDescription get indicatorSpring =>
+      lg.GlassSpring.bouncy(
+        duration: const Duration(milliseconds: 550),
+        extraBounce: 0.1,
+      );
 }
 
 /// 与 [LiquidGlass] 参数对齐的玻璃面板，内部按设置切换渲染引擎。
