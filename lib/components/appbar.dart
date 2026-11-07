@@ -77,10 +77,11 @@ class _AppbarState extends State<Appbar> {
 
   @override
   Widget build(BuildContext context) {
-    // 外层导航栏已经把状态栏那段付掉了，这里不能再留一次。
-    final topInset = NaviTopBarScope.paidByOuterBar(context)
-        ? 0.0
-        : context.padding.top;
+    // 直接吃 `padding.top`：主导航里的页面现在拿到的是「顶栏高度（状态栏 +
+    // 48）」，正好等于要把标题栏推到顶栏下沿所需的高度。注意 MediaQuery 的
+    // padding 只是建议值、不会自己挪动布局，所以这里必须显式留白——把它当成
+    // 「已经付过了」而跳过，标题栏就整体钻到玻璃顶栏底下去了。
+    final topInset = context.padding.top;
     var content = Container(
       decoration: BoxDecoration(
         color: widget.backgroundColor ?? GlassConfig.surface(context),
@@ -163,9 +164,7 @@ class SliverAppbar extends StatelessWidget {
         leading: leading,
         title: title,
         actions: actions,
-        topPadding: NaviTopBarScope.paidByOuterBar(context)
-            ? 0
-            : MediaQuery.of(context).padding.top,
+        topPadding: MediaQuery.of(context).padding.top,
         radius: radius,
         style: style,
       ),
@@ -741,9 +740,7 @@ class _SliverSearchBarState extends State<SliverSearchBar>
       delegate: _SliverSearchBarDelegate(
         editingController: _editingController,
         controller: _controller,
-        topPadding: NaviTopBarScope.paidByOuterBar(context)
-            ? 0
-            : MediaQuery.of(context).padding.top,
+        topPadding: MediaQuery.of(context).padding.top,
         onChanged: widget.onChanged,
         action: widget.action,
         focusNode: widget.focusNode,

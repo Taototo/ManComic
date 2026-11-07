@@ -769,28 +769,6 @@ class _BottomNavItemState extends State<_BottomNavItem> {
   }
 }
 
-/// 标记「页面外面已经有一层顶栏，顶部这段高度由它代付」。
-///
-/// 主导航把顶栏从「占一行」改成「盖在内容之上」，页面拿到的
-/// `MediaQuery.padding.top` 里因此包含了顶栏高度 —— 页面自己会从顶栏
-/// 下沿开始排版，这是对的。但页面内部如果再放一个 [Appbar] 或
-/// [SliverAppbar]，它会按 `padding.top` 再留一次同样的高度，结果凭空
-/// 多出一条空白。这个 scope 就是让它们知道「那一段已经付过了」。
-///
-/// 独立路由（设置页、详情页等）外面没有这个 scope，行为和以前完全一致。
-class NaviTopBarScope extends InheritedWidget {
-  const NaviTopBarScope({required super.child, super.key});
-
-  /// 当前页面的顶部是否已经被外层导航栏占掉了一部分。
-  static bool paidByOuterBar(BuildContext context) {
-    return context.dependOnInheritedWidgetOfExactType<NaviTopBarScope>() !=
-        null;
-  }
-
-  @override
-  bool updateShouldNotify(covariant NaviTopBarScope oldWidget) => false;
-}
-
 class NaviObserver extends NavigatorObserver implements Listenable {
   var routes = Queue<Route>();
 
@@ -907,7 +885,7 @@ class _NaviMainViewState extends State<_NaviMainView> {
         bottom: mq.padding.bottom + (showBar ? state.bottomBarHeight : 0),
       ),
     );
-    Widget page = MediaQuery(
+    final page = MediaQuery(
       data: pageData,
       // key 挂在页签序号上：切页时旧页面在这里**立刻**被替换、销毁，
       // 不再像 AnimatedSwitcher 那样让新旧两页共存 260ms。
@@ -918,11 +896,9 @@ class _NaviMainViewState extends State<_NaviMainView> {
       ),
     );
     if (!showBar) {
-      // 宽屏走侧栏模式，没有外层顶栏，页面的 padding.top 仍是真实状态栏，
-      // 内部 Appbar 必须照常留白，所以这里不挂 scope。
+      // 宽屏走侧栏模式，没有外层顶栏，页面拿到的就是真实状态栏高度。
       return page;
     }
-    page = NaviTopBarScope(child: page);
     // 顶栏和底栏都是 premium 档玻璃，各自采样一次背景等于每帧截两次屏。
     // GlassBackdropGroup 让它们共用同一次背景读取——这正是官方给
     //「app bar + tab bar」的推荐组合。
