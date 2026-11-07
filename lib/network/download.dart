@@ -27,6 +27,18 @@ abstract class DownloadTask with ChangeNotifier {
 
   bool get isPaused;
 
+  /// 用户主动按下暂停。
+  ///
+  /// 必须和「排队等待」区分开：两者 [_isRunning] 都是 false，但排队中的任务
+  /// 该被调度器自动拉起来，手动暂停的不行，否则用户按暂停毫无作用。
+  bool userPaused = false;
+
+  /// 已写入磁盘的字节数（估算进度用，任务刚建好时为 0）
+  int get downloadedBytes;
+
+  /// 预计总字节数。下载过程中只能估算，全部完成后才是准确值；未知时为 0。
+  int get totalBytes;
+
   /// bytes per second
   int get speed;
 
@@ -58,6 +70,8 @@ abstract class DownloadTask with ChangeNotifier {
     switch (json["type"]) {
       case "ImagesDownloadTask":
         return ImagesDownloadTask.fromJson(json);
+      case "ArchiveDownloadTask":
+        return ArchiveDownloadTask.fromJson(json);
       default:
         return null;
     }
@@ -145,6 +159,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     if (isPaused) {
       return;
     }
+    userPaused = true;
     _isRunning = false;
     _message = "Paused";
     _currentSpeed = 0;
@@ -165,6 +180,23 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   @override
   double get progress => _totalCount == 0 ? 0 : _downloadedCount / _totalCount;
 
+  @override
+  int get downloadedBytes => _downloadedBytes;
+
+  @override
+  int get totalBytes => estimateTotalBytes(
+        downloadedBytes: _downloadedBytes,
+        downloadedCount: _downloadedCount,
+        totalCount: _totalCount,
+      );
+
+  void _addDownloadedBytes(int bytes) {
+    if (bytes <= 0) {
+      return;
+    }
+    _downloadedBytes += bytes;
+  }
+
   bool _isRunning = false;
 
   bool _isError = false;
@@ -181,6 +213,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
 
   /// Total image count
   int _totalCount = 0;
+
+  /// Bytes written to disk so far
+  int _downloadedBytes = 0;
 
   /// Current downloading image index
   int _index = 0;
@@ -243,6 +278,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   void resume() async {
     if (_isRunning) return;
     _isError = false;
+    userPaused = false;
     _message = "Resuming...";
     _isRunning = true;
     notifyListeners();
@@ -451,9 +487,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       "cover": _cover,
       "images": _images,
       "downloadedCount": _downloadedCount,
+      "downloadedBytes": _downloadedBytes,
       "totalCount": _totalCount,
       "index": _index,
       "chapter": _chapter,
+      "userPaused": userPaused,
     };
   }
 
@@ -480,10 +518,12 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       ..path = json["path"]
       .._cover = json["cover"]
       .._images = images
-      .._downloadedCount = json["downloadedCount"]
-      .._totalCount = json["totalCount"]
-      .._index = json["index"]
-      .._chapter = json["chapter"];
+      .._downloadedCount = json["downloadedCount"] ?? 0
+      .._downloadedBytes = json["downloadedBytes"] ?? 0
+      .._totalCount = json["totalCount"] ?? 0
+      .._index = json["index"] ?? 0
+      .._chapter = json["chapter"] ?? 0
+      ..userPaused = json["userPaused"] ?? false;
   }
 
   @override
@@ -522,9 +562,32 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   int get hashCode => Object.hash(comicId, source.key);
 }
 
+/// 估算整本体积。
+///
+/// 漫画源不提供整本大小，逐页拉图时也拿不到后面几页的 Content-Length，
+/// 所以只能用已完成的页求平均再乘总页数。误差随进度收窄，全部下完时
+/// 正好退化成真实总量——不会出现「下完了还显示 ≈」的情况。
+int estimateTotalBytes({
+  required int downloadedBytes,
+  required int downloadedCount,
+  required int totalCount,
+}) {
+  // 图片列表还没拉回来，不知道要下多少页，此时任何数字都是编的
+  if (totalCount <= 0) {
+    return 0;
+  }
+  if (downloadedCount >= totalCount) {
+    return downloadedBytes;
+  }
+  // 一页都没完成，没有样本可外推
+  if (downloadedCount <= 0) {
+    return 0;
+  }
+  return (downloadedBytes / downloadedCount * totalCount).round();
+}
+
 Future<Res<T>> _runWithRetry<T>(Future<T> Function() task,
-    {int retry = 3}) async {
-  for (var i = 0; i < retry; i++) {
+    {int retry = 3}) async {  for (var i = 0; i < retry; i++) {
     try {
       return Res(await task());
     } catch (e) {
@@ -586,6 +649,9 @@ class _ImageDownloadWrapper {
           var fileType = detectFileType(p.imageBytes!);
           var file = saveTo.joinFile("$index${fileType.ext}");
           await file.writeAsBytes(p.imageBytes!);
+          // 只有真正落到磁盘上才计入体积：中途取消/失败的那张下次会重下，
+          // 提前记账会让「已下载」越走越快、总面积越算越小。
+          task._addDownloadedBytes(p.imageBytes!.length);
           isComplete = true;
           for (var c in completers) {
             c.complete(this);
@@ -728,6 +794,7 @@ class ArchiveDownloadTask extends DownloadTask {
   @override
   void pause() {
     _isRunning = false;
+    userPaused = true;
     _message = "Paused";
     _downloader?.stop();
     notifyListeners();
@@ -738,11 +805,18 @@ class ArchiveDownloadTask extends DownloadTask {
       _expectedBytes == 0 ? 0 : _currentBytes / _expectedBytes;
 
   @override
+  int get downloadedBytes => _currentBytes;
+
+  @override
+  int get totalBytes => _expectedBytes;
+
+  @override
   void resume() async {
     if (_isRunning) {
       return;
     }
     _isError = false;
+    userPaused = false;
     _isRunning = true;
     notifyListeners();
     _message = "Downloading...";
@@ -843,6 +917,7 @@ class ArchiveDownloadTask extends DownloadTask {
       "archiveUrl": archiveUrl,
       "comic": comic.toJson(),
       "path": path,
+      "userPaused": userPaused,
     };
   }
 
@@ -853,7 +928,9 @@ class ArchiveDownloadTask extends DownloadTask {
     return ArchiveDownloadTask(
       json["archiveUrl"],
       ComicDetails.fromJson(json["comic"]),
-    )..path = json["path"];
+    )
+      ..path = json["path"]
+      ..userPaused = json["userPaused"] ?? false;
   }
 
   String _findCover() {

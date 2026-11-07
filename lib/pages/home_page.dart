@@ -581,7 +581,7 @@ class _LocalState extends State<_Local> {
                     Button.outlined(
                       child: Row(
                         children: [
-                          if (LocalManager().downloadingTasks.first.isPaused)
+                          if (LocalManager().allPaused)
                             const Icon(Icons.pause_circle_outline, size: 18)
                           else
                             const _AnimatedDownloadingIcon(),

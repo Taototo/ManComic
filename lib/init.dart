@@ -6,7 +6,6 @@ import 'package:flutter_saf/flutter_saf.dart';
 import 'package:rhttp/rhttp.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
-import 'package:venera/foundation/cloud_library.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/display_refresh.dart';
@@ -93,9 +92,6 @@ Future<void> init() async {
   }
   CacheManager().setLimitSize(appdata.settings['cacheSize']);
   _checkOldConfigs();
-  // 上传队列要在这里读回来：详情页判断「这本能不能从网盘打开」靠的就是
-  // 队列里的记录，晚于首页加载就会有一批漫画暂时不显示网盘入口。
-  CloudLibrary().loadTasks();
   if (App.isAndroid) {
     handleLinks();
     handleTextShare();

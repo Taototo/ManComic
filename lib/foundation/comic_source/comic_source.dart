@@ -8,7 +8,6 @@ import 'dart:math' as math;
 import 'package:flutter/widgets.dart';
 import 'package:flutter_qjs/flutter_qjs.dart';
 import 'package:venera/foundation/app.dart';
-import 'package:venera/foundation/cloud_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/res.dart';
@@ -42,11 +41,7 @@ class ComicSourceManager with ChangeNotifier, Init {
 
   factory ComicSourceManager() => _instance ??= ComicSourceManager._create();
 
-  // 内置源（网盘线路）不对外暴露：它没有探索页、不能搜索、也没法重测，
-  // 出现在「漫画源」列表里只会让人以为坏了。ComicType 仍能按 key 查到它，
-  // 因为 fromIntKey 直接读 _sources。
-  List<ComicSource> all() =>
-      _sources.where((element) => !element.isBuiltin).toList();
+  List<ComicSource> all() => _sources.toList();
 
   ComicSource? find(String key) =>
       _sources.firstWhereOrNull((element) => element.key == key);
@@ -58,11 +53,6 @@ class ComicSourceManager with ChangeNotifier, Init {
   @protected
   Future<void> doInit() async {
     await JsEngine().ensureInit();
-    // 内置源先注册。它不来自 js 文件，但同样要能被 ComicType 按 key 查到，
-    // 否则阅读器会以「源不存在」直接失败。
-    if (!_sources.any((e) => e.key == CloudSource.key)) {
-      _sources.add(CloudSource.create());
-    }
     final path = "${App.dataPath}/comic_source";
     if (!(await Directory(path).exists())) {
       Directory(path).create();
@@ -368,12 +358,6 @@ class ComicSource {
           null, // starRatingFunc
           null, // archiveDownloader
         );
-
-  /// 是否是代码内置的源（不来自 js 文件）。源列表里要把它过滤掉。
-  ///
-  /// 按 key 判断而不是「filePath 为空」：测试里构造的假源也没有 filePath，
-  /// 用 filePath 会把它们一起过滤掉。
-  bool get isBuiltin => key == CloudSource.key;
 }
 
 class AccountConfig {

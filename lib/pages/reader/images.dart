@@ -38,13 +38,27 @@ class _ReaderImagesState extends State<_ReaderImages> {
   void load() async {
     if (inProgress) return;
     inProgress = true;
-    if (reader.type == ComicType.local ||
+    var useLocal = reader.type == ComicType.local ||
         (LocalManager().isDownloaded(
           reader.cid,
           reader.type,
           reader.chapter,
           reader.widget.chapters,
-        ))) {
+        ));
+    // 边下边看：这本还在下载，但当前这一章已经落到磁盘上了，就直接本地读。
+    // 判断按章做而不是按本做——否则「刚下完第 1 话」的书会因为整本没完成
+    // 而被判去走网络，本地那些图就白下了。
+    if (!useLocal && LocalManager().isDownloading(reader.cid, reader.type)) {
+      useLocal = await LocalManager().hasLocalPages(
+        reader.cid,
+        reader.type,
+        reader.chapter,
+      );
+      if (!mounted) {
+        return;
+      }
+    }
+    if (useLocal) {
       try {
         var images = await LocalManager().getImages(
           reader.cid,

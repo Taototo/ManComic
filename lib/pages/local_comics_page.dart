@@ -1,8 +1,8 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
+import 'package:venera/components/downloading_card.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
-import 'package:venera/foundation/cloud_library.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
@@ -295,6 +295,11 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                     ),
               actions: multiSelectMode ? selectActions : null,
             ),
+          if (!searchMode && LocalManager().downloadingTasks.isNotEmpty)
+            // 不能加 const：任务数变化时父级 setState 会重建这棵树，但如果
+            // widget 实例相同（const），Flutter 会跳过子树更新，横条就会
+            // 停在第一次渲染时的任务数上。
+            SliverToBoxAdapter(child: _DownloadingSection()),
           SliverGridComics(
             comics: comics,
             selections: selectedComics,
@@ -438,28 +443,6 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
 
   List<MenuEntry> exportActions(List<LocalComic> comics) {
     return [
-      // 备份放在导出之后：导出是「拿走给别人」，备份是「留在自己网盘」，
-      // 两者都作用于选中的漫画，但目的不同，不该混进同一个子菜单。
-      MenuEntry(
-        icon: Icons.cloud_upload_outlined,
-        text: "Back up to cloud".tl,
-        onClick: () {
-          final library = CloudLibrary();
-          if (!library.isConfigured) {
-            context.showMessage(
-              message: "Comic Cloud is not configured yet".tl,
-            );
-            return;
-          }
-          for (final comic in comics) {
-            library.enqueue(comic);
-          }
-          context.showMessage(
-            message: "@n added to the upload queue"
-                .tlParams({"n": comics.length}),
-          );
-        },
-      ),
       MenuEntry(
         icon: Icons.outbox_outlined,
         text: "Export as cbz".tl,
@@ -658,4 +641,66 @@ void showDeleteChaptersPopWindow(BuildContext context, LocalComic comic) {
       }),
     ),
   );
+}
+
+/// 本地页顶部的「下载中」横条。
+///
+/// 已下载的漫画在数据库里，下载中的还没有记录——原来看不到它们，只能去
+/// 下载管理页翻。放在本地页顶部，语义上正好连起来：上面是正在进来的，
+/// 下面是已经进来的。
+class _DownloadingSection extends StatelessWidget {
+  const _DownloadingSection();
+
+  @override
+  Widget build(BuildContext context) {
+    final tasks = LocalManager().downloadingTasks;
+    if (tasks.isEmpty) {
+      return const SizedBox();
+    }
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Text(
+                "Downloading".tl,
+                style: ts.s14.bold,
+              ),
+              const SizedBox(width: 6),
+              Text(
+                "${tasks.length}",
+                style: ts.s12.copyWith(
+                  color: context.colorScheme.onSurface.toOpacity(0.6),
+                ),
+              ),
+              const Spacer(),
+              TextButton(
+                onPressed: () {
+                  showPopUpWidget(context, const DownloadingPage());
+                },
+                child: Text("View all".tl, style: ts.s12),
+              ),
+            ],
+          ),
+          SizedBox(
+            height: 162,
+            child: ListView.separated(
+              scrollDirection: Axis.horizontal,
+              padding: EdgeInsets.zero,
+              itemCount: tasks.length,
+              separatorBuilder: (_, __) => const SizedBox(width: 10),
+              itemBuilder: (context, i) {
+                return DownloadingCard(
+                  key: ValueKey(tasks[i]),
+                  task: tasks[i],
+                );
+              },
+            ),
+          ),
+        ],
+      ),
+    );
+  }
 }

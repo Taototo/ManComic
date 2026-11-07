@@ -1,5 +1,5 @@
 import 'package:flutter_test/flutter_test.dart';
-import 'package:venera/foundation/cloud_library.dart';
+import 'package:venera/foundation/webdav_url.dart';
 
 void main() {
   group('normalizeWebdavUrl', () {

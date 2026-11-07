@@ -206,6 +206,8 @@ class Settings with ChangeNotifier {
     'language': 'system', // system, zh-CN, zh-TW, en-US
     'cacheSize': 2048, // in MB
     'downloadThreads': 5,
+    // 同时下载几本（每本内部再按 downloadThreads 并发）
+    'maxConcurrentDownloads': 3,
     'enableLongPressToZoom': true,
     'longPressAction': 'hud', // hud, zoom —— HUD 为长按呼出快捷面板
     'longPressZoomPosition': "press", // press, center
@@ -213,10 +215,6 @@ class Settings with ChangeNotifier {
     'checkUpdateOnStart': false,
     'limitImageWidth': true,
     'webdav': [], // empty means not configured
-    // 漫画备份专用的 WebDAV 配置，和数据备份那套分开。
-    // 数据备份（坚果云之类）只放几 MB 的收藏与历史；漫画动辄几百 MB，
-    // 走同一个目录会把免费额度和月流量瞬间吃光，所以必须各用各的。
-    'comicWebdav': [],
     "disableSyncFields": "", // "field1, field2, ..."
     'dataVersion': 0,
     'quickFavorite': null,

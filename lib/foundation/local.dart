@@ -14,6 +14,7 @@ import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 
 import 'app.dart';
+import 'appdata.dart';
 import 'history.dart';
 
 class LocalComic with HistoryMixin implements Comic {
@@ -414,15 +415,35 @@ class LocalManager with ChangeNotifier {
     return res.map((row) => LocalComic.fromRow(row)).toList();
   }
 
+  /// 本地图片目录和章节表。
+  ///
+  /// 已入库的漫画从数据库拿；还在下载中的漫画数据库里没有记录，目录和
+  /// 章节表都在下载任务上——「下载多少看多少」要靠这条路径才能读到已经
+  /// 落到磁盘的那几章。
+  ({String baseDir, ComicChapters? chapters})? _localTarget(
+    String id,
+    ComicType type,
+  ) {
+    var comic = find(id, type);
+    if (comic != null) {
+      return (baseDir: comic.baseDir, chapters: comic.chapters);
+    }
+    var task = findTask(id, type);
+    if (task is ImagesDownloadTask && task.path != null) {
+      return (baseDir: task.path!, chapters: task.comic?.chapters);
+    }
+    return null;
+  }
+
   Future<List<String>> getImages(String id, ComicType type, Object ep) async {
     if (ep is! String && ep is! int) {
       throw "Invalid ep";
     }
-    var comic = find(id, type) ?? (throw "Comic Not Found");
-    var directory = Directory(comic.baseDir);
-    if (comic.hasChapters) {
-      var cid =
-          ep is int ? comic.chapters!.ids.elementAt(ep - 1) : (ep as String);
+    var target = _localTarget(id, type) ?? (throw "Comic Not Found");
+    var directory = Directory(target.baseDir);
+    var chapters = target.chapters;
+    if (chapters != null) {
+      var cid = ep is int ? chapters.ids.elementAt(ep - 1) : (ep as String);
       cid = getChapterDirectoryName(cid);
       directory = Directory(FilePath.join(directory.path, cid));
     }
@@ -450,6 +471,19 @@ class LocalManager with ChangeNotifier {
       return a.name.compareTo(b.name);
     });
     return files.map((e) => "file://${e.path}").toList();
+  }
+
+  /// 这一章本地是否已经有能读的图。
+  ///
+  /// 阅读器据此决定走本地还是走网络：下载中的漫画，已经落盘的那几章直接
+  /// 本地读（秒开），还没开始下的仍然走源站，于是「下载多少看多少」自然
+  /// 成立，不需要额外的下载引擎。
+  Future<bool> hasLocalPages(String id, ComicType type, Object ep) async {
+    try {
+      return (await getImages(id, type, ep)).isNotEmpty;
+    } catch (_) {
+      return false;
+    }
   }
 
   bool isDownloaded(String id, ComicType type,
@@ -480,10 +514,80 @@ class LocalManager with ChangeNotifier {
 
   List<DownloadTask> downloadingTasks = [];
 
+  /// 同时开跑的下载任务数上限。
+  ///
+  /// 单个任务内部还会按 `downloadThreads` 并发拉图，所以实际并发是
+  /// 「任务数 × 线程数」。默认 3 是折中：再多很容易被源站限速或触发风控，
+  /// 反而比串行更慢；而串行时后面的任务要等到天荒地老，用户会以为卡死了。
+  int get maxConcurrentTasks {
+    var value = appdata.settings['maxConcurrentDownloads'];
+    if (value is num && value >= 1) {
+      return value.toInt();
+    }
+    return 3;
+  }
+
   bool isDownloading(String id, ComicType type) {
     return downloadingTasks
         .any((element) => element.id == id && element.comicType == type);
   }
+
+  DownloadTask? findTask(String id, ComicType type) {
+    for (var task in downloadingTasks) {
+      if (task.id == id && task.comicType == type) {
+        return task;
+      }
+    }
+    return null;
+  }
+
+  /// 按并发上限把排队中的任务拉起来。
+  ///
+  /// 排队和手动暂停在 [DownloadTask.isPaused] 上长得一样，靠 `userPaused`
+  /// 区分——否则这个函数会把用户按了暂停的任务重新启动。
+  void pumpQueue() {
+    var running = 0;
+    for (var task in downloadingTasks) {
+      if (!task.isPaused) {
+        running++;
+      }
+    }
+    for (var task in downloadingTasks) {
+      if (running >= maxConcurrentTasks) {
+        break;
+      }
+      if (!task.isPaused || task.isError || task.userPaused) {
+        continue;
+      }
+      task.resume();
+      running++;
+    }
+  }
+
+  /// 暂停所有任务（含排队中的），并记住这是用户的意思。
+  void pauseAll() {
+    for (var task in downloadingTasks) {
+      if (!task.isPaused) {
+        task.pause();
+      } else {
+        task.userPaused = true;
+      }
+    }
+    notifyListeners();
+    saveCurrentDownloadingTasks();
+  }
+
+  /// 继续所有被暂停的任务，仍然受并发上限约束。
+  void resumeAll() {
+    for (var task in downloadingTasks) {
+      task.userPaused = false;
+    }
+    notifyListeners();
+    saveCurrentDownloadingTasks();
+    pumpQueue();
+  }
+
+  bool get allPaused => downloadingTasks.every((e) => e.isPaused);
 
   Future<Directory> findValidDirectory(
       String id, ComicType type, String name) async {
@@ -504,27 +608,28 @@ class LocalManager with ChangeNotifier {
     downloadingTasks.remove(task);
     notifyListeners();
     saveCurrentDownloadingTasks();
-    downloadingTasks.firstOrNull?.resume();
+    pumpQueue();
   }
 
   void removeTask(DownloadTask task) {
     downloadingTasks.remove(task);
     notifyListeners();
     saveCurrentDownloadingTasks();
+    pumpQueue();
   }
 
   void moveToFirst(DownloadTask task) {
-    if (downloadingTasks.first != task) {
-      var shouldResume = !downloadingTasks.first.isPaused;
-      downloadingTasks.first.pause();
-      downloadingTasks.remove(task);
-      downloadingTasks.insert(0, task);
-      notifyListeners();
-      saveCurrentDownloadingTasks();
-      if (shouldResume) {
-        downloadingTasks.first.resume();
+    if (downloadingTasks.firstOrNull == task) {
+      if (task.isPaused && !task.userPaused) {
+        task.resume();
       }
+      return;
     }
+    downloadingTasks.remove(task);
+    downloadingTasks.insert(0, task);
+    notifyListeners();
+    saveCurrentDownloadingTasks();
+    pumpQueue();
   }
 
   Future<void> saveCurrentDownloadingTasks() async {
@@ -549,13 +654,18 @@ class LocalManager with ChangeNotifier {
         Log.error("LocalManager", "Failed to restore downloading tasks: $e");
       }
     }
+    // 上次没下完的接着下。用户之前手动暂停过的（userPaused）保持暂停，
+    // 剩下的是「排到一半进程被杀」，属于断点续传该管的部分。
+    pumpQueue();
   }
 
   void addTask(DownloadTask task) {
-    downloadingTasks.add(task);
+    if (!downloadingTasks.contains(task)) {
+      downloadingTasks.add(task);
+    }
     notifyListeners();
     saveCurrentDownloadingTasks();
-    downloadingTasks.first.resume();
+    pumpQueue();
   }
 
   void deleteComic(LocalComic c, [bool removeFileOnDisk = true]) {
