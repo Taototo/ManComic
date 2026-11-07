@@ -71,6 +71,18 @@ class LiquidGlassEngine {
       // 空气≈1.0，普通玻璃≈1.5。默认 1.2 偏塑料，提到 1.4 透镜感明显。
       refractiveIndex: 1.4,
       shadowElevation: shadow ? 1.0 : 0.0,
+      // 「采样不到背景时不要画成黑板」。
+      //
+      // 玻璃本体的颜色是从背景纹理里取出来的，取的还是**感知亮度**
+      // （bodyMode 默认 adaptive）。切页那一帧底下的页面还没画上，采样拿到
+      // 的是空纹理——在预乘语义里就是透明黑，adaptive 会照着它的亮度画，
+      // 于是整块玻璃变成纯黑；而这一帧的黑有时会一直挂到下一次整棵树重建
+      // （进出一次别的页面）才恢复。
+      //
+      // passthrough 让本体的不透明度跟着「实际采到的 alpha」走：采到内容就
+      // 和原来完全一样，采到空气就让背景透出来，而不是补一块黑。正常背景上
+      // 两者像素级等价，只在「没东西可采」的那一帧才分叉。
+      platformViewMode: lg.PlatformViewGlassMode.passthrough,
     );
   }
 

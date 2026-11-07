@@ -189,7 +189,7 @@ class _AdaptiveLiquidGlassLayerState extends State<AdaptiveLiquidGlassLayer> {
                 false, // Root never provides the blur; containers do.
             hasExplicitSettings: widget.settings != null,
             hasExplicitQuality: widget.quality != null,
-            child: useFullRenderer
+            child: useFullRenderer && widget.blendAmount > 0
                 ? LiquidGlassBlendGroup(
                     blend: widget.blendAmount,
                     child: keyedContent,

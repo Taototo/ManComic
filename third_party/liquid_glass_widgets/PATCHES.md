@@ -14,4 +14,12 @@
    `GlassSpring.snappy(350ms)`。用途同上：顶栏「推荐 / 分类」的滑块要和
    底栏同一套节奏，350ms 快到看不出滑行。
 
-升级上游版本时需要重打这两个补丁。
+3. `lib/widgets/shared/adaptive_liquid_glass_layer.dart`：
+   `useFullRenderer` 分支原来无条件把子树包进 `LiquidGlassBlendGroup`，
+   现在 `blendAmount <= 0` 时直接返回子树。上游把「是否融合」只表达成
+   融合距离（0 = 不融合），但那层 group 依然会跑一趟 `blendedGeometry`
+   着色器 + saveLayer；在页签切换的那一帧它会画成整块纯黑（底栏「切页闪
+   黑底」）。关掉之后 premium 档的折射/厚度/边缘高光都还在，只少了滑块与
+   底栏轮廓互相融合那点过渡 —— 顺带省一趟全屏 pass。
+
+升级上游版本时需要重打这三个补丁。

@@ -414,6 +414,21 @@ class NaviPaneState extends State<NaviPane>
           // 黑底；路由切换（进一遍设置再退回来）会把 group 重建一次，所以
           // 那样「碰一下」就恢复正常。现在两条栏各自读各自的背景，不再共享。
           quality: lg.GlassQuality.premium,
+          // 关掉「形状融合」那一趟 pass（默认开）。
+          //
+          // premium 档在 Impeller 上会把整个底栏包进 LiquidGlassBlendGroup：
+          // 它要多渲染一趟，把底栏和滑块两个形状的轮廓融成一片。切页那一帧
+          // 页面整棵子树被换掉，这趟融合渲染拿到的几何/背景是新的、还没画完的，
+          // 结果就是整块底栏先画成纯黑，而且会一直挂着，直到别的重建把它顶掉
+          // （所以「进一遍设置再退回来」能恢复）。
+          //
+          // 证据：1.4.38 用 standard 时没有这一趟（standard 不进 full renderer），
+          // 也就没黑；回到 premium 就带回来了。滑块本身的折射不依赖融合，关掉
+          // 只是少了「药丸和底栏融成一张皮」那点过渡，省一趟全屏 pass。
+          //
+          // 补丁见 third_party/liquid_glass_widgets/PATCHES.md：
+          // blendAmount 为 0 时不再包这层 group。
+          enableBlend: false,
           // 底栏压在任意内容上（漫画封面经常是深色大块），玻璃底色必须
           // 比浮层默认值实一截，图标和文字才不会陷进背景里。
           settings: LiquidGlassEngine.settings(context, tintAlpha: 0.55),
@@ -981,8 +996,13 @@ class _NaviMainViewState extends State<_NaviMainView> {
     // 代价是每帧多一次背景读取，换的是切页再也不会闪黑。
     return Stack(
       children: [
-        // 页面单独一层，先落成自己的 composited layer，玻璃去读时一定读得到。
-        Positioned.fill(child: RepaintBoundary(child: page)),
+        // 页面不额外包 RepaintBoundary。
+        //
+        // 1.4.38 加它是为了「先落层，玻璃再读」，但闪黑并没有因此消失；
+        // 反过来它让页面成为独立的合成层，切页那一帧这张图层是新建的，
+        // 玻璃的 backdrop 读取一旦排在它栅格化之前，读到的就是空的。
+        // 现在让页面直接画进同一趟 pass。
+        Positioned.fill(child: page),
         Positioned(
           left: 0,
           right: 0,
