@@ -37,7 +37,7 @@ class CloudSource {
       return null;
     }
     return newClient(
-      config[0],
+      normalizeWebdavUrl(config[0]),
       user: config[1],
       password: config[2],
       adapter: RHttpAdapter(),

@@ -3,6 +3,7 @@ import 'package:venera/components/components.dart';
 import 'package:venera/components/window_frame.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/cloud_library.dart' show normalizeWebdavUrl;
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/log.dart';
@@ -121,7 +122,7 @@ class DataSync with ChangeNotifier {
       String pass = config[2];
 
       var client = newClient(
-        url,
+        normalizeWebdavUrl(url),
         user: user,
         password: pass,
         adapter: RHttpAdapter(),
@@ -188,7 +189,7 @@ class DataSync with ChangeNotifier {
       String pass = config[2];
 
       var client = newClient(
-        url,
+        normalizeWebdavUrl(url),
         user: user,
         password: pass,
         adapter: RHttpAdapter(),

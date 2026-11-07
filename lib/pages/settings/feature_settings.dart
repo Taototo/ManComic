@@ -207,6 +207,8 @@ class _DataSettingsState extends State<DataSettings> {
         ).toSliver(),
         _CallbackSetting(
           title: "Data Sync".tl,
+          subtitle: "Back up favorites, history and settings. Small files only"
+              .tl,
           callback: () async {
             showPopUpWidget(context, const _WebdavSetting());
           },

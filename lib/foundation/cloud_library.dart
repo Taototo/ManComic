@@ -12,6 +12,19 @@ import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/io.dart';
 import 'package:webdav_client/webdav_client.dart' hide File;
 
+/// 把 WebDAV 地址末尾的斜杠去掉。
+///
+/// `webdav_client` 是拿 path 直接拼在 baseUrl 后面的，地址留个 `/` 就变成
+/// `.../dav//`，坚果云这类严格的实现不分青红皂白回 404，报错还只说
+/// 「Not found」，从输入框完全看不出问题。所有进客户端的地方都要先过一遍。
+String normalizeWebdavUrl(String url) {
+  var normalized = url.trim();
+  while (normalized.endsWith('/')) {
+    normalized = normalized.substring(0, normalized.length - 1);
+  }
+  return normalized;
+}
+
 /// 漫画备份到网盘（WebDAV）的队列。
 ///
 /// 和数据同步那套 WebDAV 完全独立：那边只传几 MB 的收藏与历史，放在
@@ -176,7 +189,7 @@ class CloudLibrary with ChangeNotifier {
 
   Client _newClient(List<String> config) {
     return newClient(
-      config[0],
+      normalizeWebdavUrl(config[0]),
       user: config[1],
       password: config[2],
       adapter: RHttpAdapter(),
@@ -185,11 +198,7 @@ class CloudLibrary with ChangeNotifier {
 
   /// 网盘上某个文件的直链。分段编码：整串 encode 会把 `/` 也转义掉。
   String imageUrl(String path) {
-    final base = config?[0] ?? '';
-    var normalized = base;
-    while (normalized.endsWith('/')) {
-      normalized = normalized.substring(0, normalized.length - 1);
-    }
+    final normalized = normalizeWebdavUrl(config?[0] ?? '');
     final encoded = path
         .split('/')
         .where((e) => e.isNotEmpty)
