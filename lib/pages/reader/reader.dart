@@ -35,6 +35,7 @@ import 'package:venera/foundation/reading_stats.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/foundation/screen_brightness.dart';
+import 'package:venera/network/download.dart';
 import 'package:venera/network/images.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/clipboard_image.dart';

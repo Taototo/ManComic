@@ -29,12 +29,12 @@ class _ExploreSettingsState extends State<ExploreSettings> {
             context.to(() => const ComicSourcePage());
           },
         ).toSliver(),
-        _SettingPartTitle(title: "Content sources".tl, icon: Icons.tune_rounded),
-        ...contentSourceSlivers(),
         _SettingPartTitle(
-          title: "Filters".tl,
-          icon: Icons.filter_alt_outlined,
+          title: "Content sources".tl,
+          icon: Icons.tune_rounded,
         ),
+        ...contentSourceSlivers(),
+        _SettingPartTitle(title: "Filters".tl, icon: Icons.filter_alt_outlined),
         // 「屏蔽哪些词」和「从哪些源取内容」是同一件事的两面：都是在决定
         // 内容边界。
         ...keywordFilterSlivers(),
@@ -45,10 +45,7 @@ class _ExploreSettingsState extends State<ExploreSettings> {
         SelectSetting(
           title: "Display mode of comic tile".tl,
           settingKey: "comicDisplayMode",
-          optionTranslation: {
-            "detailed": "Detailed".tl,
-            "brief": "Brief".tl,
-          },
+          optionTranslation: {"detailed": "Detailed".tl, "brief": "Brief".tl},
         ).toSliver(),
         SelectSetting(
           title: "Layout mode of comic grid".tl,
@@ -206,9 +203,8 @@ class _DataSettingsState extends State<DataSettings> {
           actionTitle: 'Import'.tl,
         ).toSliver(),
         _CallbackSetting(
-          title: "Data Sync".tl,
-          subtitle: "Back up favorites, history and settings. Small files only"
-              .tl,
+          title: "Nutstore Sync".tl,
+          subtitle: "Sync favorites, history and settings to Nutstore".tl,
           callback: () async {
             showPopUpWidget(context, const _WebdavSetting());
           },
@@ -413,9 +409,9 @@ class _LogsPageState extends State<LogsPage> {
                   Text(logToShow[index].content),
                   Text(
                     logToShow[index].time.toString().replaceAll(
-                          RegExp(r"\.\w+"),
-                          "",
-                        ),
+                      RegExp(r"\.\w+"),
+                      "",
+                    ),
                   ),
                   TextButton(
                     onPressed: () {
@@ -473,6 +469,9 @@ class _WebdavSetting extends StatefulWidget {
 }
 
 class _WebdavSettingState extends State<_WebdavSetting> {
+  /// 坚果云官方的 WebDAV 入口，填错地址是这类同步最常见的失败原因。
+  static const nutstoreUrl = "https://dav.jianguoyun.com/dav/";
+
   String url = "";
   String user = "";
   String pass = "";
@@ -482,6 +481,11 @@ class _WebdavSettingState extends State<_WebdavSetting> {
 
   bool isTesting = false;
   bool upload = true;
+
+  late final urlController = TextEditingController(text: url);
+  late final userController = TextEditingController(text: user);
+  late final passController = TextEditingController(text: pass);
+  late final disableSyncController = TextEditingController(text: disableSync);
 
   @override
   void initState() {
@@ -500,6 +504,19 @@ class _WebdavSettingState extends State<_WebdavSetting> {
     user = configs[1];
     pass = configs[2];
     autoSync = appdata.implicitData['webdavAutoSync'] ?? true;
+    urlController.text = url;
+    userController.text = user;
+    passController.text = pass;
+    disableSyncController.text = disableSync;
+  }
+
+  @override
+  void dispose() {
+    urlController.dispose();
+    userController.dispose();
+    passController.dispose();
+    disableSyncController.dispose();
+    super.dispose();
   }
 
   void onAutoSyncChanged(bool value) {
@@ -513,18 +530,49 @@ class _WebdavSettingState extends State<_WebdavSetting> {
   @override
   Widget build(BuildContext context) {
     return PopUpWidgetScaffold(
-      title: "Webdav",
+      title: "Nutstore Sync".tl,
       body: SingleChildScrollView(
         child: Column(
           children: [
             const SizedBox(height: 12),
+            Container(
+              padding: const EdgeInsets.all(10),
+              decoration: BoxDecoration(
+                color: context.colorScheme.secondaryContainer,
+                borderRadius: BorderRadius.circular(10),
+              ),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const Icon(Icons.cloud_outlined, size: 20),
+                  const SizedBox(width: 8),
+                  Expanded(
+                    child: Text(
+                      "Nutstore → Account info → Security → Add app password. "
+                              "Use it here, not your login password."
+                          .tl,
+                      style: ts.s12,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(height: 12),
             TextField(
               decoration: InputDecoration(
                 labelText: "URL",
-                hintText: "A valid WebDav directory URL".tl,
-                border: OutlineInputBorder(),
+                hintText: nutstoreUrl,
+                border: const OutlineInputBorder(),
+                suffixIcon: IconButton(
+                  icon: const Icon(Icons.auto_fix_high),
+                  tooltip: "Fill in Nutstore address".tl,
+                  onPressed: () {
+                    urlController.text = nutstoreUrl;
+                    url = nutstoreUrl;
+                  },
+                ),
               ),
-              controller: TextEditingController(text: url),
+              controller: urlController,
               onChanged: (value) => url = value,
             ),
             const SizedBox(height: 12),
@@ -533,16 +581,16 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                 labelText: "Username".tl,
                 border: const OutlineInputBorder(),
               ),
-              controller: TextEditingController(text: user),
+              controller: userController,
               onChanged: (value) => user = value,
             ),
             const SizedBox(height: 12),
             TextField(
               decoration: InputDecoration(
-                labelText: "Password".tl,
+                labelText: "App password".tl,
                 border: const OutlineInputBorder(),
               ),
-              controller: TextEditingController(text: pass),
+              controller: passController,
               onChanged: (value) => pass = value,
             ),
             const SizedBox(height: 12),
@@ -551,9 +599,9 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                 labelText: "Skip Setting Fields (Optional)".tl,
                 hintText: "field0, field1, field2, ...",
                 hintStyle: TextStyle(color: Theme.of(context).hintColor),
-                border: OutlineInputBorder(),
+                border: const OutlineInputBorder(),
                 suffixIcon: IconButton(
-                  icon: Icon(Icons.help_outline),
+                  icon: const Icon(Icons.help_outline),
                   onPressed: () {
                     showDialog(
                       context: context,
@@ -595,7 +643,7 @@ class _WebdavSettingState extends State<_WebdavSetting> {
                   },
                 ),
               ),
-              controller: TextEditingController(text: disableSync),
+              controller: disableSyncController,
               onChanged: (value) => disableSync = value,
             ),
             const SizedBox(height: 12),
@@ -711,4 +759,3 @@ class _WebdavSettingState extends State<_WebdavSetting> {
     );
   }
 }
-

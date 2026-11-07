@@ -75,13 +75,17 @@ class _DownloadingCardState extends State<DownloadingCard> {
     setState(() {});
   }
 
+  double get _progress => task.progress.clamp(0.0, 1.0).toDouble();
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
       width: widget.width,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.enableTap ? () => _open(context) : null,
+        onTap: widget.enableTap
+            ? () => openDownloadingTask(context, task)
+            : null,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -120,8 +124,10 @@ class _DownloadingCardState extends State<DownloadingCard> {
                         child: Stack(
                           alignment: Alignment.center,
                           children: [
+                            // 一直用确定值：排队中的任务转个不停的圈会让人
+                            // 以为它在偷偷跑，而 0% 的空环是诚实的。
                             CircularProgressIndicator(
-                              value: task.progress <= 0 ? null : task.progress,
+                              value: _progress,
                               strokeWidth: 3,
                               backgroundColor: Colors.white24,
                               valueColor: const AlwaysStoppedAnimation(
@@ -129,9 +135,7 @@ class _DownloadingCardState extends State<DownloadingCard> {
                               ),
                             ),
                             Text(
-                              task.progress <= 0
-                                  ? "--"
-                                  : "${(task.progress * 100).round()}",
+                              "${(_progress * 100).round()}",
                               style: const TextStyle(
                                 fontSize: 11,
                                 height: 1,
@@ -196,11 +200,17 @@ class _DownloadingCardState extends State<DownloadingCard> {
     );
   }
 
-  /// 点缩略图直接进阅读器读已经下好的部分。
-  ///
-  /// 一页都还没落盘时不去猜，直接告诉用户还没东西可看——否则会跳进一个
-  /// 空白页，比什么都不做更让人困惑。
-  Future<void> _open(BuildContext context) async {
+}
+
+/// 点缩略图直接进阅读器读已经下好的部分。
+///
+/// 一页都还没落盘时不去猜，直接告诉用户还没东西可看——否则会跳进一个
+/// 空白页，比什么都不做更让人困惑。
+Future<void> openDownloadingTask(
+  BuildContext context,
+  DownloadTask task,
+) async {
+  {
     final t = task;
     if (t is! ImagesDownloadTask || t.comic == null) {
       showPopUpWidget(context, const DownloadingPage());

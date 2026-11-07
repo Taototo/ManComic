@@ -38,7 +38,8 @@ class _ReaderImagesState extends State<_ReaderImages> {
   void load() async {
     if (inProgress) return;
     inProgress = true;
-    var useLocal = reader.type == ComicType.local ||
+    var useLocal =
+        reader.type == ComicType.local ||
         (LocalManager().isDownloaded(
           reader.cid,
           reader.type,
@@ -65,6 +66,14 @@ class _ReaderImagesState extends State<_ReaderImages> {
           reader.type,
           reader.chapter,
         );
+        if (!mounted) {
+          return;
+        }
+        // 这一章只下了一部分时，把后面的页接到网络 URL 上，翻过去照样能看。
+        images = await _fillPendingPages(images);
+        if (!mounted) {
+          return;
+        }
         setState(() {
           reader.images = images;
           reader.isLoading = false;
@@ -106,6 +115,45 @@ class _ReaderImagesState extends State<_ReaderImages> {
       }
     }
     context.readerScaffold.update();
+  }
+
+  /// 已经落盘的页走本地，还没下到的页接上网地址。
+  ///
+  /// 只在这一章确实处于下载中时才补：已经下全的章不该为了多一次网络请求
+  /// 白等。拼接按文件名里的页码对齐而不是按顺序排队，否则中间失败过一页
+  /// 就会整段错位，用户看到的是「第 7 页其实是第 8 页」。
+  Future<List<String>> _fillPendingPages(List<String> local) async {
+    final task = LocalManager().findTask(reader.cid, reader.type);
+    if (task is! ImagesDownloadTask || task.path == null) {
+      return local;
+    }
+    final source = reader.type.comicSource;
+    if (source?.loadComicPages == null) {
+      return local;
+    }
+    final cp = reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1);
+    try {
+      final res = await source!.loadComicPages!(reader.widget.cid, cp);
+      if (res.error) {
+        return local;
+      }
+      final map = await LocalManager().getPageMap(
+        reader.cid,
+        reader.type,
+        reader.chapter,
+      );
+      // 文件名对不上页码（导入的 epub/pdf），拼不了，老实只显示本地页。
+      if (map.isEmpty) {
+        return local;
+      }
+      if (map.length >= res.data.length) {
+        return local;
+      }
+      return mergeLocalPages(map, res.data);
+    } catch (e) {
+      Log.info("Reader", "Failed to extend local pages: $e");
+      return local;
+    }
   }
 
   @override
@@ -396,7 +444,8 @@ class _GalleryModeState extends State<_GalleryMode>
         },
         onPageChanged: (i) {
           if (i == 0) {
-            if (reader.isFirstChapterOfGroup || !reader.toPrevChapter(toLastPage: true)) {
+            if (reader.isFirstChapterOfGroup ||
+                !reader.toPrevChapter(toLastPage: true)) {
               controller.jumpToPage(1);
             }
           } else if (i == totalPages + 1) {
@@ -745,7 +794,8 @@ class _ContinuousModeState extends State<_ContinuousMode>
     if (dt <= 0) {
       return;
     }
-    final v = _axisVelocity(event.delta) / (dt / Duration.microsecondsPerSecond);
+    final v =
+        _axisVelocity(event.delta) / (dt / Duration.microsecondsPerSecond);
     // 低通一下，避免单帧抖动被当成甩动
     _flingVelocity = _flingVelocity * 0.6 + v * 0.4;
   }
@@ -1313,7 +1363,9 @@ ImageProvider _createImageProviderFromKey(
     reader.cid,
     reader.eid,
     reader.page,
-    enableResize: reader.mode.isContinuous, // For continuous mode, we need to resize the image to improve performance
+    enableResize: reader
+        .mode
+        .isContinuous, // For continuous mode, we need to resize the image to improve performance
   );
 }
 

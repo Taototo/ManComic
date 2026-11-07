@@ -657,6 +657,9 @@ class _DownloadingSection extends StatelessWidget {
     if (tasks.isEmpty) {
       return const SizedBox();
     }
+    // 卡片高度 = 封面 112 + 间距 + 两行文字。按系统字体缩放算，否则把
+    // 字号调大之后横向列表会把底下的标题和速度裁掉一半。
+    final textScale = MediaQuery.textScalerOf(context).scale(10) / 10;
     return Padding(
       padding: const EdgeInsets.fromLTRB(12, 0, 12, 10),
       child: Column(
@@ -685,7 +688,7 @@ class _DownloadingSection extends StatelessWidget {
             ],
           ),
           SizedBox(
-            height: 162,
+            height: 112 + 4 + 33 * textScale + 6,
             child: ListView.separated(
               scrollDirection: Axis.horizontal,
               padding: EdgeInsets.zero,

@@ -255,8 +255,11 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
   @override
   Widget build(BuildContext context) {
     final errorText = task.isError ? task.message : null;
-    return Container(
+    return InkWell(
       key: ValueKey(task),
+      // 支持边下边看之后，任务行不点一下太浪费：点进去直接读已下好的部分。
+      onTap: () => openDownloadingTask(context, task),
+      child: Container(
       padding: const EdgeInsets.symmetric(vertical: 10, horizontal: 12),
       child: Row(
         crossAxisAlignment: CrossAxisAlignment.start,
@@ -398,6 +401,7 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
             ),
           ),
         ],
+      ),
       ),
     );
   }
