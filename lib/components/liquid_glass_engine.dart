@@ -35,6 +35,38 @@ class LiquidGlassEngine {
   /// 自研实现的模糊半径是 sigma（量级 0-40），新引擎的 blur 是另一套
   /// 标度（量级 0-15）。按 3.5 倍折算，默认 26 落到 7.4。
   static double mapBlur(double sigma) => (sigma / 3.5).clamp(0.0, 15.0);
+
+  /// 组装新引擎的玻璃参数。
+  ///
+  /// 透镜感（边缘把背景弯折、像凸透镜）只在玻璃**足够清透**时可见：
+  /// 底色 alpha 一高，折射就被磨砂层盖住，只剩「糊」。所以这里的 tint
+  /// 给得比自研实现淡得多，厚度和折射率反过来给大，让 spherical 透镜
+  /// 模型在边缘真正弯出弧度。
+  static lg.LiquidGlassSettings settings(
+    BuildContext context, {
+    double? blurSigma,
+    double? opacity,
+    Color? tint,
+    double saturation = 1.4,
+    bool shadow = true,
+  }) {
+    final theme = Theme.of(context);
+    final isDark = theme.brightness == Brightness.dark;
+    final alpha = ((opacity ?? GlassConfig.opacity) * 0.35).clamp(0.0, 0.6);
+    final tintColor =
+        (tint ?? theme.colorScheme.surface).withValues(alpha: alpha);
+    return lg.LiquidGlassSettings(
+      blur: mapBlur(blurSigma ?? GlassConfig.blur),
+      glassColor: tintColor,
+      saturation: saturation,
+      // 厚度直接决定边缘弯折的幅度；暗色下略收，避免高光发灰。
+      thickness: isDark ? 20 : 28,
+      lightIntensity: isDark ? 0.55 : 0.9,
+      // 空气≈1.0，普通玻璃≈1.5。默认 1.2 偏塑料，提到 1.4 透镜感明显。
+      refractiveIndex: 1.4,
+      shadowElevation: shadow ? 1.0 : 0.0,
+    );
+  }
 }
 
 /// 与 [LiquidGlass] 参数对齐的玻璃面板，内部按设置切换渲染引擎。
@@ -89,30 +121,20 @@ class LiquidGlassPanel extends StatelessWidget {
       );
     }
 
-    final theme = Theme.of(context);
-    final colors = theme.colorScheme;
-    final isDark = theme.brightness == Brightness.dark;
     final radius = borderRadius.topLeft.x;
-    final sigma = blur ?? GlassConfig.blur;
-
-    // 新引擎的着色器会自己叠高光、描边和环境光，底色比自研实现给得淡一些
-    // 才不会糊成一块实心板。
-    final alpha = ((opacity ?? GlassConfig.opacity) * 0.55).clamp(0.0, 0.9);
-    final tintColor = (tint ?? colors.surface).withValues(alpha: alpha);
 
     return lg.AdaptiveGlass(
       shape: radius <= 0.5
           ? const lg.LiquidRoundedRectangle(borderRadius: 0)
           : lg.LiquidRoundedSuperellipse(borderRadius: radius),
       quality: quality ?? LiquidGlassEngine.quality,
-      settings: lg.LiquidGlassSettings(
-        blur: LiquidGlassEngine.mapBlur(sigma),
-        glassColor: tintColor,
+      settings: LiquidGlassEngine.settings(
+        context,
+        blurSigma: blur,
+        opacity: opacity,
+        tint: tint,
         saturation: saturation,
-        // 亮色下玻璃要有"厚度"，暗色下压一点，否则会发灰。
-        thickness: isDark ? 16 : 22,
-        lightIntensity: isDark ? 0.55 : 0.9,
-        shadowElevation: shadow ? 1.0 : 0.0,
+        shadow: shadow,
       ),
       child: child,
     );

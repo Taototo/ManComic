@@ -356,8 +356,40 @@ class NaviPaneState extends State<NaviPane>
 
   Widget buildBottom() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
+    final outer =
+        EdgeInsets.fromLTRB(14, 0, 14, bottomInset + _kBottomBarMargin);
+    // 液态开启时用包里完整的底栏：玻璃胶囊 + 会折射下方图标的果冻滑块。
+    // 切换时滑块按弹簧曲线滑过去，途中横向拉伸、到站回弹——这正是
+    // iOS 26 标签栏的那个动效，自绘的渐变色药丸做不出折射。
+    if (LiquidGlassEngine.enabled) {
+      return Padding(
+        padding: outer,
+        child: lg.GlassTabBar.bottom(
+          tabs: [
+            for (var e in widget.paneItems)
+              lg.GlassTab(
+                icon: Icon(e.icon),
+                activeIcon: Icon(e.activeIcon),
+                label: e.label,
+              ),
+          ],
+          selectedIndex: currentPage,
+          onTabSelected: (i) {
+            HapticFeedback.selectionClick();
+            updatePage(i);
+          },
+          barHeight: _kBottomBarHeight,
+          // 外层 Padding 已负责与屏幕边缘的距离，内部别再留一圈。
+          horizontalPadding: 0,
+          verticalPadding: 0,
+          quality: lg.GlassQuality.premium,
+          settings: LiquidGlassEngine.settings(context),
+        ),
+      );
+    }
+    // 回退：自研玻璃 + 自绘药丸，观感与接入第三方包之前一致。
     return Padding(
-      padding: EdgeInsets.fromLTRB(14, 0, 14, bottomInset + _kBottomBarMargin),
+      padding: outer,
       child: LiquidGlassBar(
         borderRadius: BorderRadius.circular(_kBottomBarHeight / 2),
         child: SizedBox(
