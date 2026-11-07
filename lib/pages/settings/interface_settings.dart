@@ -134,6 +134,34 @@ class _AppSettingsState extends State<AppSettings> {
             ],
           ),
         ),
+        // 新的折射式玻璃是试用特性：关掉它就完全退回原来那套
+        // 「模糊 + 提饱和」的实现，方便在真机上直接对比取舍。
+        _SwitchSetting(
+          title: "Liquid glass".tl,
+          subtitle: "Refractive glass on the top and bottom bars. "
+                  "Turn off to go back to the frosted style."
+              .tl,
+          settingKey: "liquidGlass",
+          onChanged: () {
+            App.forceRebuild();
+          },
+        ).toSliver(),
+        if (appdata.settings['liquidGlass'] == true)
+          SelectSetting(
+            title: "Liquid glass quality".tl,
+            settingKey: "liquidGlassQuality",
+            optionTranslation: const {
+              "minimal": "Frosted",
+              "standard": "Standard",
+              "premium": "Premium",
+            },
+            help: "Premium adds real refraction with a heavier shader. "
+                    "Switch down if scrolling feels sluggish."
+                .tl,
+            onChanged: () {
+              App.forceRebuild();
+            },
+          ).toSliver(),
         _SliderSetting(
           title: "Glass Blur".tl,
           settingsIndex: "glassBlur",

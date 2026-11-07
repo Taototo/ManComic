@@ -179,6 +179,8 @@ class Settings with ChangeNotifier {
     'theme_mode': 'system', // light, dark, system
     'glassBlur': 26, // 0-40, 毛玻璃模糊半径
     'glassOpacity': 58, // 10-95, 毛玻璃不透明度百分比
+    'liquidGlass': true, // 顶栏/底栏是否用带折射的液态玻璃引擎
+    'liquidGlassQuality': 'standard', // minimal, standard, premium
     'refreshRate': 'auto', // auto, 60, 90, 120
     'showFps': false, // 右下角帧率读数（诊断用）
     'newFavoriteAddTo': 'end', // start, end

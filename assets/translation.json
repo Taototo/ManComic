@@ -865,7 +865,14 @@
     "@a h ago": "@a 小时前",
     "@a results": "@a 条",
     "Recent comics, reading time, goals, achievements and the year in review": "最近在读什么、阅读时长、目标、成就与年度回顾",
-    "Back up favorites, history and settings. Small files only": "备份收藏、历史与设置（只有小文件）"
+    "Back up favorites, history and settings. Small files only": "备份收藏、历史与设置（只有小文件）",
+    "Liquid glass": "液态玻璃",
+    "Refractive glass on the top and bottom bars. Turn off to go back to the frosted style.": "顶栏与底栏使用带折射的玻璃材质。关闭后回到原来的毛玻璃样式。",
+    "Liquid glass quality": "液态玻璃质量",
+    "Frosted": "磨砂",
+    "Standard": "标准",
+    "Premium": "高级",
+    "Premium adds real refraction with a heavier shader. Switch down if scrolling feels sluggish.": "高级档使用更重的着色器做真实折射，滚动卡顿时可以调低。"
   },
   "zh_TW": {
     "Concurrent downloads": "同時下載數量",
@@ -1733,6 +1740,13 @@
     "@a h ago": "@a 小時前",
     "@a results": "@a 筆",
     "Recent comics, reading time, goals, achievements and the year in review": "最近在讀什麼、閱讀時長、目標、成就與年度回顧",
-    "Back up favorites, history and settings. Small files only": "備份收藏、歷史與設定（只有小檔案）"
+    "Back up favorites, history and settings. Small files only": "備份收藏、歷史與設定（只有小檔案）",
+    "Liquid glass": "液態玻璃",
+    "Refractive glass on the top and bottom bars. Turn off to go back to the frosted style.": "頂欄與底欄使用帶折射的玻璃材質。關閉後回到原本的毛玻璃樣式。",
+    "Liquid glass quality": "液態玻璃品質",
+    "Frosted": "磨砂",
+    "Standard": "標準",
+    "Premium": "高級",
+    "Premium adds real refraction with a heavier shader. Switch down if scrolling feels sluggish.": "高級檔使用更重的著色器做真實折射，滾動卡頓時可以調低。"
   }
 }

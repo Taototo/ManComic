@@ -77,11 +77,15 @@ class _AppbarState extends State<Appbar> {
 
   @override
   Widget build(BuildContext context) {
+    // 外层导航栏已经把状态栏那段付掉了，这里不能再留一次。
+    final topInset = NaviTopBarScope.paidByOuterBar(context)
+        ? 0.0
+        : context.padding.top;
     var content = Container(
       decoration: BoxDecoration(
         color: widget.backgroundColor ?? GlassConfig.surface(context),
       ),
-      height: _kAppBarHeight + context.padding.top,
+      height: _kAppBarHeight + topInset,
       child: Row(
         children: [
           const SizedBox(width: 8),
@@ -109,7 +113,7 @@ class _AppbarState extends State<Appbar> {
             width: 8,
           )
         ],
-      ).paddingTop(context.padding.top),
+      ).paddingTop(topInset),
     );
     if (widget.style == AppbarStyle.shadow) {
       return Material(
@@ -159,7 +163,9 @@ class SliverAppbar extends StatelessWidget {
         leading: leading,
         title: title,
         actions: actions,
-        topPadding: MediaQuery.of(context).padding.top,
+        topPadding: NaviTopBarScope.paidByOuterBar(context)
+            ? 0
+            : MediaQuery.of(context).padding.top,
         radius: radius,
         style: style,
       ),
@@ -735,7 +741,9 @@ class _SliverSearchBarState extends State<SliverSearchBar>
       delegate: _SliverSearchBarDelegate(
         editingController: _editingController,
         controller: _controller,
-        topPadding: MediaQuery.of(context).padding.top,
+        topPadding: NaviTopBarScope.paidByOuterBar(context)
+            ? 0
+            : MediaQuery.of(context).padding.top,
         onChanged: widget.onChanged,
         action: widget.action,
         focusNode: widget.focusNode,

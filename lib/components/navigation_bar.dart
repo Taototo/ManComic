@@ -305,56 +305,60 @@ class NaviPaneState extends State<NaviPane>
   }
 
   Widget buildTop() {
-    return Material(
-      child: Container(
-        padding: const EdgeInsets.only(left: 16, right: 8),
-        height: _kTopBarHeight,
-        width: double.infinity,
-        child: Row(
-          children: [
-            AnimatedSwitcher(
-              duration: const Duration(milliseconds: 260),
-              switchInCurve: Curves.easeOutCubic,
-              switchOutCurve: Curves.easeInCubic,
-              transitionBuilder: (child, animation) {
-                return FadeTransition(
-                  opacity: animation,
-                  child: SlideTransition(
-                    position: Tween<Offset>(
-                      begin: const Offset(0, 0.4),
-                      end: Offset.zero,
-                    ).animate(animation),
-                    child: child,
-                  ),
-                );
-              },
-              child: Text(
-                widget.paneItems[currentPage].label,
-                key: ValueKey(currentPage),
-                style: const TextStyle(
-                  fontSize: 18,
-                  fontWeight: FontWeight.bold,
+    // 玻璃要连状态栏一起盖住。只盖 48 的话，页面内容滚上来会从状态栏
+    // 那条缝里露出来，看起来像顶栏被切成两半。
+    final topInset = MediaQuery.of(context).padding.top;
+    final content = Container(
+      padding: EdgeInsets.only(left: 16, right: 8, top: topInset),
+      height: _kTopBarHeight + topInset,
+      width: double.infinity,
+      child: Row(
+        children: [
+          AnimatedSwitcher(
+            duration: const Duration(milliseconds: 260),
+            switchInCurve: Curves.easeOutCubic,
+            switchOutCurve: Curves.easeInCubic,
+            transitionBuilder: (child, animation) {
+              return FadeTransition(
+                opacity: animation,
+                child: SlideTransition(
+                  position: Tween<Offset>(
+                    begin: const Offset(0, 0.4),
+                    end: Offset.zero,
+                  ).animate(animation),
+                  child: child,
                 ),
+              );
+            },
+            child: Text(
+              widget.paneItems[currentPage].label,
+              key: ValueKey(currentPage),
+              style: const TextStyle(
+                fontSize: 18,
+                fontWeight: FontWeight.bold,
               ),
             ),
-            const Spacer(),
-            for (var action in widget.paneActions)
-              _GlassActionButton(
-                icon: action.icon,
-                label: action.label,
-                onTap: action.onTap,
-              ),
-          ],
-        ),
+          ),
+          const Spacer(),
+          for (var action in widget.paneActions)
+            _GlassActionButton(
+              icon: action.icon,
+              label: action.label,
+              onTap: action.onTap,
+            ),
+        ],
       ),
     );
+    // 顶栏通栏贴着状态栏，用直角玻璃。它会盖在页面内容之上，
+    // 列表滚上来时从玻璃后面经过。
+    return LiquidGlassBar(child: content);
   }
 
   Widget buildBottom() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
     return Padding(
       padding: EdgeInsets.fromLTRB(14, 0, 14, bottomInset + _kBottomBarMargin),
-      child: LiquidGlass(
+      child: LiquidGlassBar(
         borderRadius: BorderRadius.circular(_kBottomBarHeight / 2),
         child: SizedBox(
           height: _kBottomBarHeight,
@@ -765,6 +769,28 @@ class _BottomNavItemState extends State<_BottomNavItem> {
   }
 }
 
+/// 标记「页面外面已经有一层顶栏，顶部这段高度由它代付」。
+///
+/// 主导航把顶栏从「占一行」改成「盖在内容之上」，页面拿到的
+/// `MediaQuery.padding.top` 里因此包含了顶栏高度 —— 页面自己会从顶栏
+/// 下沿开始排版，这是对的。但页面内部如果再放一个 [Appbar] 或
+/// [SliverAppbar]，它会按 `padding.top` 再留一次同样的高度，结果凭空
+/// 多出一条空白。这个 scope 就是让它们知道「那一段已经付过了」。
+///
+/// 独立路由（设置页、详情页等）外面没有这个 scope，行为和以前完全一致。
+class NaviTopBarScope extends InheritedWidget {
+  const NaviTopBarScope({required super.child, super.key});
+
+  /// 当前页面的顶部是否已经被外层导航栏占掉了一部分。
+  static bool paidByOuterBar(BuildContext context) {
+    return context.dependOnInheritedWidgetOfExactType<NaviTopBarScope>() !=
+        null;
+  }
+
+  @override
+  bool updateShouldNotify(covariant NaviTopBarScope oldWidget) => false;
+}
+
 class NaviObserver extends NavigatorObserver implements Listenable {
   var routes = Queue<Route>();
 
@@ -864,44 +890,60 @@ class _NaviMainViewState extends State<_NaviMainView> {
   Widget build(BuildContext context) {
     final showBar = state.controller.value < 2;
     final mq = MediaQuery.of(context);
-    // 顶栏已经处理了状态栏高度，页面内容要拿掉 top padding；
-    // 底栏漂浮在内容之上，这里把高度补给页面，避免内容被挡住。
+    // 顶栏从「占位的一行」改成「盖在内容上面的一层」：留在 Column 里的话，
+    // 它背后永远只有 Scaffold 底色，玻璃模糊完还是纯色，等于没做。
+    // 页面顶部让出顶栏高度，初始状态和原来一模一样，只有滚动时内容
+    // 才会从玻璃后面穿过去。
     final base = showBar ? mq.removePadding(removeTop: true) : mq;
     final pageData = base.copyWith(
       padding: base.padding.copyWith(
+        // 让出的高度必须和顶栏实际占用的一致（状态栏 + 48）。只写 48 的话，
+        // 页面内容会整体上移一个状态栏的高度，被顶栏压住一条。
+        top: showBar
+            ? NaviPaneState._kTopBarHeight + mq.padding.top
+            : base.padding.top,
+        // 底栏同样漂浮在内容之上，这部分高度也要补给页面，
+        // 否则列表最后一行会被底栏压住。
         bottom: mq.padding.bottom + (showBar ? state.bottomBarHeight : 0),
       ),
     );
-    final content = Column(
-      children: [
-        if (showBar) state.buildTop().paddingTop(mq.padding.top),
-        Expanded(
-          child: MediaQuery(
-            data: pageData,
-            // key 挂在页签序号上：切页时旧页面在这里**立刻**被替换、销毁，
-            // 不再像 AnimatedSwitcher 那样让新旧两页共存 260ms。
-            child: _TabTransition(
-              key: ValueKey(state.currentPage),
-              direction: _direction,
-              child: state.buildMainViewContent(),
-            ),
-          ),
-        ),
-      ],
+    Widget page = MediaQuery(
+      data: pageData,
+      // key 挂在页签序号上：切页时旧页面在这里**立刻**被替换、销毁，
+      // 不再像 AnimatedSwitcher 那样让新旧两页共存 260ms。
+      child: _TabTransition(
+        key: ValueKey(state.currentPage),
+        direction: _direction,
+        child: state.buildMainViewContent(),
+      ),
     );
     if (!showBar) {
-      return content;
+      // 宽屏走侧栏模式，没有外层顶栏，页面的 padding.top 仍是真实状态栏，
+      // 内部 Appbar 必须照常留白，所以这里不挂 scope。
+      return page;
     }
-    return Stack(
-      children: [
-        Positioned.fill(child: content),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: state.buildBottom(),
-        ),
-      ],
+    page = NaviTopBarScope(child: page);
+    // 顶栏和底栏都是 premium 档玻璃，各自采样一次背景等于每帧截两次屏。
+    // GlassBackdropGroup 让它们共用同一次背景读取——这正是官方给
+    //「app bar + tab bar」的推荐组合。
+    return lg.GlassBackdropGroup(
+      child: Stack(
+        children: [
+          Positioned.fill(child: page),
+          Positioned(
+            left: 0,
+            right: 0,
+            top: 0,
+            child: state.buildTop(),
+          ),
+          Positioned(
+            left: 0,
+            right: 0,
+            bottom: 0,
+            child: state.buildBottom(),
+          ),
+        ],
+      ),
     );
   }
 }

@@ -5,6 +5,7 @@ import 'package:flex_seed_scheme/flex_seed_scheme.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:flutter_localizations/flutter_localizations.dart';
+import 'package:liquid_glass_widgets/liquid_glass_widgets.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/auth_page.dart';
 import 'package:venera/pages/main_page.dart';
@@ -31,7 +32,24 @@ void main(List<String> args) {
     runZonedGuarded(() async {
       WidgetsFlutterBinding.ensureInitialized();
       await init();
-      runApp(const MyApp());
+      // 液态玻璃着色器预加载：纯磁盘到内存的 IO，不做绘制。
+      // 关掉这个特性时不必预热，省掉启动时那几毫秒。
+      //
+      // 必须兜住异常：预热失败只该让玻璃退化成磨砂，不能把整个 App
+      // 卡在 runApp 之前——那会是一片黑屏，连错误提示都出不来。
+      if (appdata.settings['liquidGlass'] != false) {
+        try {
+          await LiquidGlassWidgets.initialize();
+        } catch (e) {
+          Log.error("Liquid Glass Init", e.toString());
+        }
+      }
+      runApp(LiquidGlassWidgets.wrap(
+        child: const MyApp(),
+        // MaterialApp 的主题模式可能和系统亮度不一致，必须显式告知，
+        // 否则暗色系统下用亮色主题时玻璃的描边和投影会整个消失。
+        brightnessResolver: Theme.maybeBrightnessOf,
+      ));
       if (App.isDesktop) {
         await windowManager.ensureInitialized();
         windowManager.waitUntilReadyToShow().then((_) async {
