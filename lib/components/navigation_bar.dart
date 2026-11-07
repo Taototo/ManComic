@@ -440,6 +440,14 @@ class NaviPaneState extends State<NaviPane>
           selectedLabelColor: colors.primary,
           unselectedIconColor: colors.onSurface.toOpacity(0.78),
           unselectedLabelColor: colors.onSurface.toOpacity(0.78),
+          // 选中项放大：包里默认是 iOS 27 实测的 1.25，配合 27.5 的图标那是
+          // 一次很明显的「跳」。收窄到 1.12——还看得出哪个被选中，但不再抢
+          // 眼球的注意力。滑块滑过去时邻格也会按距离渐变放大（区间写死在
+          // 包的 _tabProximityScale 里），同一倍率一起收敛。
+          magnification: 1.12,
+          // 按压缩放（默认 1.04 鼓一下再弹回）关掉，只留触摸光晕：
+          // glowOnly 让玻璃在手指位置亮一下，本体不鼓，位置关系更稳定。
+          interactionBehavior: lg.GlassInteractionBehavior.glowOnly,
         ),
       );
     }
