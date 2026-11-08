@@ -144,6 +144,7 @@ class SliverAppbar extends StatelessWidget {
     this.actions,
     this.radius = 0,
     this.style = AppbarStyle.blur,
+    this.pinned = true,
   });
 
   final Widget? leading;
@@ -156,10 +157,18 @@ class SliverAppbar extends StatelessWidget {
 
   final AppbarStyle style;
 
+  /// 是否常驻在顶部。
+  ///
+  /// 设为 false 时它随内容一起滚出去，滚走以后内容可以直接穿到上层的玻璃
+  /// 顶栏后面——顶栏那块玻璃才有东西可以折射。收藏夹这类「上面还有一层
+  /// 玻璃顶栏」的页面必须这么做，否则它自己那条实色横杠会把内容挡在顶栏
+  /// 之外，顶栏底下永远是空的。
+  final bool pinned;
+
   @override
   Widget build(BuildContext context) {
     return SliverPersistentHeader(
-      pinned: true,
+      pinned: pinned,
       delegate: _MySliverAppBarDelegate(
         leading: leading,
         title: title,

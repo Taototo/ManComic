@@ -369,7 +369,16 @@ class NaviPaneState extends State<NaviPane>
     );
     // 顶栏通栏贴着状态栏，用直角玻璃。它会盖在页面内容之上，
     // 列表滚上来时从玻璃后面经过。
-    return LiquidGlassBar(child: content);
+    //
+    // 边缘高光要压到很低：顶栏只有下沿露在屏幕里，那圈高光正好沿着
+    // 「玻璃和内容的交界」画一条亮线，看起来就是给顶栏描了个白边。
+    // 折射（thickness/refractiveIndex）不跟着变，厚玻璃的弯折还在。
+    final isDark = Theme.of(context).brightness == Brightness.dark;
+    return LiquidGlassBar(
+      lightIntensity: isDark ? 0.16 : 0.45,
+      fresnelStrength: 0.35,
+      child: content,
+    );
   }
 
   Widget buildBottom() {
@@ -394,7 +403,9 @@ class NaviPaneState extends State<NaviPane>
           ],
           selectedIndex: currentPage,
           onTabSelected: (i) {
-            HapticFeedback.selectionClick();
+            // 系统那一下（CLOCK_TICK）在国内 ROM 上偏重，换成自己发的定振幅
+            // 短震；见 utils/haptics.dart。
+            Haptics.tap();
             updatePage(i);
           },
           barHeight: _kBottomBarHeight,
@@ -445,6 +456,12 @@ class NaviPaneState extends State<NaviPane>
           // 眼球的注意力。滑块滑过去时邻格也会按距离渐变放大（区间写死在
           // 包的 _tabProximityScale 里），同一倍率一起收敛。
           magnification: 1.12,
+          // 滑块自身的挤压拉伸（squash & stretch）收敛一档。
+          //
+          // 包里的默认值 0.4 是按「按压时药丸鼓一下」调的，实际观感是
+          // 点下去的瞬间按钮先晃了一下才切过去。0.2 只留滑动途中那点形变，
+          // 手感是「滑过去」而不是「弹一下」。
+          indicatorPinchStrength: 0.2,
           // 按压缩放（默认 1.04 鼓一下再弹回）关掉，只留触摸光晕：
           // glowOnly 让玻璃在手指位置亮一下，本体不鼓，位置关系更稳定。
           interactionBehavior: lg.GlassInteractionBehavior.glowOnly,
@@ -699,7 +716,7 @@ class _BottomNavBarState extends State<_BottomNavBar>
                     entry: widget.entries[index],
                     active: widget.currentIndex == index,
                     onTap: () {
-                      HapticFeedback.selectionClick();
+                      Haptics.tap();
                       widget.onTap(index);
                     },
                   ),

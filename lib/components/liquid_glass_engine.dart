@@ -54,6 +54,15 @@ class LiquidGlassEngine {
     /// 底栏这类压在任意内容上的表面需要更实的底色保文字可读；
     /// 折射主要靠边缘（thickness/refractiveIndex），不受影响。
     double? tintAlpha,
+
+    /// 边缘高光强度。默认按明暗给 0.55 / 0.9。
+    ///
+    /// 贴边通栏的顶栏必须压低：它只有下沿露在屏幕里，那道高光正好沿着
+    /// 边界画一条亮线，看起来就像给玻璃描了个白边。
+    double? lightIntensity,
+
+    /// 菲涅尔反射强度（视线角度越斜越亮）。默认 1.0，同样是顶栏要收的那个量。
+    double? fresnelStrength,
   }) {
     final theme = Theme.of(context);
     final isDark = theme.brightness == Brightness.dark;
@@ -67,7 +76,8 @@ class LiquidGlassEngine {
       saturation: saturation,
       // 厚度直接决定边缘弯折的幅度；暗色下略收，避免高光发灰。
       thickness: isDark ? 20 : 28,
-      lightIntensity: isDark ? 0.55 : 0.9,
+      lightIntensity: lightIntensity ?? (isDark ? 0.55 : 0.9),
+      fresnelStrength: fresnelStrength ?? 1.0,
       // 空气≈1.0，普通玻璃≈1.5。默认 1.2 偏塑料，提到 1.4 透镜感明显。
       refractiveIndex: 1.4,
       shadowElevation: shadow ? 1.0 : 0.0,
@@ -111,6 +121,8 @@ class LiquidGlassPanel extends StatelessWidget {
     this.shadow = true,
     this.quality,
     this.tintAlpha,
+    this.lightIntensity,
+    this.fresnelStrength,
   });
 
   final Widget child;
@@ -139,6 +151,11 @@ class LiquidGlassPanel extends StatelessWidget {
   /// 默认那一档是给卡片、按钮这类「玻璃本身才是主体」的地方配的，压在
   /// 一屏漫画封面上时字会直接糊掉。
   final double? tintAlpha;
+
+  /// 边缘高光与菲涅尔反射强度，见 [LiquidGlassEngine.settings]。
+  final double? lightIntensity;
+
+  final double? fresnelStrength;
 
   /// 抽屉一类需要「看得清」的玻璃用的底色强度。
   ///
@@ -178,6 +195,8 @@ class LiquidGlassPanel extends StatelessWidget {
         saturation: saturation,
         shadow: shadow,
         tintAlpha: tintAlpha,
+        lightIntensity: lightIntensity,
+        fresnelStrength: fresnelStrength,
       ),
       child: child,
     );
@@ -195,6 +214,8 @@ class LiquidGlassBar extends StatelessWidget {
     required this.child,
     this.borderRadius = BorderRadius.zero,
     this.quality,
+    this.lightIntensity,
+    this.fresnelStrength,
   });
 
   final Widget child;
@@ -203,11 +224,18 @@ class LiquidGlassBar extends StatelessWidget {
 
   final lg.GlassQuality? quality;
 
+  /// 边缘高光强度。通栏贴边的顶栏要压低，否则下沿那道高光就是一条白描边。
+  final double? lightIntensity;
+
+  final double? fresnelStrength;
+
   @override
   Widget build(BuildContext context) {
     return LiquidGlassPanel(
       borderRadius: borderRadius,
       quality: quality ?? lg.GlassQuality.premium,
+      lightIntensity: lightIntensity,
+      fresnelStrength: fresnelStrength,
       child: child,
     );
   }

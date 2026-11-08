@@ -4,12 +4,16 @@ import android.Manifest
 import android.app.Activity
 import android.content.ComponentName
 import android.content.ContentResolver
+import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.VibrationEffect
+import android.os.Vibrator
+import android.os.VibratorManager
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
@@ -232,6 +236,46 @@ class MainActivity : FlutterFragmentActivity() {
         launcher.launch(input)
     }
 
+    private var vibrator: Vibrator? = null
+
+    /// 一段极短的定振幅震动。
+    ///
+    /// 设备支持振幅控制时用 [amplitude]；不支持时退回系统默认振幅——
+    /// 至少时长比 CLOCK_TICK 短，听感上还是更轻。
+    private fun hapticTick(durationMs: Int, amplitude: Int) {
+        try {
+            val v = vibrator ?: run {
+                val resolved: Vibrator = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                    val manager =
+                        getSystemService(Context.VIBRATOR_MANAGER_SERVICE) as VibratorManager
+                    manager.defaultVibrator
+                } else {
+                    @Suppress("DEPRECATION")
+                    getSystemService(Context.VIBRATOR_SERVICE) as Vibrator
+                }
+                vibrator = resolved
+                resolved
+            }
+            if (!v.hasVibrator()) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val effect = if (v.hasAmplitudeControl()) {
+                    VibrationEffect.createOneShot(durationMs.toLong(), amplitude)
+                } else {
+                    VibrationEffect.createOneShot(
+                        durationMs.toLong(),
+                        VibrationEffect.DEFAULT_AMPLITUDE
+                    )
+                }
+                v.vibrate(effect)
+            } else {
+                @Suppress("DEPRECATION")
+                v.vibrate(durationMs.toLong())
+            }
+        } catch (e: Exception) {
+            Log.w("Venera", "haptic tick failed", e)
+        }
+    }
+
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         GeneratedPluginRegistrant.registerWith(flutterEngine)
         MethodChannel(
@@ -375,6 +419,26 @@ class MainActivity : FlutterFragmentActivity() {
                 }
 
                 "getDisplayInfo" -> res.success(displayInfo())
+                else -> res.notImplemented()
+            }
+        }
+
+        // 触感：底栏点一下的反馈。
+        //
+        // 系统那一下（CLOCK_TICK）的强度和时长是国内 ROM 说了算的，
+        // 普遍偏重；这里自己发一段定振幅短震，才能真正「轻一点」。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "venera/haptics"
+        ).setMethodCallHandler { call, res ->
+            when (call.method) {
+                "tick" -> {
+                    val ms = (call.argument<Int>("durationMs") ?: 8).coerceIn(1, 40)
+                    val amp = (call.argument<Int>("amplitude") ?: 45).coerceIn(1, 255)
+                    hapticTick(ms, amp)
+                    res.success(null)
+                }
+
                 else -> res.notImplemented()
             }
         }

@@ -11,6 +11,12 @@ import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 
+/// 源页签栏的高度。
+///
+/// 页签栏现在叠在内容之上（见 [_ExplorePageState.build]），这个高度同时用来
+/// 给内容加顶部留白，所以必须和 `AppTabBar` 里的实际高度一致。
+const _kExploreTabBarHeight = 48.0;
+
 /// 「推荐 / 分类」分组的共享状态。
 ///
 /// 这个切换控件现在长在顶栏的标题位上，而顶栏和页面是两棵互不相干的子树，
@@ -453,51 +459,92 @@ class _ExplorePageState extends State<ExplorePage>
     var hasContent = group == 0 ? pages.isNotEmpty : categories.isNotEmpty;
     final inlineSwitcher = _needsInlineSwitcher;
 
+    Widget? fab;
+    if (group == 0) {
+      fab = Positioned(
+        right: 16,
+        // 底栏漂浮在页面之上，按钮要抬到底栏上面
+        bottom: 16 + context.padding.bottom,
+        child: AnimatedSwitcher(
+          duration: const Duration(milliseconds: 150),
+          reverseDuration: const Duration(milliseconds: 150),
+          child: showFB ? buildFAB() : const SizedBox(),
+          transitionBuilder: (widget, animation) {
+            var tween = Tween<Offset>(
+                begin: const Offset(0, 1), end: const Offset(0, 0));
+            return SlideTransition(
+              position: tween.animate(animation),
+              child: widget,
+            );
+          },
+        ),
+      );
+    }
+
+    final tabBarSwitcher = AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      child: buildTabBar(),
+    );
+
+    // 宽屏走侧栏，没有外层玻璃顶栏，页签栏照旧占一行。
+    if (inlineSwitcher) {
+      return Stack(
+        children: [
+          Positioned.fill(
+            child: Column(
+              children: [
+                buildInlineSwitcher(),
+                tabBarSwitcher,
+                Expanded(
+                  child: hasContent ? buildContent() : buildEmpty(),
+                ),
+              ],
+            ),
+          ),
+          if (fab != null) fab,
+        ],
+      );
+    }
+
+    final padding = context.padding;
+    final stripHeight = hasContent ? _kExploreTabBarHeight : 0.0;
+
     return Stack(
       children: [
+        // 内容顶到最上面，只靠 MediaQuery 的 padding 让第一行落在页签栏下面。
+        // 这份 padding 是滚动容器**内部**的留白，所以往上滑的时候封面会一路
+        // 穿到玻璃顶栏后面——顶栏这才有东西可以折射。
+        //
+        // 之前页签栏是 Column 里的一行，内容被它的边界裁住，永远到不了顶栏，
+        // 顶栏底下只剩一片空底色，看起来就是「玻璃没生效」。
         Positioned.fill(
-          child: Column(
-            children: [
-              // 有顶栏时「推荐 / 分类」长在顶栏标题位上，这一行只剩页签栏；
-              // 顶栏高度仍然由 padding.top 补给我们，所以页签栏自己吃掉它，
-              // 否则整块内容会往上钻到玻璃顶栏底下。
-              if (inlineSwitcher) buildInlineSwitcher(),
-              Padding(
-                padding: EdgeInsets.only(
-                  top: inlineSwitcher ? 0 : context.padding.top,
-                ),
-                child: AnimatedSwitcher(
-                  duration: const Duration(milliseconds: 180),
-                  switchInCurve: Curves.easeOut,
-                  switchOutCurve: Curves.easeIn,
-                  child: buildTabBar(),
-                ),
-              ),
-              Expanded(
-                child: hasContent ? buildContent() : buildEmpty(),
-              ),
-            ],
+          child: MediaQuery(
+            data: MediaQuery.of(context).copyWith(
+              padding: padding.copyWith(top: padding.top + stripHeight),
+            ),
+            child: hasContent ? buildContent() : buildEmpty(),
           ),
         ),
-        if (group == 0)
+        if (hasContent)
           Positioned(
-            right: 16,
-            // 底栏漂浮在页面之上，按钮要抬到底栏上面
-            bottom: 16 + context.padding.bottom,
-            child: AnimatedSwitcher(
-              duration: const Duration(milliseconds: 150),
-              reverseDuration: const Duration(milliseconds: 150),
-              child: showFB ? buildFAB() : const SizedBox(),
-              transitionBuilder: (widget, animation) {
-                var tween = Tween<Offset>(
-                    begin: const Offset(0, 1), end: const Offset(0, 0));
-                return SlideTransition(
-                  position: tween.animate(animation),
-                  child: widget,
-                );
-              },
+            left: 0,
+            right: 0,
+            top: padding.top,
+            height: _kExploreTabBarHeight,
+            // 页签栏自己也压一层玻璃：它下面是滚动的封面，不模糊的话
+            // 页签文字会直接糊在封面上。
+            child: LiquidGlassPanel(
+              borderRadius: BorderRadius.zero,
+              blur: 30,
+              tintAlpha: Theme.of(context).brightness == Brightness.dark
+                  ? 0.4
+                  : 0.55,
+              child: tabBarSwitcher,
             ),
-          )
+          ),
+        if (fab != null) fab,
       ],
     );
   }

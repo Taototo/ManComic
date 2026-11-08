@@ -308,6 +308,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       slivers: [
         if (!searchMode && !multiSelectMode)
           SliverAppbar(
+            pinned: false,
             style: context.width < changePoint
                 ? AppbarStyle.shadow
                 : AppbarStyle.blur,
