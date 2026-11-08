@@ -441,14 +441,24 @@ class _AppTabBarState extends State<AppTabBar> {
 
   Widget _buildGlassPill(BuildContext context, Rect rect) {
     final isDark = Theme.of(context).brightness == Brightness.dark;
-    // standard 档：页签行的滑块每帧都在动，premium 的采样纹理在动画里会
-    // 抓空、闪黑；standard 走实时 BackdropFilter，滑到哪儿都读到当前背景。
+    // premium 档：这块滑块要有「透镜」感，也就是边缘把底下的封面弯折一下。
+    //
+    // standard 走的是 2D 磨砂着色器，只有模糊、没有厚度/折射/边缘高光，
+    // 看起来就是一张半透明的胶片——和底栏那颗会折射的滑块完全不是一回事。
+    // 之前担心 premium 在「会移动的表面上」会采到空纹理闪黑，但底栏的滑块
+    // 就是同一个用法（每帧都在动）且一直正常，档位差异那套说法已经被
+    // 1.4.40 证伪了：真正导致黑底的是 blend group 那趟融合 pass，
+    // 而 LiquidGlassEngine.settings 里已经统一关掉了（platformViewMode:
+    // passthrough 兜底）。
+    //
+    // 底色必须压得比顶栏淡：折射要被看见，前提是玻璃足够清透，底色一浓
+    // 就只剩「糊」。
     return Positioned.fromRect(
       rect: rect,
       child: LiquidGlassPanel(
         borderRadius: BorderRadius.circular(rect.height / 2),
-        quality: lg.GlassQuality.standard,
-        tintAlpha: isDark ? 0.34 : 0.5,
+        quality: lg.GlassQuality.premium,
+        tintAlpha: isDark ? 0.26 : 0.3,
         child: const SizedBox.expand(),
       ),
     );

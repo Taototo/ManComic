@@ -19,12 +19,27 @@ class PaneActionEntry {
 
   IconData icon;
 
-  VoidCallback onTap;
+  VoidCallback? onTap;
+
+  /// 需要「贴着按钮弹菜单」的操作（收藏页的「更多」）。
+  ///
+  /// [onTap] 拿不到按钮自己的位置，而 `showMenuX` 要的正是那个矩形：菜单
+  /// 必须挂在被点的那个图标下面。回调把按钮在屏幕上的矩形交出去，页面再
+  /// 自己决定弹什么。
+  void Function(BuildContext context, Rect anchor)? onTapWithAnchor;
+
+  /// 图标颜色。`null` 表示用默认的前景色。
+  ///
+  /// 有些图标本身带状态（收藏页的「排序 / 筛选」被改过就是高亮的），
+  /// 光换个图标表达不出来。
+  Color? color;
 
   PaneActionEntry({
     required this.label,
     required this.icon,
-    required this.onTap,
+    this.onTap,
+    this.onTapWithAnchor,
+    this.color,
   });
 }
 
@@ -355,6 +370,13 @@ class NaviPaneState extends State<NaviPane>
     return LiquidGlassBar(
       lightIntensity: isDark ? 0.16 : 0.45,
       fresnelStrength: 0.35,
+      // 底色和底栏同一档。
+      //
+      // 默认那档（opacity×0.35 ≈ 0.2）是给「玻璃本身才是主体」的卡片配的：
+      // 顶栏下面压的是漫画封面，一旦碰上浅色封面，18pt 的标题字就直接糊进
+      // 封面里了。底栏因为压在任意内容上早就调到了这条线，顶栏没理由比它
+      // 更清透——那正是「同一种玻璃，两种观感」的来源。
+      tintAlpha: LiquidGlassEngine.barTintAlpha,
       // 这里必须用 Builder 而不是直接算：附加行（源页签）的构造器是页面在
       // 自己的 initState 里注册的，而 buildTop 在父级 build 期间就被调用了，
       // 那时候页面子树还没建起来。Builder 的 build 排在 Stack 里更靠前的
@@ -381,40 +403,50 @@ class NaviPaneState extends State<NaviPane>
               padding: const EdgeInsets.only(left: 16, right: 8),
               child: Row(
                 children: [
-                  AnimatedSwitcher(
-                    duration: const Duration(milliseconds: 260),
-                    switchInCurve: Curves.easeOutCubic,
-                    switchOutCurve: Curves.easeInCubic,
-                    transitionBuilder: (child, animation) {
-                      return FadeTransition(
-                        opacity: animation,
-                        child: SlideTransition(
-                          position: Tween<Offset>(
-                            begin: const Offset(0, 0.4),
-                            end: Offset.zero,
-                          ).animate(animation),
-                          child: child,
-                        ),
-                      );
-                    },
-                    child: KeyedSubtree(
-                      key: ValueKey(currentPage),
-                      child: widget.titleBuilder?.call(currentPage, context) ??
-                          Text(
-                            widget.paneItems[currentPage].label,
-                            style: const TextStyle(
-                              fontSize: 18,
-                              fontWeight: FontWeight.bold,
+                  // 标题位要能被压缩：收藏页把「排序 / 多选 / 搜索 / 更多」
+                  // 一起提到了这一行，图标一多，原来那种「标题按自身宽度铺
+                  // 开 + Spacer」的排法会直接把 Row 挤爆（图标并不会缩）。
+                  Expanded(
+                    child: Align(
+                      alignment: Alignment.centerLeft,
+                      child: AnimatedSwitcher(
+                        duration: const Duration(milliseconds: 260),
+                        switchInCurve: Curves.easeOutCubic,
+                        switchOutCurve: Curves.easeInCubic,
+                        transitionBuilder: (child, animation) {
+                          return FadeTransition(
+                            opacity: animation,
+                            child: SlideTransition(
+                              position: Tween<Offset>(
+                                begin: const Offset(0, 0.4),
+                                end: Offset.zero,
+                              ).animate(animation),
+                              child: child,
                             ),
-                          ),
+                          );
+                        },
+                        child: KeyedSubtree(
+                          key: ValueKey(currentPage),
+                          child:
+                              widget.titleBuilder?.call(currentPage, context) ??
+                                  Text(
+                                    widget.paneItems[currentPage].label,
+                                    style: const TextStyle(
+                                      fontSize: 18,
+                                      fontWeight: FontWeight.bold,
+                                    ),
+                                  ),
+                        ),
+                      ),
                     ),
                   ),
-                  const Spacer(),
                   for (var action in widget.paneActions)
                     _GlassActionButton(
                       icon: action.icon,
                       label: action.label,
+                      color: action.color,
                       onTap: action.onTap,
+                      onTapWithAnchor: action.onTapWithAnchor,
                     ),
                 ],
               ),
@@ -492,7 +524,10 @@ class NaviPaneState extends State<NaviPane>
           enableBlend: false,
           // 底栏压在任意内容上（漫画封面经常是深色大块），玻璃底色必须
           // 比浮层默认值实一截，图标和文字才不会陷进背景里。
-          settings: LiquidGlassEngine.settings(context, tintAlpha: 0.55),
+          settings: LiquidGlassEngine.settings(
+            context,
+            tintAlpha: LiquidGlassEngine.barTintAlpha,
+          ),
           // 弹簧放慢：默认 snappy(350ms) 快到看不出滑行，果冻感没展开
           // 就到站了。bouncy(550ms) 才有 iOS 26 那种滑过去再弹一下的节奏。
           springDescription: LiquidGlassEngine.indicatorSpring,
@@ -785,14 +820,21 @@ class _GlassActionButton extends StatefulWidget {
   const _GlassActionButton({
     required this.icon,
     required this.label,
-    required this.onTap,
+    this.color,
+    this.onTap,
+    this.onTapWithAnchor,
   });
 
   final IconData icon;
 
   final String label;
 
-  final VoidCallback onTap;
+  final Color? color;
+
+  final VoidCallback? onTap;
+
+  /// 需要按位置弹菜单时用这个，见 [PaneActionEntry.onTapWithAnchor]。
+  final void Function(BuildContext context, Rect anchor)? onTapWithAnchor;
 
   @override
   State<_GlassActionButton> createState() => _GlassActionButtonState();
@@ -802,6 +844,19 @@ class _GlassActionButtonState extends State<_GlassActionButton> {
   bool _pressed = false;
 
   bool _hovering = false;
+
+  void _handleTap() {
+    final anchor = widget.onTapWithAnchor;
+    if (anchor == null) {
+      widget.onTap?.call();
+      return;
+    }
+    final box = context.findRenderObject() as RenderBox?;
+    if (box == null || !box.hasSize) {
+      return;
+    }
+    anchor(context, box.localToGlobal(Offset.zero) & box.size);
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -819,7 +874,7 @@ class _GlassActionButtonState extends State<_GlassActionButton> {
         onExit: (_) => setState(() => _hovering = false),
         child: GestureDetector(
           behavior: HitTestBehavior.opaque,
-          onTap: widget.onTap,
+          onTap: _handleTap,
           onTapDown: (_) => setState(() => _pressed = true),
           onTapUp: (_) => setState(() => _pressed = false),
           onTapCancel: () => setState(() => _pressed = false),
@@ -842,7 +897,8 @@ class _GlassActionButtonState extends State<_GlassActionButton> {
                   child: Icon(
                     widget.icon,
                     size: 22,
-                    color: colors.onSurface.withValues(alpha: 0.86),
+                    color: widget.color ??
+                        colors.onSurface.withValues(alpha: 0.86),
                   ),
                 ),
               ),

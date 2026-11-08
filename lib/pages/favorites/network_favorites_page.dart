@@ -92,9 +92,15 @@ class _NormalFavoritePageState extends State<_NormalFavoritePage> {
 
   @override
   Widget build(BuildContext context) {
-    return ComicList(
+    final topBar =
+        context.findAncestorStateOfType<_FavoritesPageState>()?.topBar;
+    Widget body = ComicList(
       key: comicListKey,
-      leadingSliver: SliverAppbar(
+      // 顶栏接管标题和按钮之后，这里只留顶栏的位移：内容要能一路穿到
+      // 玻璃后面去，顶栏才有东西可以折射。
+      leadingSliver: topBar != null
+          ? SliverPadding(padding: EdgeInsets.only(top: context.padding.top))
+          : SliverAppbar(
         pinned: false,
         style:
             context.width < changePoint ? AppbarStyle.shadow : AppbarStyle.blur,
@@ -184,6 +190,32 @@ class _NormalFavoritePageState extends State<_NormalFavoritePage> {
       },
       enablePageStorage: true,
     );
+    if (topBar == null) {
+      return body;
+    }
+    return FavoritesTopBarScope(
+      controller: topBar,
+      title: widget.data.title,
+      actions: [
+        PaneActionEntry(
+          icon: Icons.refresh,
+          label: "Refresh".tl,
+          onTap: () {
+            // Force refresh bypassing cache
+            NetworkCacheManager().clear();
+            comicListKey.currentState?.refresh();
+          },
+        ),
+        PaneActionEntry(
+          icon: Icons.sync,
+          label: "Convert to local".tl,
+          onTap: () {
+            importNetworkFolder(widget.data.key, 9999999, null, null);
+          },
+        ),
+      ],
+      child: body,
+    );
   }
 }
 
@@ -228,8 +260,25 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
     context.to(() => _FavoriteFolder(widget.data, key, title));
   }
 
+  /// 顶栏是否接管了标题和按钮。为 null 时页面自己画一条表头。
+  FavoritesTopBarController? get _topBar =>
+      context.findAncestorStateOfType<_FavoritesPageState>()?.topBar;
+
   @override
   Widget build(BuildContext context) {
+    final topBar = _topBar;
+    final body = _buildBody(context, showOwnBar: topBar == null);
+    if (topBar == null) {
+      return body;
+    }
+    return FavoritesTopBarScope(
+      controller: topBar,
+      title: widget.data.title,
+      child: body,
+    );
+  }
+
+  Widget _buildBody(BuildContext context, {required bool showOwnBar}) {
     var sliverAppBar = SliverAppbar(
       pinned: false,
       style:
@@ -271,7 +320,7 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
       loadPage();
       return Column(
         children: [
-          appBar,
+          if (showOwnBar) appBar,
           const Expanded(
             child: Center(
               child: FiveDotLoadingAnimation(),
@@ -282,7 +331,7 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
     } else if (_errorMessage != null) {
       return Column(
         children: [
-          appBar,
+          if (showOwnBar) appBar,
           Expanded(
             child: NetworkError(
               message: _errorMessage!,
@@ -304,7 +353,10 @@ class _MultiFolderFavoritesPageState extends State<_MultiFolderFavoritesPage> {
 
       return SmoothCustomScrollView(
         slivers: [
-          sliverAppBar,
+          if (showOwnBar)
+            sliverAppBar
+          else
+            SliverPadding(padding: EdgeInsets.only(top: context.padding.top)),
           SliverGridViewWithFixedItemHeight(
             delegate:
                 SliverChildBuilderDelegate(childCount: length, (context, i) {
@@ -554,10 +606,14 @@ class _FavoriteFolder extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return ComicList(
+    final topBar =
+        context.findAncestorStateOfType<_FavoritesPageState>()?.topBar;
+    Widget body = ComicList(
       key: comicListKey,
       enablePageStorage: true,
-      leadingSliver: SliverAppbar(
+      leadingSliver: topBar != null
+          ? SliverPadding(padding: EdgeInsets.only(top: context.padding.top))
+          : SliverAppbar(
         title: Text(title),
         actions: [
           MenuButton(entries: [
@@ -602,6 +658,23 @@ class _FavoriteFolder extends StatelessWidget {
           ),
         ];
       },
+    );
+    if (topBar == null) {
+      return body;
+    }
+    return FavoritesTopBarScope(
+      controller: topBar,
+      title: title,
+      actions: [
+        PaneActionEntry(
+          icon: Icons.sync,
+          label: "Convert to local".tl,
+          onTap: () {
+            importNetworkFolder(data.key, 9999999, title, folderID);
+          },
+        ),
+      ],
+      child: body,
     );
   }
 }

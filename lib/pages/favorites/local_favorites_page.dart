@@ -294,6 +294,247 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   var scrollController = ScrollController();
 
+  /// 顶栏接管了标题和操作按钮时，页面自己那条 SliverAppbar 就不画了。
+  ///
+  /// 之前两条栏是同时存在的：玻璃顶栏（文件夹 / 搜索 / 设置）下面再压一条
+  /// 实色横杠（≡ / 文件夹名 / 排序 / 多选 / 搜索 / 更多），同一屏里两个搜索
+  /// 图标各管各的，顶上还多一条硬边。现在标题和按钮全部交给顶栏，页面只剩
+  /// 内容——和主页、推荐页一致。
+  bool get _headersInTopBar => favPage.topBar != null;
+
+  /// 排序 / 已阅筛选被动过时，顶栏那颗按钮要有个「开着」的样子。
+  bool get _filterActive =>
+      readFilterSelect != readFilterList[0] || sortSelect != titleSortDefault;
+
+  void openFilterDialog() {
+    showDialog(
+      context: context,
+      builder: (context) {
+        return _LocalFavoritesFilterDialog(
+          initReadFilterSelect: readFilterSelect,
+          initSortSelect: sortSelect,
+          updateConfig: (readFilter, sort) {
+            setState(() {
+              readFilterSelect = readFilter;
+              sortSelect = sort;
+            });
+            updateComics();
+          },
+        );
+      },
+    );
+  }
+
+  void enterSelectMode() {
+    setState(() {
+      multiSelectMode = true;
+      selectedComics.clear();
+    });
+  }
+
+  void enterSearchMode() {
+    setState(() {
+      keyword = "";
+      searchMode = true;
+      updateSearchResult();
+    });
+  }
+
+  /// 与网络收藏夹同步（只有「链接到网络源」的文件夹才有）。
+  ///
+  /// 原来这颗按钮点开的是一个 [Flyout]，而 Flyout 必须挂在被点的那个图标
+  /// 下面，顶栏那套图标位给不了它这个宿主。这里改成弹窗，内容一字未动。
+  void openSyncDialog() {
+    if (networkSource == null) {
+      return;
+    }
+    final key = GlobalKey<_SelectUpdatePageNumState>();
+    showDialog(
+      context: context,
+      builder: (context) {
+        return ContentDialog(
+          title: "Sync".tl,
+          content: Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 16),
+            child: _SelectUpdatePageNum(
+              networkSource: networkSource!,
+              networkFolder: networkFolder,
+              key: key,
+            ),
+          ),
+          actions: [
+            Button.filled(
+              child: Text("Update".tl),
+              onPressed: () {
+                final pageNum = key.currentState?.updatePageNum;
+                context.pop();
+                if (pageNum == null) {
+                  return;
+                }
+                importNetworkFolder(
+                  networkSource!,
+                  pageNum,
+                  widget.folder,
+                  networkFolder!,
+                ).then((value) {
+                  updateComics();
+                });
+              },
+            ),
+          ],
+        );
+      },
+    );
+  }
+
+  /// 三点菜单。文件夹管理的低频动作都收在这里，顶栏只留高频图标。
+  ///
+  /// 「已阅」是内置分类，不提供重命名/排序/导出/删除等文件夹管理。
+  List<MenuEntry> buildMoreMenu() {
+    return [
+      // 与网络源同步。只有「链接到网络源」的文件夹才有，而且是个低频动作，
+      // 放在菜单里比在顶栏占一颗图标划算（顶栏已经被 6 颗图标挤满了）。
+      if (networkSource != null && !isAllFolder)
+        MenuEntry(
+          icon: Icons.sync,
+          text: "Sync".tl,
+          onClick: openSyncDialog,
+        ),
+      // 智能书架入口收进三点菜单，顶栏只留高频操作
+      MenuEntry(
+        icon: Icons.auto_awesome_motion_outlined,
+        text: "Smart shelf".tl,
+        onClick: () {
+          context.to(() => const SmartShelfPage());
+        },
+      ),
+      if (!isAllFolder && !isReadFolder) ...[
+        MenuEntry(
+          icon: Icons.edit_outlined,
+          text: "Rename".tl,
+          onClick: () {
+            showInputDialog(
+              context: App.rootContext,
+              title: "Rename".tl,
+              hintText: "New Name".tl,
+              onConfirm: (value) {
+                var err = validateFolderName(value.toString());
+                if (err != null) {
+                  return err;
+                }
+                LocalFavoritesManager().rename(
+                  widget.folder,
+                  value.toString(),
+                );
+                favPage.folderList?.updateFolders();
+                favPage.setFolder(false, value.toString());
+                return null;
+              },
+            );
+          },
+        ),
+        MenuEntry(
+          icon: Icons.reorder,
+          text: "Reorder".tl,
+          onClick: () {
+            context
+                .to(() {
+                  return _ReorderComicsPage(widget.folder, (
+                    comics,
+                  ) {
+                    this.comics = comics;
+                  });
+                })
+                .then((value) {
+                  if (mounted) {
+                    setState(() {});
+                  }
+                });
+          },
+        ),
+        MenuEntry(
+          icon: Icons.upload_file,
+          text: "Export".tl,
+          onClick: () {
+            var json = LocalFavoritesManager().folderToJson(widget.folder);
+            saveFile(
+              data: utf8.encode(json),
+              filename: "${widget.folder}.json",
+            );
+          },
+        ),
+        MenuEntry(
+          icon: Icons.update,
+          text: "Update Comics Info".tl,
+          onClick: () {
+            updateComicsInfo(widget.folder).then((newComics) {
+              if (mounted) {
+                setState(() {
+                  comics = newComics;
+                });
+              }
+            });
+          },
+        ),
+        MenuEntry(
+          icon: Icons.delete_outline,
+          text: "Delete Folder".tl,
+          color: context.colorScheme.error,
+          isDanger: true,
+          onClick: () {
+            showConfirmDialog(
+              context: App.rootContext,
+              title: "Delete".tl,
+              content: "Delete folder '@f' ?".tlParams({
+                "f": widget.folder,
+              }),
+              btnColor: context.colorScheme.error,
+              onConfirm: () {
+                favPage.setFolder(false, null);
+                LocalFavoritesManager().deleteFolder(widget.folder);
+                favPage.folderList?.updateFolders();
+              },
+            );
+          },
+        ),
+      ],
+    ];
+  }
+
+  /// 交给玻璃顶栏的图标位。顺序按使用频率：筛选 → 多选 → 搜索 → 更多。
+  ///
+  /// 这里**没有**「文件夹」入口：它已经在顶栏的全局图标位上了（见
+  /// [MainPage] 的 paneActions），再放一个就是同一件事两颗图标。
+  /// 「同步」也挪进了三点菜单——手机宽度只够 6 颗图标，它最不值钱。
+  List<PaneActionEntry> buildTopBarActions(BuildContext context) {
+    final primary = context.colorScheme.primary;
+    return [
+      PaneActionEntry(
+        icon: Icons.sort_rounded,
+        label: "Filter".tl,
+        color: _filterActive ? primary : null,
+        onTap: openFilterDialog,
+      ),
+      PaneActionEntry(
+        icon: Icons.checklist_rtl,
+        label: "Select".tl,
+        onTap: enterSelectMode,
+      ),
+      PaneActionEntry(
+        icon: Icons.search,
+        label: "Search".tl,
+        onTap: enterSearchMode,
+      ),
+      PaneActionEntry(
+        icon: Icons.more_horiz,
+        label: "More".tl,
+        onTapWithAnchor: (context, anchor) {
+          showMenuX(context, anchor.topLeft, buildMoreMenu());
+        },
+      ),
+    ];
+  }
+
   @override
   Widget build(BuildContext context) {
     var title = favPage.folder ?? "Unselected".tl;
@@ -306,7 +547,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     Widget body = SmoothCustomScrollView(
       controller: scrollController,
       slivers: [
-        if (!searchMode && !multiSelectMode)
+        if (!searchMode && !multiSelectMode && !_headersInTopBar)
           SliverAppbar(
             pinned: false,
             style: context.width < changePoint
@@ -328,214 +569,34 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   : null,
               child: Text(title),
             ),
+            // 按钮全部走同一批方法：顶栏那一排图标调用的是同一份，
+            // 只是换了宿主（这一条栏只在没有顶栏时才会出现）。
             actions: [
-              if (networkSource != null && !isAllFolder)
-                Tooltip(
-                  message: "Sync".tl,
-                  child: Flyout(
-                    flyoutBuilder: (context) {
-                      final GlobalKey<_SelectUpdatePageNumState>
-                      selectUpdatePageNumKey =
-                          GlobalKey<_SelectUpdatePageNumState>();
-                      var updatePageWidget = _SelectUpdatePageNum(
-                        networkSource: networkSource!,
-                        networkFolder: networkFolder,
-                        key: selectUpdatePageNumKey,
-                      );
-                      return FlyoutContent(
-                        title: "Sync".tl,
-                        content: updatePageWidget,
-                        actions: [
-                          Button.filled(
-                            child: Text("Update".tl),
-                            onPressed: () {
-                              context.pop();
-                              importNetworkFolder(
-                                networkSource!,
-                                selectUpdatePageNumKey
-                                    .currentState!
-                                    .updatePageNum,
-                                widget.folder,
-                                networkFolder!,
-                              ).then((value) {
-                                updateComics();
-                              });
-                            },
-                          ),
-                        ],
-                      );
-                    },
-                    child: Builder(
-                      builder: (context) {
-                        return IconButton(
-                          icon: const Icon(Icons.sync),
-                          onPressed: () {
-                            Flyout.of(context).show();
-                          },
-                        );
-                      },
-                    ),
-                  ),
-                ),
               Tooltip(
                 message: "Filter".tl,
                 child: IconButton(
                   icon: const Icon(Icons.sort_rounded),
-                  color:
-                      (readFilterSelect != readFilterList[0] ||
-                          sortSelect != titleSortDefault)
+                  color: _filterActive
                       ? context.colorScheme.primaryContainer
                       : null,
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (context) {
-                        return _LocalFavoritesFilterDialog(
-                          initReadFilterSelect: readFilterSelect,
-                          initSortSelect: sortSelect,
-                          updateConfig: (readFilter, sort) {
-                            setState(() {
-                              readFilterSelect = readFilter;
-                              sortSelect = sort;
-                            });
-                            updateComics();
-                          },
-                        );
-                      },
-                    );
-                  },
+                  onPressed: openFilterDialog,
                 ),
               ),
               Tooltip(
                 message: "Select".tl,
                 child: IconButton(
                   icon: const Icon(Icons.checklist_rtl),
-                  onPressed: () {
-                    setState(() {
-                      multiSelectMode = true;
-                      selectedComics.clear();
-                    });
-                  },
+                  onPressed: enterSelectMode,
                 ),
               ),
               Tooltip(
                 message: "Search".tl,
                 child: IconButton(
                   icon: const Icon(Icons.search),
-                  onPressed: () {
-                    setState(() {
-                      keyword = "";
-                      searchMode = true;
-                      updateSearchResult();
-                    });
-                  },
+                  onPressed: enterSearchMode,
                 ),
               ),
-              // 「已阅」是内置分类，不提供重命名/排序/导出/删除等文件夹管理
-              MenuButton(
-                entries: [
-                  // 智能书架入口收进三点菜单，顶栏只留高频操作
-                  MenuEntry(
-                    icon: Icons.auto_awesome_motion_outlined,
-                    text: "Smart shelf".tl,
-                    onClick: () {
-                      context.to(() => const SmartShelfPage());
-                    },
-                  ),
-                  if (!isAllFolder && !isReadFolder) ...[
-                    MenuEntry(
-                      icon: Icons.edit_outlined,
-                      text: "Rename".tl,
-                      onClick: () {
-                        showInputDialog(
-                          context: App.rootContext,
-                          title: "Rename".tl,
-                          hintText: "New Name".tl,
-                          onConfirm: (value) {
-                            var err = validateFolderName(value.toString());
-                            if (err != null) {
-                              return err;
-                            }
-                            LocalFavoritesManager().rename(
-                              widget.folder,
-                              value.toString(),
-                            );
-                            favPage.folderList?.updateFolders();
-                            favPage.setFolder(false, value.toString());
-                            return null;
-                          },
-                        );
-                      },
-                    ),
-                    MenuEntry(
-                      icon: Icons.reorder,
-                      text: "Reorder".tl,
-                      onClick: () {
-                        context
-                            .to(() {
-                              return _ReorderComicsPage(widget.folder, (
-                                comics,
-                              ) {
-                                this.comics = comics;
-                              });
-                            })
-                            .then((value) {
-                              if (mounted) {
-                                setState(() {});
-                              }
-                            });
-                      },
-                    ),
-                    MenuEntry(
-                      icon: Icons.upload_file,
-                      text: "Export".tl,
-                      onClick: () {
-                        var json = LocalFavoritesManager().folderToJson(
-                          widget.folder,
-                        );
-                        saveFile(
-                          data: utf8.encode(json),
-                          filename: "${widget.folder}.json",
-                        );
-                      },
-                    ),
-                    MenuEntry(
-                      icon: Icons.update,
-                      text: "Update Comics Info".tl,
-                      onClick: () {
-                        updateComicsInfo(widget.folder).then((newComics) {
-                          if (mounted) {
-                            setState(() {
-                              comics = newComics;
-                            });
-                          }
-                        });
-                      },
-                    ),
-                    MenuEntry(
-                      icon: Icons.delete_outline,
-                      text: "Delete Folder".tl,
-                      color: context.colorScheme.error,
-                      isDanger: true,
-                      onClick: () {
-                        showConfirmDialog(
-                          context: App.rootContext,
-                          title: "Delete".tl,
-                          content: "Delete folder '@f' ?".tlParams({
-                            "f": widget.folder,
-                          }),
-                          btnColor: context.colorScheme.error,
-                          onConfirm: () {
-                            favPage.setFolder(false, null);
-                            LocalFavoritesManager().deleteFolder(widget.folder);
-                            favPage.folderList?.updateFolders();
-                          },
-                        );
-                      },
-                    ),
-                  ],
-                ],
-              ),
+              MenuButton(entries: buildMoreMenu()),
             ],
           )
         else if (multiSelectMode)
@@ -671,6 +732,12 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                 updateSearchResult();
               },
             ).paddingBottom(8).paddingRight(8),
+          ),
+        // 正常状态下页面没有自己的标题栏了，留白要自己付：付成 sliver 内部
+        // 的 padding，往上滑的时候封面才能穿到玻璃顶栏后面去。
+        if (!searchMode && !multiSelectMode && _headersInTopBar)
+          SliverPadding(
+            padding: EdgeInsets.only(top: context.padding.top),
           ),
         if (isLoading)
           SliverToBoxAdapter(
@@ -808,13 +875,29 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       ],
     );
     body = AppScrollBar(
-      topPadding: 48,
+      // 拇指的轨道要从玻璃顶栏下沿开始。顶栏模式下页面没有自己的标题栏，
+      // 起算点就是顶栏的位移；搜索 / 多选时页面里还有一条 pinned 的表头，
+      // 再往下让 52。
+      topPadding:
+          context.padding.top + ((searchMode || multiSelectMode) ? 52 : 0),
       controller: scrollController,
       child: ScrollConfiguration(
         behavior: ScrollConfiguration.of(context).copyWith(scrollbars: false),
         child: body,
       ),
     );
+    final topBar = favPage.topBar;
+    if (topBar != null) {
+      // 顶栏接管标题和按钮。搜索 / 多选这种临时状态由页面自己那条表头负责，
+      // 这时候顶栏一侧清空，免得两处各显示一份。
+      final inline = searchMode || multiSelectMode;
+      body = FavoritesTopBarScope(
+        controller: topBar,
+        title: inline ? null : title,
+        actions: inline ? const [] : buildTopBarActions(context),
+        child: body,
+      );
+    }
     return PopScope(
       canPop: !multiSelectMode && !searchMode,
       onPopInvokedWithResult: (didPop, result) {

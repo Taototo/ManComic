@@ -90,4 +90,56 @@ void main() {
     final barHeight = tester.getSize(find.byType(LiquidGlassBar).first).height;
     expect(barHeight, closeTo(statusBar + 48, 0.5));
   });
+
+  testWidgets('六颗图标 + 文件夹名：360 宽的手机上不溢出', (tester) async {
+    // 收藏页把「排序 / 多选 / 搜索 / 更多」提到了顶栏，加上全局的「文件夹 /
+    // 设置」一共六颗；每颗 44 宽就是 264，360 宽的手机只剩不到 70 给标题。
+    // 排错的表现是 RenderFlex 溢出（黄黑条），所以这里必须按真实宽度跑一遍。
+    final key = GlobalKey<NavigatorState>();
+    tester.view.physicalSize = const Size(360, 800);
+    tester.view.devicePixelRatio = 1;
+    addTearDown(tester.view.reset);
+    await tester.pumpWidget(
+      MaterialApp(
+        home: MediaQuery(
+          data: const MediaQueryData(
+            padding: EdgeInsets.only(top: statusBar),
+            viewPadding: EdgeInsets.only(top: statusBar),
+          ),
+          child: NaviPane(
+            observer: NaviObserver(),
+            navigatorKey: key,
+            titleBuilder: (page, context) => const Text("漫漫看的最爱收藏夹"),
+            paneItems: [
+              PaneItemEntry(
+                label: 'Explore',
+                icon: Icons.explore_outlined,
+                activeIcon: Icons.explore,
+              ),
+            ],
+            paneActions: [
+              for (var i = 0; i < 6; i++)
+                PaneActionEntry(
+                  icon: Icons.circle_outlined,
+                  label: 'action $i',
+                  onTap: () {},
+                ),
+            ],
+            pageBuilder: (i) => const SizedBox.expand(),
+          ),
+        ),
+      ),
+    );
+    await tester.pump(const Duration(milliseconds: 300));
+
+    expect(tester.takeException(), isNull, reason: "顶栏这一行排溢出了");
+    // 侧栏（宽屏折叠形态）用的是同一份图标，所以按「至少 6 颗」断言，
+    // 真正要看的是最后那一颗没被挤出屏幕。
+    expect(find.byIcon(Icons.circle_outlined), findsAtLeastNWidgets(6));
+    // 图标一个都不能被挤没，标题也只能被压窄（不能把图标推出去）。
+    final titleWidth = tester.getSize(find.text("漫漫看的最爱收藏夹")).width;
+    expect(titleWidth, greaterThan(0));
+    final lastIcon = tester.getTopLeft(find.byIcon(Icons.circle_outlined).last);
+    expect(lastIcon.dx, lessThan(360));
+  });
 }

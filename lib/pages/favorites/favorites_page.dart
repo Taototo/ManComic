@@ -3,7 +3,6 @@ import 'dart:math';
 import 'dart:ui' show ImageFilter;
 
 import 'package:flutter/material.dart';
-import 'package:flutter/services.dart';
 import 'package:flutter_reorderable_grid_view/widgets/reorderable_builder.dart';
 import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:venera/components/components.dart';
@@ -51,11 +50,154 @@ class FavoritesFolderController {
   VoidCallback? open;
 }
 
+/// 收藏页交给玻璃顶栏的内容：文件夹名 + 页面自己的操作按钮。
+///
+/// 收藏页原来自己有一条 SliverAppbar（文件夹名 + 排序 / 多选 / 搜索 / 更多），
+/// 它就压在玻璃顶栏下面：顶上等于多出一条实色横杠，同一屏里还有两个搜索
+/// 图标各管各的。现在那条栏整体去掉，标题和图标位都由页面交给顶栏。
+///
+/// [update] 带一个 owner：切文件夹时**新**页面的 initState 会先跑、**旧**
+/// 页面的 dispose 后跑，不带 owner 的话旧页面的清理会把新页面刚写进去的
+/// 内容一起抹掉（顶栏闪一下空白）。
+class FavoritesTopBarController extends ChangeNotifier {
+  Object? _owner;
+
+  String? _title;
+
+  List<PaneActionEntry> _actions = const [];
+
+  String? get title => _title;
+
+  List<PaneActionEntry> get actions => _actions;
+
+  void update(
+    Object owner, {
+    String? title,
+    List<PaneActionEntry> actions = const [],
+  }) {
+    final changed = title != _title || !_sameActions(_actions, actions);
+    _owner = owner;
+    _title = title;
+    _actions = actions;
+    if (changed) {
+      notifyListeners();
+    }
+  }
+
+  void clear(Object owner) {
+    if (!identical(_owner, owner)) {
+      return;
+    }
+    _owner = null;
+    if (_title == null && _actions.isEmpty) {
+      return;
+    }
+    _title = null;
+    _actions = const [];
+    notifyListeners();
+  }
+
+  /// 只比「看得见的那部分」：onTap 每次 build 都是新闭包，逐项比闭包会让
+  /// 顶栏每帧重建一次（还会顺手把顶栏玻璃重置一遍）。
+  static bool _sameActions(List<PaneActionEntry> a, List<PaneActionEntry> b) {
+    if (a.length != b.length) {
+      return false;
+    }
+    for (var i = 0; i < a.length; i++) {
+      if (a[i].icon != b[i].icon ||
+          a[i].label != b[i].label ||
+          a[i].color != b[i].color) {
+        return false;
+      }
+    }
+    return true;
+  }
+}
+
+/// 声明「这一页在顶栏里显示什么」。
+///
+/// 包在收藏页各子页的最外层：谁在树上，顶栏就听谁的。做成 widget 而不是让
+/// 每个页面自己去调 controller，一来 StatelessWidget（网络收藏的几个子页
+/// 都是）也能用，二来「写入」必须排在 build 之后——在 initState 里直接通知
+/// 会撞上「build 期间 markNeedsBuild」。
+class FavoritesTopBarScope extends StatefulWidget {
+  const FavoritesTopBarScope({
+    super.key,
+    required this.controller,
+    required this.title,
+    this.actions = const [],
+    required this.child,
+  });
+
+  final FavoritesTopBarController controller;
+
+  /// 顶栏标题位的内容。文件夹名这类「随时可能变」的东西放这里，
+  /// 比塞进图标位更合适——它本来就在原来那条栏的左边。
+  final String? title;
+
+  final List<PaneActionEntry> actions;
+
+  final Widget child;
+
+  @override
+  State<FavoritesTopBarScope> createState() => _FavoritesTopBarScopeState();
+}
+
+class _FavoritesTopBarScopeState extends State<FavoritesTopBarScope> {
+  bool _scheduled = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _schedule();
+  }
+
+  @override
+  void didUpdateWidget(covariant FavoritesTopBarScope oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 每次重建都重新写一遍：图标本身会随状态变（筛选被改过要高亮、
+    // 是否已选多选状态会换掉整组动作），而 [FavoritesTopBarController]
+    // 只在「看得见的部分」变了才通知顶栏重画，所以这里是廉价的。
+    _schedule();
+  }
+
+  @override
+  void dispose() {
+    widget.controller.clear(this);
+    super.dispose();
+  }
+
+  void _schedule() {
+    if (_scheduled) {
+      return;
+    }
+    _scheduled = true;
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      _scheduled = false;
+      if (!mounted) {
+        return;
+      }
+      widget.controller.update(
+        this,
+        title: widget.title,
+        actions: widget.actions,
+      );
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) => widget.child;
+}
+
 class FavoritesPage extends StatefulWidget {
-  const FavoritesPage({super.key, this.folders});
+  const FavoritesPage({super.key, this.folders, this.topBar});
 
   /// 抽屉入口。为 null 时页面自己把入口留在页面里（测试或独立使用）。
   final FavoritesFolderController? folders;
+
+  /// 顶栏内容（文件夹名 + 页面操作按钮）。为 null 时页面不往顶栏写东西，
+  /// 各子页会把原来那条 SliverAppbar 留着——单独使用本页时仍然可用。
+  final FavoritesTopBarController? topBar;
 
   @override
   State<FavoritesPage> createState() => _FavoritesPageState();
@@ -97,6 +239,9 @@ class _FavoritesPageState extends State<FavoritesPage> {
   bool isNetwork = false;
 
   FolderList? folderList;
+
+  /// 顶栏内容的上游。各子页通过 [FavoritesTopBarScope] 往里写。
+  FavoritesTopBarController? get topBar => widget.topBar;
 
   /// 隐私保护：当前是否被模糊遮罩挡住
   bool locked = false;

@@ -103,6 +103,14 @@ class LiquidGlassEngine {
         duration: const Duration(milliseconds: 550),
         extraBounce: 0.1,
       );
+
+  /// 顶栏/底栏这类「压在任意内容之上的通栏玻璃」的底色强度。
+  ///
+  /// 默认那档（`GlassConfig.opacity × 0.35` ≈ 0.2）是给卡片配的：玻璃本身
+  /// 就是主体，透出来的东西越多越好看。但通栏上压着 18pt 的标题和图标，
+  /// 后面又是漫画封面这种大面积高对比图案，0.2 根本兜不住——浅色封面上
+  /// 白字直接消失。两条栏必须同档，否则同一种玻璃在上下两处是两种观感。
+  static const double barTintAlpha = 0.55;
 }
 
 /// 与 [LiquidGlass] 参数对齐的玻璃面板，内部按设置切换渲染引擎。
@@ -214,6 +222,7 @@ class LiquidGlassBar extends StatelessWidget {
     required this.child,
     this.borderRadius = BorderRadius.zero,
     this.quality,
+    this.tintAlpha,
     this.lightIntensity,
     this.fresnelStrength,
   });
@@ -223,6 +232,9 @@ class LiquidGlassBar extends StatelessWidget {
   final BorderRadius borderRadius;
 
   final lg.GlassQuality? quality;
+
+  /// 底色强度，见 [LiquidGlassEngine.barTintAlpha]。
+  final double? tintAlpha;
 
   /// 边缘高光强度。通栏贴边的顶栏要压低，否则下沿那道高光就是一条白描边。
   final double? lightIntensity;
@@ -234,6 +246,7 @@ class LiquidGlassBar extends StatelessWidget {
     return LiquidGlassPanel(
       borderRadius: borderRadius,
       quality: quality ?? lg.GlassQuality.premium,
+      tintAlpha: tintAlpha,
       lightIntensity: lightIntensity,
       fresnelStrength: fresnelStrength,
       child: child,

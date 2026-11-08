@@ -86,8 +86,10 @@ class _MainPageState extends State<MainPage> {
       FavoritesPage(
         key: const PageStorageKey('favorites'),
         folders: _favoritesFolders,
+        topBar: _favoritesTopBar,
       ),
     ];
+    _favoritesTopBar.addListener(onFavoritesTopBarChanged);
     super.initState();
   }
 
@@ -98,10 +100,24 @@ class _MainPageState extends State<MainPage> {
   /// 收藏夹抽屉的入口，由收藏页注册（见 [FavoritesFolderController]）。
   final _favoritesFolders = FavoritesFolderController();
 
+  /// 收藏页交给顶栏的内容（文件夹名 + 排序 / 多选 / 搜索 / 更多）。
+  ///
+  /// 收藏页原来自己有一条标题栏，就压在玻璃顶栏下面，等于顶上多一条实色
+  /// 横杠、同一屏两个搜索图标。现在那条栏去掉，标题和按钮都从这里进顶栏。
+  final _favoritesTopBar = FavoritesTopBarController();
+
+  void onFavoritesTopBarChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
   late final List<Widget> _pages;
 
   @override
   void dispose() {
+    _favoritesTopBar.removeListener(onFavoritesTopBarChanged);
+    _favoritesTopBar.dispose();
     _exploreGroup.dispose();
     super.dispose();
   }
@@ -114,9 +130,32 @@ class _MainPageState extends State<MainPage> {
       initialPage: index,
       observer: _observer,
       navigatorKey: _navigatorKey!,
-      // 主页和收藏不再显示标题字：顶栏只剩一块玻璃，内容直接长在它下面，
-      // 和主页的观感统一。推荐页把标题位让给「推荐 / 分类」分段控件。
+      // 主页不再显示标题字：顶栏只剩一块玻璃，内容直接长在它下面，
+      // 和推荐页的观感统一。推荐页把标题位让给「推荐 / 分类」分段控件，
+      // 收藏页则显示当前文件夹名——那条栏去掉以后，这里是唯一还写着
+      // 「我在哪个文件夹」的地方。
       titleBuilder: (page, context) {
+        if (page == _tabFavorites) {
+          final title = _favoritesTopBar.title;
+          if (title == null || title.isEmpty) {
+            return const SizedBox.shrink();
+          }
+          // 点文件夹名就开抽屉：原来那条栏里标题本来就是这个作用，
+          // 现在图标位被 6 颗按钮占满，标题这一下正好补上。
+          return GestureDetector(
+            behavior: HitTestBehavior.opaque,
+            onTap: () => _favoritesFolders.open?.call(),
+            child: Text(
+              title,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: const TextStyle(
+                fontSize: 17,
+                fontWeight: FontWeight.w600,
+              ),
+            ),
+          );
+        }
         if (page != _tabExplore) {
           return const SizedBox.shrink();
         }
@@ -169,6 +208,9 @@ class _MainPageState extends State<MainPage> {
         });
       },
       paneActions: [
+        // 收藏页自己的按钮（同步 / 排序 / 多选 / 搜索 / 更多）。原来它们长在
+        // 页面那条标题栏里，现在整条搬到顶栏，由页面登记、这里拼进来。
+        if (index == _tabFavorites) ..._favoritesTopBar.actions,
         // 收藏夹抽屉的入口。原来它长在收藏页自己的标题栏里（那一栏已经
         // 去掉，页面顶部才能和主页一致），现在提到顶栏图标位上。
         if (index == _tabFavorites)
@@ -177,7 +219,9 @@ class _MainPageState extends State<MainPage> {
             label: "Folders".tl,
             onTap: () => _favoritesFolders.open?.call(),
           ),
-        if (index != _tabHome)
+        // 收藏页自带「在当前文件夹里搜」的放大镜，这里再放一个全局搜索就是
+        // 同一屏两颗放大镜（原来截图里那两个就是这么来的）。
+        if (index != _tabHome && index != _tabFavorites)
           PaneActionEntry(
             icon: Icons.search,
             label: "Search".tl,
