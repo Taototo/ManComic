@@ -131,6 +131,21 @@ class _MainPageState extends State<MainPage> {
           },
         );
       },
+      // 推荐页的源页签并进顶栏这块玻璃：顶栏高度加一行 48，页面再把内容
+      // 整体让开这么多。两段玻璃合起来看就是一整块，不再有自己的磨砂底
+      // 和自己的边缘高光。
+      headerBuilder: (page, context) {
+        if (page != _tabExplore) {
+          return null;
+        }
+        return AnimatedBuilder(
+          animation: _exploreGroup,
+          builder: (context, _) =>
+              _exploreGroup.headerBuilder?.call(context) ??
+              const SizedBox.shrink(),
+        );
+      },
+      headerHeight: (page) => page == _tabExplore ? ExplorePage.tabBarHeight : 0,
       paneItems: [
         PaneItemEntry(
           label: 'Explore'.tl,

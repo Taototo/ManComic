@@ -13,8 +13,9 @@ import 'package:venera/utils/translations.dart';
 
 /// 源页签栏的高度。
 ///
-/// 页签栏现在叠在内容之上（见 [_ExplorePageState.build]），这个高度同时用来
-/// 给内容加顶部留白，所以必须和 `AppTabBar` 里的实际高度一致。
+/// 这一行现在并进了顶栏那块玻璃（见 [NaviPane.headerBuilder]），高度要同时
+/// 用于「顶栏的附加行」和「内容的顶部留白」，所以两边都读同一个常量：一边
+/// 是 [ExplorePage.tabBarHeight]，一边是 `AppTabBar` 里的实际高度。
 const _kExploreTabBarHeight = 48.0;
 
 /// 「推荐 / 分类」分组的共享状态。
@@ -37,6 +38,19 @@ class ExploreGroupController extends ChangeNotifier {
   /// 和推荐两组各有一套逻辑，只有页面自己知道当前该滚哪个控制器。
   VoidCallback? onReselect;
 
+  /// 顶栏附加行（源页签）的构造器，由页面注册。
+  ///
+  /// 页签栏要画在顶栏那块玻璃**里面**，而它的滚动控制器、页签控制器都在
+  /// 页面里。让顶栏去「问页面要一行 widget」，比把整棵页签栏搬到上层、
+  /// 再想办法把状态串过去要省事得多。
+  Widget? Function(BuildContext context)? headerBuilder;
+
+  /// 页签增减之后叫顶栏重画一次附加行。
+  ///
+  /// 只有「源 / 分类列表变了」这种非 build 期的改动需要显式叫一次；
+  /// 分组切换本来就会 notify。
+  void notifyHeaderChanged() => notifyListeners();
+
   /// 点页签：切换分组，或（点到当前页签时）回到顶部。
   void select(int value) {
     if (value == _group) {
@@ -57,6 +71,10 @@ class ExplorePage extends StatefulWidget {
 
   /// 分组状态。为 null 时页面自己在内部维护一份（供测试或独立使用）。
   final ExploreGroupController? group;
+
+  /// 源页签栏的高度。顶栏把它当作附加行的高度，页面把它当作内容顶部留白，
+  /// 两边必须是同一个数。
+  static const double tabBarHeight = _kExploreTabBarHeight;
 
   @override
   State<ExplorePage> createState() => _ExplorePageState();
@@ -121,6 +139,8 @@ class _ExplorePageState extends State<ExplorePage>
             .addPostFrameCallback((_) => old.dispose());
       }
     });
+    // 页签列表变了，但页签栏长在顶栏里，那棵子树不跟着本页重建。
+    widget.group?.notifyHeaderChanged();
   }
 
   void onNaviItemTapped(int index) {
@@ -186,6 +206,8 @@ class _ExplorePageState extends State<ExplorePage>
     exploreController = TabController(length: pages.length, vsync: this);
     categoryController = TabController(length: categories.length, vsync: this);
     appdata.settings.addListener(onSettingsChanged);
+    // 源页签这一行要画进顶栏那块玻璃里，由顶栏来取。
+    widget.group?.headerBuilder = buildHeader;
     NaviPane.of(context).addNaviItemTapListener(onNaviItemTapped);
   }
 
@@ -206,6 +228,9 @@ class _ExplorePageState extends State<ExplorePage>
     // 只有自己还是当前注入的回调时才清，避免把后来者的覆盖掉。
     if (widget.group?.onReselect == _toTopCurrentGroup) {
       widget.group?.onReselect = null;
+    }
+    if (widget.group?.headerBuilder == buildHeader) {
+      widget.group?.headerBuilder = null;
     }
     appdata.settings.removeListener(onSettingsChanged);
     naviPane?.removeNaviItemTapListener(onNaviItemTapped);
@@ -244,6 +269,14 @@ class _ExplorePageState extends State<ExplorePage>
           key: PageStorageKey("category_$key"),
           controller: _categoryController(key),
         ),
+      );
+
+  /// 内容顶部的留白 = 顶栏（+ 源页签）占掉的高度。
+  ///
+  /// 必须付成**滚动容器内部**的 sliver padding：付在外面等于把列表从玻璃
+  /// 下沿裁开，往上滑也钻不到玻璃后面去，顶栏那块玻璃就永远是空的。
+  static Widget topInsetSliver(BuildContext context) => SliverPadding(
+        padding: EdgeInsets.only(top: context.padding.top),
       );
 
   Widget buildExploreTabBar() {
@@ -311,6 +344,22 @@ class _ExplorePageState extends State<ExplorePage>
           );
   }
 
+  /// 顶栏附加行：当前分组的源页签栏。
+  ///
+  /// 由 [ExploreGroupController.headerBuilder] 交给顶栏，在那块玻璃里长出来。
+  /// 列表为空时返回 null，顶栏就不留这一行。
+  Widget? buildHeader(BuildContext context) {
+    if (group == 0 ? pages.isEmpty : categories.isEmpty) {
+      return null;
+    }
+    return AnimatedSwitcher(
+      duration: const Duration(milliseconds: 180),
+      switchInCurve: Curves.easeOut,
+      switchOutCurve: Curves.easeIn,
+      child: buildTabBar(),
+    );
+  }
+
   Widget buildContent() {
     return NotificationListener<ScrollNotification>(
       onNotification: (notifications) {
@@ -342,27 +391,28 @@ class _ExplorePageState extends State<ExplorePage>
         }
         return false;
       },
-      child: MediaQuery.removePadding(
-        context: context,
-        removeTop: true,
-        child: DirectionalIndexedStack(
-          index: group,
-          children: [
-            pages.isEmpty
-                ? const SizedBox()
-                : TabBarView(
-                    controller: exploreController,
-                    children: pages.map((e) => buildBody(e)).toList(),
-                  ),
-            categories.isEmpty
-                ? const SizedBox()
-                : TabBarView(
-                    controller: categoryController,
-                    children:
-                        categories.map((e) => buildCategoryBody(e)).toList(),
-                  ),
-          ],
-        ),
+      // 注意：这里**不能**把顶部 padding 去掉（以前去过）。页面铺满整个
+      // 屏幕，顶栏和源页签是盖在上面的两块玻璃，内容要靠 padding.top 自己
+      // 让开它们；`MediaQuery.padding` 只是建议值，不会挪动任何布局，去掉
+      // 之后列表第一行就直接钻到顶栏底下去了（分类页那种「标题被状态栏切了
+      // 一半」就是它）。真正的留白在各内容自己的 sliver padding 里付。
+      child: DirectionalIndexedStack(
+        index: group,
+        children: [
+          pages.isEmpty
+              ? const SizedBox()
+              : TabBarView(
+                  controller: exploreController,
+                  children: pages.map((e) => buildBody(e)).toList(),
+                ),
+          categories.isEmpty
+              ? const SizedBox()
+              : TabBarView(
+                  controller: categoryController,
+                  children:
+                      categories.map((e) => buildCategoryBody(e)).toList(),
+                ),
+        ],
       ),
     );
   }
@@ -481,12 +531,17 @@ class _ExplorePageState extends State<ExplorePage>
       );
     }
 
-    final tabBarSwitcher = AnimatedSwitcher(
-      duration: const Duration(milliseconds: 180),
-      switchInCurve: Curves.easeOut,
-      switchOutCurve: Curves.easeIn,
-      child: buildTabBar(),
-    );
+    // 分组切换时两套页签交叉淡入淡出，高度固定 48，不会把内容顶下去。
+    Widget tabBarSwitcher() => AnimatedSwitcher(
+          duration: const Duration(milliseconds: 180),
+          switchInCurve: Curves.easeOut,
+          switchOutCurve: Curves.easeIn,
+          child: buildTabBar(),
+        );
+
+    // 源页签栏平时是交给顶栏画的（和标题共用同一块玻璃），只有宽屏侧栏
+    // 模式或没有分组控制器时才退回页面自己渲染。
+    final headerInTopBar = !inlineSwitcher && widget.group != null;
 
     // 宽屏走侧栏，没有外层玻璃顶栏，页签栏照旧占一行。
     if (inlineSwitcher) {
@@ -496,9 +551,14 @@ class _ExplorePageState extends State<ExplorePage>
             child: Column(
               children: [
                 buildInlineSwitcher(),
-                tabBarSwitcher,
+                tabBarSwitcher(),
                 Expanded(
-                  child: hasContent ? buildContent() : buildEmpty(),
+                  // 顶部这段已经被上面两行让开了，内容不用再自己留白。
+                  child: MediaQuery(
+                    data: MediaQuery.of(context)
+                        .removePadding(removeTop: true),
+                    child: hasContent ? buildContent() : buildEmpty(),
+                  ),
                 ),
               ],
             ),
@@ -513,12 +573,10 @@ class _ExplorePageState extends State<ExplorePage>
 
     return Stack(
       children: [
-        // 内容顶到最上面，只靠 MediaQuery 的 padding 让第一行落在页签栏下面。
-        // 这份 padding 是滚动容器**内部**的留白，所以往上滑的时候封面会一路
-        // 穿到玻璃顶栏后面——顶栏这才有东西可以折射。
-        //
-        // 之前页签栏是 Column 里的一行，内容被它的边界裁住，永远到不了顶栏，
-        // 顶栏底下只剩一片空底色，看起来就是「玻璃没生效」。
+        // 内容铺满整个屏幕，靠 MediaQuery 把「顶栏（+ 源页签）」这段高度
+        // 交给各内容，由它们自己付成滚动容器**内部**的留白——见 buildContent
+        // 的注释。好处是：静止在顶部时第一行正好落在玻璃下沿，往上滑又整片
+        // 穿到玻璃后面，顶栏始终有东西可以折射。
         Positioned.fill(
           child: MediaQuery(
             data: MediaQuery.of(context).copyWith(
@@ -527,21 +585,22 @@ class _ExplorePageState extends State<ExplorePage>
             child: hasContent ? buildContent() : buildEmpty(),
           ),
         ),
-        if (hasContent)
+        // 回退分支：页签栏没交给顶栏时自己压一层玻璃。
+        // （正常路径下这一行在顶栏里，和标题同一块玻璃，不会再出现
+        // 「两条磨砂带叠在一起」的割裂感。）
+        if (!headerInTopBar && hasContent)
           Positioned(
             left: 0,
             right: 0,
             top: padding.top,
             height: _kExploreTabBarHeight,
-            // 页签栏自己也压一层玻璃：它下面是滚动的封面，不模糊的话
-            // 页签文字会直接糊在封面上。
             child: LiquidGlassPanel(
               borderRadius: BorderRadius.zero,
               blur: 30,
               tintAlpha: Theme.of(context).brightness == Brightness.dark
                   ? 0.4
                   : 0.55,
-              child: tabBarSwitcher,
+              child: tabBarSwitcher(),
             ),
           ),
         if (fab != null) fab,
@@ -621,6 +680,7 @@ class _SingleExplorePageState extends AutomaticGlobalState<_SingleExplorePage>
       return ComicList(
         enablePageStorage: true,
         showUpdateTime: true,
+        leadingSliver: _ExplorePageState.topInsetSliver(context),
         loadPage: data.loadPage,
         loadNext: data.loadNext,
         key: const PageStorageKey("comic_list"),
@@ -727,6 +787,7 @@ class _MixedExplorePageState
     return SmoothCustomScrollView(
       controller: widget.controller,
       slivers: [
+        _ExplorePageState.topInsetSliver(context),
         ...buildSlivers(context, data),
         const SliverListLoadingIndicator(),
       ],
@@ -898,7 +959,10 @@ class _MultiPartExplorePageState extends State<_MultiPartExplorePage> {
     return SmoothCustomScrollView(
       key: const PageStorageKey('scroll'),
       controller: widget.controller,
-      slivers: _buildPage().toList(),
+      slivers: [
+        _ExplorePageState.topInsetSliver(context),
+        ..._buildPage(),
+      ],
     );
   }
 

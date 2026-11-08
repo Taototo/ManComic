@@ -75,8 +75,12 @@ class CategoryView extends StatelessWidget {
     }
     return SingleChildScrollView(
       controller: controller,
-      // 底栏是漂浮的，留出空间避免最后一个标签被遮挡
-      padding: const EdgeInsets.only(bottom: 96),
+      // 顶部让开上层玻璃顶栏（+ 源页签）：这一页是铺满整个屏幕的，顶栏盖在
+      // 它上面，`MediaQuery.padding.top` 只是建议值、不会挪动布局，不在这里
+      // 显式付出来，第一个分类标题就会钻到状态栏底下被切掉一半。
+      //
+      // 底栏是漂浮的，留出空间避免最后一个标签被遮挡。
+      padding: EdgeInsets.only(top: context.padding.top + 8, bottom: 96),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: children,

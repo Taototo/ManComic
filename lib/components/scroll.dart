@@ -237,7 +237,24 @@ class _AppScrollBarState extends State<AppScrollBar> {
 
   double viewHeight = 0;
 
-  final _scrollIndicatorSize = App.isDesktop ? 36.0 : 54.0;
+  /// 滚动条拇指的宽度。以前是一块 27 宽的圆角「胶囊 + 上下箭头」，
+  /// 压在封面上像贴了一张白色小卡；现在收成一条 4 宽的竖条。
+  static const double _thumbWidth = 4.0;
+
+  /// 拇指最短长度：长列表里按比例算出来会细成一根线，既看不见也抓不住。
+  static double get _minThumbHeight => App.isDesktop ? 32 : 44;
+
+  /// 拇指长度按「可见高度 / 内容高度」算，最短 [_minThumbHeight]。
+  double get _thumbHeight {
+    final content = viewHeight + (maxExtent - minExtent);
+    if (content <= 0 || viewHeight <= 0) {
+      return _minThumbHeight;
+    }
+    var height = viewHeight * viewHeight / content;
+    if (height < _minThumbHeight) height = _minThumbHeight;
+    if (height > viewHeight) height = viewHeight;
+    return height;
+  }
 
   late final VerticalDragGestureRecognizer _dragGestureRecognizer;
 
@@ -295,9 +312,12 @@ class _AppScrollBarState extends State<AppScrollBar> {
         details.primaryDelta == null) {
       return;
     }
+    final travel = viewHeight - _thumbHeight;
+    if (travel <= 0) {
+      return;
+    }
     var offset = details.primaryDelta!;
-    var positionOffset =
-        offset / (viewHeight - _scrollIndicatorSize) * (maxExtent - minExtent);
+    var positionOffset = offset / travel * (maxExtent - minExtent);
     _scrollController.jumpTo((position + positionOffset).clamp(
       minExtent,
       maxExtent,
@@ -335,11 +355,11 @@ class _AppScrollBarState extends State<AppScrollBar> {
         var scrollHeight = (maxExtent - minExtent);
         var height = constrains.maxHeight - widget.topPadding;
         viewHeight = height;
-        var top = scrollHeight == 0
+        final thumbHeight = _thumbHeight;
+        final travel = height - thumbHeight;
+        var top = scrollHeight == 0 || travel <= 0
             ? 0.0
-            : (position - minExtent) /
-                scrollHeight *
-                (height - _scrollIndicatorSize);
+            : (position - minExtent) / scrollHeight * travel;
         return Stack(
           children: [
             Positioned.fill(
@@ -355,27 +375,26 @@ class _AppScrollBarState extends State<AppScrollBar> {
                   cursor: SystemMouseCursors.click,
                   onEnter: (_) => _showScrollbar(),
                   onExit: (_) => _scheduleHide(),
+                  // 23 宽的透明热区里放一条 4 宽的拇指：拇指太细抓不住，
+                  // 热区太宽又会挡住贴着右边缘的卡片点击。
                   child: Listener(
                     behavior: HitTestBehavior.translucent,
                     onPointerDown: (event) {
                       _dragGestureRecognizer.addPointer(event);
                     },
                     child: SizedBox(
-                      width: _scrollIndicatorSize / 2,
-                      height: _scrollIndicatorSize,
-                      child: CustomPaint(
-                        painter: _ScrollIndicatorPainter(
-                          backgroundColor: context.colorScheme.surface,
-                          shadowColor: context.colorScheme.shadow,
+                      width: App.isDesktop ? 16 : 22,
+                      height: thumbHeight,
+                      child: Center(
+                        child: Container(
+                          width: _thumbWidth,
+                          height: thumbHeight,
+                          decoration: BoxDecoration(
+                            color: context.colorScheme.onSurfaceVariant
+                                .withValues(alpha: 0.38),
+                            borderRadius: BorderRadius.circular(_thumbWidth),
+                          ),
                         ),
-                        child: Column(
-                          children: [
-                            const Spacer(),
-                            Icon(Icons.arrow_drop_up, size: 18),
-                            Icon(Icons.arrow_drop_down, size: 18),
-                            const Spacer(),
-                          ],
-                        ).paddingLeft(4),
                       ),
                     ),
                   ),
@@ -386,46 +405,5 @@ class _AppScrollBarState extends State<AppScrollBar> {
         );
       },
     );
-  }
-}
-
-class _ScrollIndicatorPainter extends CustomPainter {
-  final Color backgroundColor;
-
-  final Color shadowColor;
-
-  const _ScrollIndicatorPainter({
-    required this.backgroundColor,
-    required this.shadowColor,
-  });
-
-  @override
-  void paint(Canvas canvas, Size size) {
-    var path = Path()
-      ..moveTo(size.width, 0)
-      ..lineTo(size.width, size.height)
-      ..arcToPoint(
-        Offset(size.width, 0),
-        radius: Radius.circular(size.width),
-      );
-    canvas.drawShadow(path, shadowColor, 2, true);
-    var backgroundPaint = Paint()
-      ..color = backgroundColor
-      ..style = PaintingStyle.fill;
-    path = Path()
-      ..moveTo(size.width, 0)
-      ..lineTo(size.width, size.height)
-      ..arcToPoint(
-        Offset(size.width, 0),
-        radius: Radius.circular(size.width),
-      );
-    canvas.drawPath(path, backgroundPaint);
-  }
-
-  @override
-  bool shouldRepaint(covariant CustomPainter oldDelegate) {
-    return oldDelegate is! _ScrollIndicatorPainter ||
-        oldDelegate.backgroundColor != backgroundColor ||
-        oldDelegate.shadowColor != shadowColor;
   }
 }

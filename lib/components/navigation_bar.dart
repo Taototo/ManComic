@@ -54,6 +54,8 @@ class NaviPane extends StatefulWidget {
     this.onPageChanged,
     required this.observer,
     required this.navigatorKey,
+    this.headerBuilder,
+    this.headerHeight,
     super.key,
   });
 
@@ -69,6 +71,21 @@ class NaviPane extends StatefulWidget {
   /// 页面里，顶栏和页面又是两棵子树，所以只能由上层把「造控件」这件事
   /// 交给顶栏，而不是反过来让页面往顶栏里塞 widget。
   final Widget? Function(int index, BuildContext context)? titleBuilder;
+
+  /// 标题行**下方**再长一行内容，和标题共用同一块玻璃。
+  ///
+  /// 推荐页的「源页签」原来是自己压在页面顶部的一层独立磨砂条：和顶栏
+  /// 那块玻璃挨着，参数却不一样，中间还有一道边缘高光，看起来就是两条
+  /// 各管各的带子。现在把它交给顶栏，两行一起铺在同一块玻璃上。
+  ///
+  /// 返回 null 表示该页没有附加行。
+  final Widget? Function(int index, BuildContext context)? headerBuilder;
+
+  /// 附加行的高度（只在 [headerBuilder] 返回了东西时生效）。
+  ///
+  /// 高度必须由上层直接给出而不是测量：页面内容的顶部留白要靠它算，
+  /// 量出来的话第一帧就先按 0 排一次版。
+  final double Function(int index)? headerHeight;
 
   final void Function(int index)? onPageChanged;
 
@@ -319,54 +336,15 @@ class NaviPaneState extends State<NaviPane>
     return widget.pageBuilder(currentPage);
   }
 
+  /// 顶栏下方附加行（推荐页的源页签）的高度；没有附加行时是 0。
+  double get headerExtent {
+    if (widget.headerBuilder == null) {
+      return 0;
+    }
+    return widget.headerHeight?.call(currentPage) ?? 0;
+  }
+
   Widget buildTop() {
-    // 玻璃要连状态栏一起盖住。只盖 48 的话，页面内容滚上来会从状态栏
-    // 那条缝里露出来，看起来像顶栏被切成两半。
-    final topInset = MediaQuery.of(context).padding.top;
-    final content = Container(
-      padding: EdgeInsets.only(left: 16, right: 8, top: topInset),
-      height: _kTopBarHeight + topInset,
-      width: double.infinity,
-      child: Row(
-        children: [
-          AnimatedSwitcher(
-            duration: const Duration(milliseconds: 260),
-            switchInCurve: Curves.easeOutCubic,
-            switchOutCurve: Curves.easeInCubic,
-            transitionBuilder: (child, animation) {
-              return FadeTransition(
-                opacity: animation,
-                child: SlideTransition(
-                  position: Tween<Offset>(
-                    begin: const Offset(0, 0.4),
-                    end: Offset.zero,
-                  ).animate(animation),
-                  child: child,
-                ),
-              );
-            },
-            child: KeyedSubtree(
-              key: ValueKey(currentPage),
-              child: widget.titleBuilder?.call(currentPage, context) ??
-                  Text(
-                    widget.paneItems[currentPage].label,
-                    style: const TextStyle(
-                      fontSize: 18,
-                      fontWeight: FontWeight.bold,
-                    ),
-                  ),
-            ),
-          ),
-          const Spacer(),
-          for (var action in widget.paneActions)
-            _GlassActionButton(
-              icon: action.icon,
-              label: action.label,
-              onTap: action.onTap,
-            ),
-        ],
-      ),
-    );
     // 顶栏通栏贴着状态栏，用直角玻璃。它会盖在页面内容之上，
     // 列表滚上来时从玻璃后面经过。
     //
@@ -377,7 +355,77 @@ class NaviPaneState extends State<NaviPane>
     return LiquidGlassBar(
       lightIntensity: isDark ? 0.16 : 0.45,
       fresnelStrength: 0.35,
-      child: content,
+      // 这里必须用 Builder 而不是直接算：附加行（源页签）的构造器是页面在
+      // 自己的 initState 里注册的，而 buildTop 在父级 build 期间就被调用了，
+      // 那时候页面子树还没建起来。Builder 的 build 排在 Stack 里更靠前的
+      // 页面之后，拿到的才是注册好的构造器。
+      child: Builder(builder: _buildTopContent),
+    );
+  }
+
+  Widget _buildTopContent(BuildContext context) {
+    final topInset = MediaQuery.of(context).padding.top;
+    final header = widget.headerBuilder?.call(currentPage, context);
+    final extra = header == null ? 0.0 : headerExtent;
+    return Container(
+      padding: EdgeInsets.only(top: topInset),
+      height: _kTopBarHeight + topInset + extra,
+      width: double.infinity,
+      child: Column(
+        children: [
+          SizedBox(
+            height: _kTopBarHeight,
+            child: Padding(
+              padding: const EdgeInsets.only(left: 16, right: 8),
+              child: Row(
+                children: [
+                  AnimatedSwitcher(
+                    duration: const Duration(milliseconds: 260),
+                    switchInCurve: Curves.easeOutCubic,
+                    switchOutCurve: Curves.easeInCubic,
+                    transitionBuilder: (child, animation) {
+                      return FadeTransition(
+                        opacity: animation,
+                        child: SlideTransition(
+                          position: Tween<Offset>(
+                            begin: const Offset(0, 0.4),
+                            end: Offset.zero,
+                          ).animate(animation),
+                          child: child,
+                        ),
+                      );
+                    },
+                    child: KeyedSubtree(
+                      key: ValueKey(currentPage),
+                      child: widget.titleBuilder?.call(currentPage, context) ??
+                          Text(
+                            widget.paneItems[currentPage].label,
+                            style: const TextStyle(
+                              fontSize: 18,
+                              fontWeight: FontWeight.bold,
+                            ),
+                          ),
+                    ),
+                  ),
+                  const Spacer(),
+                  for (var action in widget.paneActions)
+                    _GlassActionButton(
+                      icon: action.icon,
+                      label: action.label,
+                      onTap: action.onTap,
+                    ),
+                ],
+              ),
+            ),
+          ),
+          if (header != null && extra > 0)
+            SizedBox(
+              height: extra,
+              width: double.infinity,
+              child: header,
+            ),
+        ],
+      ),
     );
   }
 
