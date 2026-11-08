@@ -364,6 +364,8 @@ class NaviPaneState extends State<NaviPane>
   }
 
   Widget _buildTopContent(BuildContext context) {
+    // 玻璃要连状态栏一起盖住。只盖 48 的话，页面内容滚上来会从状态栏
+    // 那条缝里露出来，看起来像顶栏被切成两半。
     final topInset = MediaQuery.of(context).padding.top;
     final header = widget.headerBuilder?.call(currentPage, context);
     final extra = header == null ? 0.0 : headerExtent;
