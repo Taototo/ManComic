@@ -430,6 +430,30 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     );
   }
 
+  /// 重新检测失效分类：已经能打开的退回原分类。
+  ///
+  /// 失效经常是暂时的（源被删了又装回来、目录被清理后重新下载），用户不该
+  /// 只能一个个手动「移动到收藏夹」。这里一次扫完，能开的原路退回。
+  void recheckInvalid() {
+    showConfirmDialog(
+      context: App.rootContext,
+      title: "Re-check invalid".tl,
+      content: "Move comics that work again back to their folder?".tl,
+      onConfirm: () async {
+        var controller = showLoadingDialog(App.rootContext);
+        var count = await LocalFavoritesManager().restoreValidInvalid();
+        controller.close();
+        App.rootContext.showMessage(
+          message: count == 0
+              ? "No comic has recovered".tl
+              : "Restored @a comics".tlParams({"a": count}),
+        );
+        updateComics();
+        favPage.folderList?.updateFolders();
+      },
+    );
+  }
+
   /// 三点菜单。文件夹管理的低频动作都收在这里，顶栏只留高频图标。
   ///
   /// 「已阅」「失效」是内置分类，不提供重命名/排序/导出/删除等文件夹管理。
@@ -441,6 +465,13 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
           icon: Icons.cleaning_services_outlined,
           text: "Clean up invalid".tl,
           onClick: cleanupInvalid,
+        ),
+      // 「失效」里才有意义：源恢复了就把还能打开的原路退回。
+      if (isInvalidFolder)
+        MenuEntry(
+          icon: Icons.refresh,
+          text: "Re-check invalid".tl,
+          onClick: recheckInvalid,
         ),
       // 与网络源同步。只有「链接到网络源」的文件夹才有，而且是个低频动作，
       // 放在菜单里比在顶栏占一颗图标划算（顶栏已经被 6 颗图标挤满了）。

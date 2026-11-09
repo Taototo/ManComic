@@ -61,6 +61,44 @@ void main() {
         900,
       );
     });
+
+    test('样本不足 5 页时不外推，避免第一张长图带偏', () {
+      // 第一页是 2.4MB 的长条图，按它外推 900 页就是 2.1GB
+      expect(
+        estimateTotalBytes(
+          downloadedBytes: 2400 * 1024,
+          downloadedCount: 1,
+          totalCount: 900,
+          recentPageBytes: [2400 * 1024],
+        ),
+        0,
+      );
+    });
+
+    test('按最近样本的中位数外推，单张大图不会把结果放大几十倍', () {
+      // 一页 2.4MB + 四页 80KB，中位数仍是 80KB
+      var samples = [2400 * 1024, 80 * 1024, 82 * 1024, 78 * 1024, 81 * 1024];
+      var total = estimateTotalBytes(
+        downloadedBytes: 2721 * 1024,
+        downloadedCount: 5,
+        totalCount: 100,
+        recentPageBytes: samples,
+      );
+      // 剩下 95 页 × 80KB ≈ 7.4MB，总量应该在 10MB 上下，绝不是 GB 级
+      expect(total, lessThan(12 * 1024 * 1024));
+      expect(total, greaterThan(9 * 1024 * 1024));
+    });
+
+    test('中位数取偶数样本的中间两页平均', () {
+      var total = estimateTotalBytes(
+        downloadedBytes: 500,
+        downloadedCount: 5,
+        totalCount: 10,
+        recentPageBytes: [100, 90, 200, 80, 70, 60],
+      );
+      // 排序后 60/70/80/90/100/200 → 中位数 (80+90)/2 = 85
+      expect(total, 500 + 85 * 5);
+    });
   });
 
   group('下载任务默认状态', () {

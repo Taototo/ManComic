@@ -9,7 +9,9 @@ import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
 import android.os.Build
+import android.os.Handler
 import android.os.IBinder
+import android.os.Looper
 import android.os.PowerManager
 import android.util.Log
 import androidx.core.app.NotificationCompat
@@ -48,9 +50,9 @@ class ComicDownloadService : Service() {
 
         private const val EXTRA_PROGRESS = "progress"
 
-        /** 启动前台服务并立刻显示通知（进度未知时用 -1）。 */
-        fun start(context: Context, title: String, text: String, progress: Int = -1) {
-            try {
+        /** 启动前台服务并立刻显示通知（进度未知时用 -1）。返回是否真的拉起。 */
+        fun start(context: Context, title: String, text: String, progress: Int = -1): Boolean {
+            return try {
                 val intent = Intent(context, ComicDownloadService::class.java).apply {
                     action = ACTION_START
                     putExtra(EXTRA_TITLE, title)
@@ -62,9 +64,11 @@ class ComicDownloadService : Service() {
                 } else {
                     context.startService(intent)
                 }
+                true
             } catch (e: Exception) {
                 // 后台启动受限（Android 12+）时不要连累下载本身
                 Log.e(TAG, "Failed to start service", e)
+                false
             }
         }
 
@@ -134,6 +138,13 @@ class ComicDownloadService : Service() {
                 .setShowWhen(false)
                 .setOnlyAlertOnce(true)
                 .setPriority(NotificationCompat.PRIORITY_LOW)
+            // Android 12+ 默认会把这个通知压后 10 秒再显示。压后期间服务
+            // 已经算前台，但用户看不到条目的那十秒里会以为「没在下」。
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                builder.setForegroundServiceBehavior(
+                    NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
+                )
+            }
             if (progress < 0) {
                 builder.setProgress(0, 0, true)
             } else {
@@ -145,11 +156,28 @@ class ComicDownloadService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
+    private val handler = Handler(Looper.getMainLooper())
+
+    /**
+     * 定时续期 wakelock。
+     *
+     * `acquire(timeout)` 到时自己就松手了，一本长篇下一两个小时很正常，
+     * 两小时一到系统开始让 CPU 睡，下载就停在那儿，用户看到的是「下了
+     * 一半不动了」。每 25 分钟续一次，只要服务还在就一直是醒的。
+     */
+    private val renewRunnable = object : Runnable {
+        override fun run() {
+            renewWakeLock()
+            handler.postDelayed(this, 25 * 60 * 1000L)
+        }
+    }
+
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onCreate() {
         super.onCreate()
         acquireWakeLock()
+        handler.postDelayed(renewRunnable, 25 * 60 * 1000L)
     }
 
     /**
@@ -185,6 +213,12 @@ class ComicDownloadService : Service() {
         wakeLock = null
     }
 
+    /** 续期：先放掉再拿一把新的，把定时器重新拨到 2 小时。 */
+    private fun renewWakeLock() {
+        releaseWakeLock()
+        acquireWakeLock()
+    }
+
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         if (intent == null) {
             stopSelf()
@@ -206,16 +240,23 @@ class ComicDownloadService : Service() {
                 build(this, title, text, progress),
                 type
             )
-            acquireWakeLock()
+            // 每次 onStartCommand 都续一次：Dart 侧会定期再调 start() 探活，
+            // 服务被系统回收重建时也能在这里重新拿到前台资格与 wakelock。
+            renewWakeLock()
+            handler.removeCallbacks(renewRunnable)
+            handler.postDelayed(renewRunnable, 25 * 60 * 1000L)
         } catch (e: Exception) {
             // 拿不到前台资格（权限被撤、后台启动）就别硬撑了
             Log.e(TAG, "startForeground failed", e)
             stopSelf()
         }
-        return START_NOT_STICKY
+        // STICKY：被系统回收后重启服务（Dart 侧进程通常已经没了，重起来
+        // 会走 intent == null 直接停，但至少不会在服务层面丢状态）。
+        return START_STICKY
     }
 
     override fun onDestroy() {
+        handler.removeCallbacks(renewRunnable)
         releaseWakeLock()
         try {
             ServiceCompat.stopForeground(this, ServiceCompat.STOP_FOREGROUND_REMOVE)

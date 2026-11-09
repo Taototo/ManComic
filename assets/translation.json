@@ -890,7 +890,23 @@
     "Checking updates": "正在检查更新",
     "@n comics have updates": "@n 部漫画有更新",
     "Failed to check updates": "检查更新失败",
-    "No comics to check": "没有可检查的漫画"
+    "No comics to check": "没有可检查的漫画",
+    "Allow": "允许",
+    "Already allowed": "已允许",
+    "Failed to open settings": "无法打开系统设置",
+    "Allow background running": "允许后台运行",
+    "Exempt from battery optimization so downloads survive in the background": "加入电池优化白名单，切到后台也不中断下载",
+    "Re-check invalid": "重新检测失效",
+    "Move comics that work again back to their folder?": "把已经能打开的漫画退回原分类？",
+    "No comic has recovered": "没有恢复的漫画",
+    "Restored @a comics": "已恢复 @a 部漫画",
+    "@a of @b downloaded": "已下载 @a / @b 话",
+    "Can't reach the WebDAV server, check the network": "连不上 WebDAV 服务器，请检查网络",
+    "WebDAV rejected the account or password": "WebDAV 账号或应用密码不正确",
+    "WebDAV denied access to this folder": "WebDAV 拒绝访问该目录",
+    "WebDAV folder does not exist": "WebDAV 目录不存在",
+    "WebDAV storage is full": "WebDAV 空间已满",
+    "The WebDAV server has no synced data yet": "服务器上还没有同步数据"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1783,6 +1799,22 @@
     "Checking updates": "正在檢查更新",
     "@n comics have updates": "@n 部漫畫有更新",
     "Failed to check updates": "檢查更新失敗",
-    "No comics to check": "沒有可檢查的漫畫"
+    "No comics to check": "沒有可檢查的漫畫",
+    "Allow": "允許",
+    "Already allowed": "已允許",
+    "Failed to open settings": "無法開啟系統設定",
+    "Allow background running": "允許背景執行",
+    "Exempt from battery optimization so downloads survive in the background": "加入電池優化白名單，切到背景也不中斷下載",
+    "Re-check invalid": "重新偵測失效",
+    "Move comics that work again back to their folder?": "把已經能開啟的漫畫退回原分類？",
+    "No comic has recovered": "沒有恢復的漫畫",
+    "Restored @a comics": "已恢復 @a 部漫畫",
+    "@a of @b downloaded": "已下載 @a / @b 話",
+    "Can't reach the WebDAV server, check the network": "連不上 WebDAV 伺服器，請檢查網路",
+    "WebDAV rejected the account or password": "WebDAV 帳號或應用密碼不正確",
+    "WebDAV denied access to this folder": "WebDAV 拒絕存取該目錄",
+    "WebDAV folder does not exist": "WebDAV 目錄不存在",
+    "WebDAV storage is full": "WebDAV 空間已滿",
+    "The WebDAV server has no synced data yet": "伺服器上還沒有同步資料"
   }
 }

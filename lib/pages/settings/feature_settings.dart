@@ -243,6 +243,29 @@ class _DataSettingsState extends State<DataSettings> {
               LocalManager().pumpQueue();
             },
           ).toSliver(),
+        // 前台服务 + wakelock 在原生 Android 上够用，但国内 ROM 的省电
+        // 策略会把后台进程整个冻住（表现就是「切出去两分钟下载就停了」）。
+        // 这里给一个入口手动放行；不是必选项，不影响其他功能。
+        if (App.isAndroid)
+          _CallbackSetting(
+            title: "Allow background running".tl,
+            subtitle:
+                "Exempt from battery optimization so downloads survive in the background"
+                    .tl,
+            callback: () async {
+              if (await DownloadBackground.instance
+                  .ignoringBatteryOptimizations) {
+                context.showMessage(message: "Already allowed".tl);
+                return;
+              }
+              var ok = await DownloadBackground.instance
+                  .requestIgnoreBatteryOptimizations();
+              if (!ok && context.mounted) {
+                context.showMessage(message: "Failed to open settings".tl);
+              }
+            },
+            actionTitle: "Allow".tl,
+          ).toSliver(),
         _SettingPartTitle(
           title: "Notifications".tl,
           icon: Icons.notifications_none_rounded,

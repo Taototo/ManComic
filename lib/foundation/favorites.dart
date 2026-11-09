@@ -280,6 +280,7 @@ class LocalFavoritesManager with ChangeNotifier {
       );
     """);
     // 「失效」表同理：这次升级引入，老库里没有，必须先建出来。
+    // `origin` 记住「是从哪个分类挪进来的」，源恢复后能原路退回去。
     _db.execute("""
       create table if not exists "$invalidFolderName"(
         id text,
@@ -291,9 +292,15 @@ class LocalFavoritesManager with ChangeNotifier {
         time TEXT,
         display_order int,
         translated_tags TEXT,
+        origin TEXT,
         primary key (id, type)
       );
     """);
+    // 1.4.46 造的表没有 origin，补一列（SQLite 的 add column 不会重写整表）。
+    var invalidColumns = _db.select('pragma table_info("$invalidFolderName");');
+    if (!invalidColumns.any((e) => e["name"] == "origin")) {
+      _db.execute('alter table "$invalidFolderName" add column origin TEXT;');
+    }
     var folderNames = _getFolderNamesWithDB();
     for (var folder in folderNames) {
       var columns = _db.select("""
@@ -1349,14 +1356,25 @@ class LocalFavoritesManager with ChangeNotifier {
             _db.execute(
               """
               insert or ignore into "$invalidFolderName"
-                (id, name, author, type, tags, cover_path, time, translated_tags, display_order)
-              select id, name, author, type, tags, cover_path, time, translated_tags, ?
+                (id, name, author, type, tags, cover_path, time, translated_tags, display_order, origin)
+              select id, name, author, type, tags, cover_path, time, translated_tags, ?, ?
               from "$folder"
               where id == ? and type == ?;
             """,
-              [displayOrder, item.id, item.type.value],
+              [displayOrder, folder, item.id, item.type.value],
             );
             displayOrder++;
+          } else {
+            // 之前从别的分类挪进来过（origin 那是旧记录）：补一次来源，
+            // 否则「源恢复了移回去」只能退回默认分类。
+            _db.execute(
+              """
+              update "$invalidFolderName"
+              set origin = ?
+              where id == ? and type == ? and origin is null;
+            """,
+              [folder, item.id, item.type.value],
+            );
           }
           _db.execute(
             """
@@ -1377,6 +1395,86 @@ class LocalFavoritesManager with ChangeNotifier {
     initCounts();
     notifyListeners();
     return moved;
+  }
+
+  /// 把「失效」里已经恢复的收藏退回原分类。
+  ///
+  /// 失效的原因可能是暂时的：源被删了又装回来、本地目录被清理工具扫走之后
+  /// 用户重新下载了同一本。用户在失效页点一下重新检测，能打开的就原路退回
+  /// ——没有 origin（老数据 / 原来那个分类被删了）就退回第一个普通分类。
+  ///
+  /// 返回恢复的条数。
+  Future<int> restoreValidInvalid({String? fallbackFolder}) async {
+    if (!existsFolder(invalidFolderName)) {
+      return 0;
+    }
+    var folders = _getFolderNamesWithDB();
+    if (folders.isEmpty) {
+      return 0;
+    }
+    var targets = <FavoriteItem, String>{};
+    for (var item in getFolderComics(invalidFolderName)) {
+      if (_isInvalidItem(item)) {
+        continue;
+      }
+      var origin = _originOf(item);
+      var target = (origin != null && folders.contains(origin))
+          ? origin
+          : (fallbackFolder != null && folders.contains(fallbackFolder)
+              ? fallbackFolder
+              : folders.first);
+      targets[item] = target;
+    }
+    if (targets.isEmpty) {
+      return 0;
+    }
+    _db.execute("BEGIN TRANSACTION");
+    try {
+      for (var entry in targets.entries) {
+        _db.execute(
+          """
+          insert or ignore into "${entry.value}"
+            (id, name, author, type, tags, cover_path, time, translated_tags, display_order)
+          select id, name, author, type, tags, cover_path, time, translated_tags, ?
+          from "$invalidFolderName"
+          where id == ? and type == ?;
+        """,
+          [minValue(entry.value) - 1, entry.key.id, entry.key.type.value],
+        );
+        _db.execute(
+          """
+          delete from "$invalidFolderName"
+          where id == ? and type == ?;
+        """,
+          [entry.key.id, entry.key.type.value],
+        );
+      }
+    } catch (e, s) {
+      Log.error("Restore Invalid", "failed: $e", s);
+      _db.execute("ROLLBACK");
+      return 0;
+    }
+    _db.execute("COMMIT");
+    initCounts();
+    notifyListeners();
+    return targets.length;
+  }
+
+  /// 一条失效记录是从哪个分类挪进来的。
+  String? _originOf(FavoriteItem item) {
+    try {
+      var res = _db.select(
+        'select origin from "$invalidFolderName" where id == ? and type == ?;',
+        [item.id, item.type.value],
+      );
+      if (res.isEmpty) {
+        return null;
+      }
+      var value = res.first["origin"];
+      return value is String && value.isNotEmpty ? value : null;
+    } catch (_) {
+      return null;
+    }
   }
 
   Future<int> removeInvalid() async {

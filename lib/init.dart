@@ -12,6 +12,7 @@ import 'package:venera/foundation/display_refresh.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/notification_service.dart';
 import 'package:venera/utils/download_background.dart';
 import 'package:venera/foundation/startup_gate.dart';
@@ -50,10 +51,22 @@ class _LifecycleObserver with WidgetsBindingObserver {
       // 冷启动时前台服务可能因为「进程还没被当成前台」没挂上，回到前台
       // 再试一次；已经在跑的（ticker 在转）这里什么也不会做。
       DownloadBackground.instance.refresh();
+      // 后台被网络掐断而停下的下载，回前台再接上。
+      LocalManager().retryErroredTasks();
       // 冷启动只查一次，可很多人根本不杀进程：App 一直躺在后台，切回来
       // 时 init() 不会重跑。少这一步，「启动时检查更新」就等于「开机时
       // 检查更新」，新版本发布后不手动点就永远发现不了。
       _checkAppUpdatesOnResume();
+    } else if (state == AppLifecycleState.paused ||
+        state == AppLifecycleState.detached) {
+      // 进后台就把下载进度落盘。
+      //
+      // 平时靠 1.2 秒的合并窗口写，用户从最近任务里划掉应用时窗口里那笔
+      // 还没轮到写，而进程下一秒就没了——下次进来进度就退回到上一次落盘
+      // 的位置。收到 paused 时立刻写一次，代价只有一个几 KB 的 JSON。
+      unawaited(LocalManager().saveDownloadProgressNow());
+      // 后台可能被系统压住，再把前台服务抬一次，保证进程不被冻结。
+      DownloadBackground.instance.refresh();
     }
   }
 }

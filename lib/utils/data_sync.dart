@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/foundation.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/components/window_frame.dart';
@@ -33,8 +35,59 @@ class DataSync with ChangeNotifier {
 
   void onDataChanged() {
     if (isEnabled) {
-      uploadData();
+      _scheduleUpload();
     }
+  }
+
+  /// 自动上传的合并窗口。
+  ///
+  /// 收藏一次改动、源变一次状态都会走到这里，连着操作几下就是几次完整的
+  /// 上传（每次都要重新打包一遍数据、还可能顺手把服务器上的旧档删掉）。
+  /// 攒 3 秒再发一次就够了。
+  Timer? _uploadDebounce;
+
+  void _scheduleUpload() {
+    _uploadDebounce?.cancel();
+    _uploadDebounce = Timer(const Duration(seconds: 3), () {
+      _uploadDebounce = null;
+      unawaited(uploadData());
+    });
+  }
+
+  /// 自动同步失败后的重试。
+  ///
+  /// 断网、VPN 切换、坚果云抽风都会让一次同步失败，不值得为此在主页挂一
+  /// 个红点让用户自己点。退避重试几次，实在不行才把错误留在界面上。
+  Timer? _retryTimer;
+
+  int _retryCount = 0;
+
+  static const _maxAutoRetries = 3;
+
+  void _scheduleRetry(Future<Res<bool>> Function() action) {
+    if (_retryCount >= _maxAutoRetries) {
+      return;
+    }
+    _retryCount++;
+    var delay = Duration(seconds: 30 * (1 << (_retryCount - 1)));
+    _retryTimer?.cancel();
+    _retryTimer = Timer(delay, () {
+      _retryTimer = null;
+      if (!isEnabled) {
+        return;
+      }
+      unawaited(action().then((res) {
+        if (res.error) {
+          _scheduleRetry(action);
+        }
+      }));
+    });
+  }
+
+  void _resetRetry() {
+    _retryCount = 0;
+    _retryTimer?.cancel();
+    _retryTimer = null;
   }
 
   bool _handleWindowClose() {
@@ -174,12 +227,14 @@ class DataSync with ChangeNotifier {
         await client.write(filename, await data.readAsBytes());
         data.deleteIgnoreError();
         Log.info("Upload Data", "Data uploaded successfully");
+        _resetRetry();
         _markSynced();
         return const Res(true);
       } catch (e, s) {
         Log.error("Upload Data", e, s);
-        _lastError = e.toString();
-        return Res.error(e.toString());
+        _lastError = _friendlyError(e);
+        _scheduleRetry(uploadData);
+        return Res.error(_lastError!);
       }
     } finally {
       _isUploading = false;
@@ -242,16 +297,62 @@ class DataSync with ChangeNotifier {
         await importAppData(localFile, true);
         await localFile.delete();
         Log.info("Data Sync", "Data downloaded successfully");
+        _resetRetry();
         _markSynced();
         return const Res(true);
       } catch (e, s) {
         Log.error("Data Sync", e, s);
-        _lastError = e.toString();
-        return Res.error(e.toString());
+        _lastError = _friendlyError(e);
+        _scheduleRetry(downloadData);
+        return Res.error(_lastError!);
       }
     } finally {
       _isDownloading = false;
       notifyListeners();
     }
+  }
+
+  /// 把底层异常翻成人话。
+  ///
+  /// 以前直接把 `e.toString()` 塞进界面，用户看到的是整段
+  /// `DioException [unknown]: null Error: [RhttpConnectionException] ...
+  /// hyper_util::client::legacy::Error(Connect, ConnectError("dns error"...))`。
+  /// 既看不懂，也看不出该怎么办。原始字符串仍然完整写进日志。
+  static String _friendlyError(Object e) {
+    var text = e.toString();
+    var lower = text.toLowerCase();
+    if (lower.contains('dns') ||
+        lower.contains('failed to lookup address') ||
+        lower.contains('no address associated with hostname') ||
+        lower.contains('connection error') ||
+        lower.contains('connection refused') ||
+        lower.contains('connection reset') ||
+        lower.contains('timed out') ||
+        lower.contains('timeout') ||
+        lower.contains('network is unreachable') ||
+        lower.contains('failed host lookup')) {
+      return "Can't reach the WebDAV server, check the network".tl;
+    }
+    if (lower.contains('401') || lower.contains('unauthorized')) {
+      return "WebDAV rejected the account or password".tl;
+    }
+    if (lower.contains('403') || lower.contains('forbidden')) {
+      return "WebDAV denied access to this folder".tl;
+    }
+    if (lower.contains('404')) {
+      return "WebDAV folder does not exist".tl;
+    }
+    if (lower.contains('507') || lower.contains('insufficient storage')) {
+      return "WebDAV storage is full".tl;
+    }
+    if (text.contains('No data file found')) {
+      return "The WebDAV server has no synced data yet".tl;
+    }
+    // 兜底：只给第一行。整段栈对用户没用，完整内容已经在日志里了。
+    var firstLine = text.split('\n').first.trim();
+    if (firstLine.length > 120) {
+      firstLine = "${firstLine.substring(0, 120)}…";
+    }
+    return firstLine;
   }
 }

@@ -639,9 +639,40 @@ class LocalManager with ChangeNotifier {
     DownloadBackground.instance.refresh();
   }
 
-  /// 暂停所有任务（含排队中的），并记住这是用户的意思。
-  void pauseAll() {
+  /// 让前台服务跟上当前状态（任务开跑/停下时调）。
+  void refreshBackgroundService() {
+    DownloadBackground.instance.refresh();
+  }
+
+  /// 回到前台时把「被网络错误停下」的任务重新拉起来。
+  ///
+  /// 锁屏、VPN 重连、进电梯都可能让下载中途报错停下；任务自己会退避重试
+  /// 几次，但如果断得久一点就用完了。用户回到应用说明网络多半也回来了，
+  /// 这里再给一次机会，省得他们逐个点「重试」。
+  void retryErroredTasks() {
+    // 不能一口气全 resume：resume() 会立刻开跑，绕过并发上限。只补满空位，
+    // 剩下的等前面的完成后由 pumpQueue 自然接手。
+    var slots = maxConcurrentTasks;
+    var retried = 0;
     for (var task in downloadingTasks) {
+      if (slots <= 0) {
+        break;
+      }
+      if (task.isError && !task.userPaused) {
+        task.resume();
+        slots--;
+        retried++;
+      }
+    }
+    if (retried > 0) {
+      saveCurrentDownloadingTasks(full: true);
+      notifyListeners();
+      DownloadBackground.instance.refresh();
+    }
+  }
+
+  /// 暂停所有任务（含排队中的），并记住这是用户的意思。
+  void pauseAll() {    for (var task in downloadingTasks) {
       if (!task.isPaused) {
         task.pause();
       } else {
@@ -806,6 +837,14 @@ class LocalManager with ChangeNotifier {
       }
     }
     _applySavedProgress();
+    // 进度文件里存的是「上次落盘那一刻」的数字。进程被强杀（从最近任务里
+    // 划掉、系统清内存）时可能落后几页，甚至整段丢失——用户看到的就成了
+    // 「明明下了一半，回来变成 0%」。恢复后先按目录扫一遍，以磁盘为准。
+    for (var task in downloadingTasks) {
+      if (task.isPaused) {
+        unawaited(task.reconcileProgress());
+      }
+    }
     // 上次没下完的接着下。用户之前手动暂停过的（userPaused）保持暂停，
     // 剩下的是「排到一半进程被杀」，属于断点续传该管的部分。
     pumpQueue();
@@ -877,8 +916,12 @@ class LocalManager with ChangeNotifier {
       running++;
       speed += task.speed;
       title ??= task.title;
-      downloaded += task.downloadedBytes;
-      total += task.totalBytes;
+      // 还没估出总量的任务（样本不足 5 页）只算速度，不算进百分比：
+      // 否则「已下 2MB / 总量 2MB」会让通知栏直接显示 100%。
+      if (task.totalBytes > task.downloadedBytes) {
+        downloaded += task.downloadedBytes;
+        total += task.totalBytes;
+      }
     }
     return DownloadSummary(
       running: running,

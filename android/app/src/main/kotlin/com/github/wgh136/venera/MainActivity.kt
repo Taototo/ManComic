@@ -402,13 +402,45 @@ class MainActivity : FlutterFragmentActivity() {
                 // 漫画下载：同更新包那套，只是多了把 wakelock（见
                 // ComicDownloadService），锁屏后下载才不会被挂起。
                 "startDownloadService" -> {
-                    ComicDownloadService.start(
-                        this,
-                        call.argument<String>("title") ?: "Downloading",
-                        call.argument<String>("text") ?: "",
-                        call.argument<Int>("progress") ?: -1
+                    res.success(
+                        ComicDownloadService.start(
+                            this,
+                            call.argument<String>("title") ?: "Downloading",
+                            call.argument<String>("text") ?: "",
+                            call.argument<Int>("progress") ?: -1
+                        )
                     )
-                    res.success(true)
+                }
+
+                // 电池优化白名单。国内 ROM 的后台策略比 AOSP 狠得多，光有
+                // 前台服务 + wakelock 也可能在两分钟后被冻住，用户在设置里
+                // 手动放行一次就稳了。
+                "isIgnoringBatteryOptimizations" -> {
+                    val pm = getSystemService(Context.POWER_SERVICE)
+                            as android.os.PowerManager
+                    val ignoring = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        pm.isIgnoringBatteryOptimizations(packageName)
+                    } else {
+                        true
+                    }
+                    res.success(ignoring)
+                }
+
+                "requestIgnoreBatteryOptimizations" -> {
+                    var ok = false
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                        try {
+                            val intent = Intent(
+                                Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS
+                            )
+                            intent.data = Uri.parse("package:$packageName")
+                            startActivity(intent)
+                            ok = true
+                        } catch (e: Exception) {
+                            Log.e("BatteryOptimization", "Failed to open settings", e)
+                        }
+                    }
+                    res.success(ok)
                 }
 
                 "updateDownloadService" -> {

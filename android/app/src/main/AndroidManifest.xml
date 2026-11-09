@@ -15,6 +15,9 @@
     <!-- 漫画下载：前台服务持一把 partial wakelock，锁屏后定时器和网络回调
          才不会被系统挂起（前台服务本身不保证 CPU 不睡）。 -->
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
+    <!-- 后台下载：国内 ROM 的省电策略比 AOSP 更激进，光有前台服务 + wakelock
+         也可能在两分钟后被冻住。让用户能在设置里把自己加进「不优化」名单。 -->
+    <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <application
         android:label="ManComic"
         android:name="${applicationName}"

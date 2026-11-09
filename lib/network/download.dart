@@ -72,6 +72,13 @@ abstract class DownloadTask with ChangeNotifier {
     userPaused = json["userPaused"] ?? userPaused;
   }
 
+  /// 用磁盘上的真实内容校正进度。
+  ///
+  /// 恢复出来的数字只是「上次落盘那一刻」的，进程被强杀时可能落后几页，
+  /// 甚至整段丢失（进度文件还没轮到写）。重启后先按目录扫一遍，界面上就
+  /// 不会出现「明明下了一半却显示 0%」。默认什么都不做。
+  Future<void> reconcileProgress() async {}
+
   /// 进度文件里的键。用「类型 + id」而不是列表下标，任务重排不会串。
   String get progressKey => "${comicType.value}:$id";
 
@@ -211,6 +218,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         downloadedBytes: _downloadedBytes,
         downloadedCount: _downloadedCount,
         totalCount: _totalCount,
+        recentPageBytes: _pageSizes,
       );
 
   void _addDownloadedBytes(int bytes) {
@@ -218,7 +226,18 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       return;
     }
     _downloadedBytes += bytes;
+    // 留一份最近的每页大小当样本。第一页正好是长条大图时，用「累计字节
+    // ÷ 已完成页数」外推会直接跳到几个 G——样本窗口里取中位数才稳。
+    _pageSizes.add(bytes);
+    if (_pageSizes.length > _pageSizeWindow) {
+      _pageSizes.removeAt(0);
+    }
   }
+
+  /// 最近几页的大小（字节），用于估算总体积。
+  final List<int> _pageSizes = [];
+
+  static const _pageSizeWindow = 32;
 
   bool _isRunning = false;
 
@@ -298,8 +317,12 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   ///
   /// 只认「文件名是数字 + 大小非 0」：写文件时已经校验过图片完整性，
   /// 所以 0 字节就代表上次写到一半被打断，当作没下过重新下。
+  ///
+  /// 顺手把每页大小记进 [_diskBytes]：恢复时直接信磁盘上的实际字节数，
+  /// 比 JSON 里那个「上一次落盘时」的数字准，也不用从 0 开始重新累计。
   Future<Set<int>> _scanChapterPages(String chapterName) async {
     var pages = <int>{};
+    var sizes = <int, int>{};
     try {
       var dir = Directory(_chapterDirPath(chapterName));
       if (!await dir.exists()) {
@@ -319,15 +342,21 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         if (index == null) {
           continue;
         }
-        if (await entity.length() > 0) {
+        var length = await entity.length();
+        if (length > 0) {
           pages.add(index);
+          sizes[index] = length;
         }
       }
     } catch (e) {
       Log.error("Download", "Failed to scan chapter $chapterName: $e");
     }
+    _diskBytes[chapterName] = sizes;
     return pages;
   }
+
+  /// 磁盘上每页的大小，key 是章节名，value 是「页码 → 字节数」。
+  final _diskBytes = <String, Map<int, int>>{};
 
   Future<Set<int>> _pagesOnDisk(String chapterName) async {
     return _diskPages[chapterName] ??= await _scanChapterPages(chapterName);
@@ -344,6 +373,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     // 每次恢复都重扫：暂停/取消发生在写盘中途时，`_diskPages` 可能和
     // 真实目录对不上，缓存不清就会一直沿用旧结论（该下的页被当成已下）。
     _diskPages.clear();
+    _diskBytes.clear();
     var pageCounts = <int>[];
     var existing = <List<int>>[];
     for (var entry in _images!.entries) {
@@ -356,6 +386,31 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     );
     _totalCount = point.total;
     _downloadedCount = point.downloaded;
+    // 字节数也以磁盘为准。以前只有「页数」按磁盘重算、字节数沿用 JSON，
+    // 于是恢复后可能出现「页数几十、体积 0」，估算又从这个错样本外推，
+    // 一会儿几个 G 一会儿几百 K。磁盘上有什么就算什么，最省事也最准。
+    var diskBytes = 0;
+    var samples = <int>[];
+    for (var entry in _images!.entries) {
+      var sizes = _diskBytes[entry.key];
+      if (sizes == null) {
+        continue;
+      }
+      var limit = entry.value.length;
+      var ordered = sizes.keys.where((i) => i < limit).toList()..sort();
+      for (var page in ordered) {
+        diskBytes += sizes[page]!;
+        samples.add(sizes[page]!);
+      }
+    }
+    _downloadedBytes = diskBytes;
+    if (samples.isNotEmpty) {
+      _pageSizes
+        ..clear()
+        ..addAll(samples.length > _pageSizeWindow
+            ? samples.sublist(samples.length - _pageSizeWindow)
+            : samples);
+    }
     // 全部都在磁盘上了（上次下完但没来得及入库）：游标推到末尾，让下面
     // 的循环立刻结束并入库。
     _chapter = point.chapter;
@@ -653,13 +708,21 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _message = message;
     notifyListeners();
     stopRecorder();
-    if (!autoRetry || _autoRetry >= 2 || userPaused || _cancelled) {
+    // 任务自己停了，前台服务该摘就摘（全部停了的话）。
+    LocalManager().refreshBackgroundService();
+    if (!autoRetry || _autoRetry >= _maxAutoRetries || userPaused || _cancelled) {
       return;
     }
     // 网络抖一下不该让整个任务停在那儿等用户来点。隔几秒自己再试，
     // 恢复时会按磁盘重算进度，已经下好的页不会重下。
+    //
+    // 次数给足：手机锁屏、VPN 掉线、地铁进隧道都可能断上一两分钟，两三次
+    // 重试根本熬不过去，用户回来看到的就是「下载停了」。退避到 2 分钟，
+    // 前面几次仍然很快，真正长时间断网才会放弃。
     _autoRetry++;
-    var delay = Duration(seconds: _autoRetry == 1 ? 5 : 15);
+    const delays = [5, 10, 20, 40, 80, 160];
+    var seconds = delays[(_autoRetry - 1).clamp(0, delays.length - 1)];
+    var delay = Duration(seconds: seconds);
     _message = "$message, retrying in ${delay.inSeconds}s";
     notifyListeners();
     _retryTimer?.cancel();
@@ -670,6 +733,8 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       resume(automatic: true);
     });
   }
+
+  static const _maxAutoRetries = 6;
 
   /// 记录里的封面还能不能用。
   ///
@@ -735,6 +800,16 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _downloadedBytes = json["downloadedBytes"] ?? _downloadedBytes;
     _totalCount = json["totalCount"] ?? _totalCount;
     userPaused = json["userPaused"] ?? userPaused;
+  }
+
+  @override
+  Future<void> reconcileProgress() async {
+    // 正在跑的任务自己有游标，别从外面改它。
+    if (_isRunning) {
+      return;
+    }
+    await _reconcileWithDisk();
+    await LocalManager().saveDownloadProgressNow();
   }
 
   @override
@@ -827,12 +902,17 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
 /// 估算整本体积。
 ///
 /// 漫画源不提供整本大小，逐页拉图时也拿不到后面几页的 Content-Length，
-/// 所以只能用已完成的页求平均再乘总页数。误差随进度收窄，全部下完时
-/// 正好退化成真实总量——不会出现「下完了还显示 ≈」的情况。
+/// 所以只能拿已下好的页外推。**不能用「累计字节 ÷ 已完成页数」**：长条漫
+/// 的第一页动辄两三 MB，按它外推一千页就是几个 G，等真实页（几十 KB）陆续
+/// 到位再一路缩回去——用户看到的就是「预估一会儿几个 G、一会儿一百多 M」。
+///
+/// 有 [recentPageBytes]（最近若干页的大小）时取中位数外推：中位数对单张
+/// 大图/小图都不敏感，样本不足 5 页干脆不给数字（返回 0），宁可不显示。
 int estimateTotalBytes({
   required int downloadedBytes,
   required int downloadedCount,
   required int totalCount,
+  List<int>? recentPageBytes,
 }) {
   // 图片列表还没拉回来，不知道要下多少页，此时任何数字都是编的
   if (totalCount <= 0) {
@@ -845,7 +925,28 @@ int estimateTotalBytes({
   if (downloadedCount <= 0) {
     return 0;
   }
+  if (recentPageBytes != null) {
+    var samples = recentPageBytes.where((e) => e > 0).toList();
+    if (samples.length < _minSamplesForEstimate) {
+      return 0;
+    }
+    var perPage = _median(samples);
+    var remaining = totalCount - downloadedCount;
+    return downloadedBytes + (perPage * remaining).round();
+  }
   return (downloadedBytes / downloadedCount * totalCount).round();
+}
+
+/// 少于这么多页时不做外推：样本太小，一张大图就能带偏整本。
+const _minSamplesForEstimate = 5;
+
+int _median(List<int> values) {
+  var sorted = List<int>.from(values)..sort();
+  var mid = sorted.length ~/ 2;
+  if (sorted.length.isOdd) {
+    return sorted[mid];
+  }
+  return ((sorted[mid - 1] + sorted[mid]) / 2).round();
 }
 
 /// 恢复下载时的落点。

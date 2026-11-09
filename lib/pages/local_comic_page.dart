@@ -85,11 +85,21 @@ class _LocalComicPageState extends State<LocalComicPage> {
   /// 这页是从下载任务的快照打开的（书还没下完、库里没有）。
   bool _fromSnapshot = false;
 
+  /// 最近一次从网络源拉到的章节表。
+  ///
+  /// 本地库里存的是**下载那一刻**的目录。源后来加了新章节，本地这份就永远
+  /// 停在旧的地方——用户点进来只能看到「当时下到哪儿」，连新话存在都不知道。
+  /// 打开页面时顺手问一次源，拿到的目录和源站详情页完全一致。
+  ComicChapters? _remoteChapters;
+
+  bool _loadingChapters = false;
+
   @override
   void initState() {
     super.initState();
     _load();
     _scrollController.addListener(_onScroll);
+    _loadRemoteChapters();
   }
 
   @override
@@ -105,6 +115,78 @@ class _LocalComicPageState extends State<LocalComicPage> {
     _comic = stored ?? widget.fallback;
     _details = ComicDetailsCache.load(widget.id, widget.comicType) ??
         widget.detailsFallback;
+  }
+
+  /// 当前生效的章节表：源上拿到了就用源的，否则用本地记下的那份。
+  ComicChapters? get _chapters => _remoteChapters ?? _comic?.chapters;
+
+  /// 向网络源要一次最新的目录。
+  ///
+  /// 只对「下载来的漫画」有意义（`ComicType.local` 是导入的，没有源）。
+  /// 失败就静默沿用本地目录——离线看本地书是常态，不能因为拉不到目录就
+  /// 把章节列表变成错误页。
+  Future<void> _loadRemoteChapters() async {
+    if (_loadingChapters) {
+      return;
+    }
+    final comic = _comic;
+    if (comic == null || widget.comicType == ComicType.local) {
+      return;
+    }
+    final source = widget.comicType.comicSource;
+    if (source?.loadComicInfo == null) {
+      return;
+    }
+    setState(() {
+      _loadingChapters = true;
+    });
+    try {
+      final res = await source!.loadComicInfo!(comic.id);
+      if (!mounted) {
+        return;
+      }
+      if (res.error || res.data.chapters == null) {
+        return;
+      }
+      final remote = res.data.chapters!;
+      setState(() {
+        _remoteChapters = remote;
+        // 顺手把源里的简介/标签也补上：本地快照可能没有这些字段。
+        _details ??= res.data;
+      });
+      // 目录变了就写回本地库。
+      //
+      // 章节目录是按「章节 id」建的，所以换一份更新的章节表不会动到已经
+      // 下好的文件；反而能让阅读器、导出、阅读进度这些按序号定位的地方
+      // 和源站对齐——否则「源加了新章节」之后本地序号会整体错位。
+      if (!_fromSnapshot &&
+          comic.chapters != null &&
+          remote.ids.join(",") != comic.chapters!.ids.join(",")) {
+        LocalManager().add(
+          LocalComic(
+            id: comic.id,
+            title: comic.title,
+            subtitle: comic.subtitle,
+            tags: comic.tags,
+            directory: comic.directory,
+            chapters: remote,
+            cover: comic.cover,
+            comicType: comic.comicType,
+            downloadedChapters: comic.downloadedChapters,
+            createdAt: comic.createdAt,
+          ),
+        );
+        _comic = LocalManager().find(comic.id, comic.comicType) ?? _comic;
+      }
+    } catch (_) {
+      // 静默：离线 / 源挂了都只是看不到最新目录，本地章节照样能读
+    } finally {
+      if (mounted) {
+        setState(() {
+          _loadingChapters = false;
+        });
+      }
+    }
   }
 
   void _onScroll() {
@@ -142,7 +224,7 @@ class _LocalComicPageState extends State<LocalComicPage> {
         type: comic.comicType,
         cid: comic.id,
         name: comic.title,
-        chapters: comic.chapters,
+        chapters: _chapters,
         initialChapter: ep ?? history?.ep,
         initialPage: page ?? (ep != null ? 1 : history?.page),
         initialChapterGroup: group ?? history?.group,
@@ -154,7 +236,7 @@ class _LocalComicPageState extends State<LocalComicPage> {
   }
 
   void _readChapter(String chapterId) {
-    final chapters = _comic!.chapters;
+    final chapters = _chapters;
     if (chapters == null) {
       _read();
       return;
@@ -545,7 +627,7 @@ class _LocalComicPageState extends State<LocalComicPage> {
     History history,
   ) {
     String text;
-    final chapters = comic.chapters;
+    final chapters = _chapters;
     if (chapters != null && chapters.length > 0) {
       var epName = "E${history.ep}";
       try {
@@ -643,17 +725,51 @@ class _LocalComicPageState extends State<LocalComicPage> {
   }
 
   Iterable<Widget> _buildChapters(LocalComic comic) sync* {
-    final chapters = comic.chapters;
+    final chapters = _chapters;
     if (chapters == null || chapters.length == 0) {
       return;
     }
     final entries = chapters.allChapters.entries.toList();
+    // 快照模式（整本还没下完、库里没有它）拿不到「哪几话真的落盘了」：
+    // 任务的 downloadedChapters 记的是「选了哪几话」，不是「下完了哪几话」。
+    // 与其把没下的也标成已下载，不如这一屏先不标。
+    final downloaded = _fromSnapshot
+        ? const <String>{}
+        : comic.downloadedChapters.toSet();
+    final downloadedCount = entries.where((e) => downloaded.contains(e.key)).length;
     yield SliverToBoxAdapter(
       child: ListTile(
         title: Text("Chapters".tl),
-        trailing: Text(
-          "${entries.length}",
-          style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
+        subtitle: downloadedCount > 0 && downloadedCount < entries.length
+            ? Text(
+                "@a of @b downloaded"
+                    .tlParams({"a": downloadedCount, "b": entries.length}),
+                style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
+              )
+            : null,
+        trailing: Row(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            if (_loadingChapters)
+              const SizedBox(
+                width: 16,
+                height: 16,
+                child: CircularProgressIndicator(strokeWidth: 2),
+              )
+            else if (widget.comicType != ComicType.local)
+              IconButton(
+                tooltip: "Refresh".tl,
+                visualDensity: VisualDensity.compact,
+                icon: const Icon(Icons.refresh, size: 18),
+                onPressed: () {
+                  _loadRemoteChapters();
+                },
+              ),
+            Text(
+              "${entries.length}",
+              style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
+            ),
+          ],
         ),
       ),
     );
@@ -663,8 +779,8 @@ class _LocalComicPageState extends State<LocalComicPage> {
         final entry = entries[index];
         final read = HistoryManager().find(comic.id, comic.comicType);
         final isCurrent = read != null &&
-            comic.chapters != null &&
-            _epIndexOf(comic.chapters!, entry.key) == read.ep;
+            _epIndexOf(chapters, entry.key) == read.ep;
+        final isDownloaded = downloaded.contains(entry.key);
         return ListTile(
           title: Text(entry.value),
           leading: SizedBox(
@@ -678,13 +794,27 @@ class _LocalComicPageState extends State<LocalComicPage> {
               ),
             ),
           ),
-          trailing: isCurrent
-              ? Icon(
+          trailing: Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              // 这一话在手机上：给个小图标，用户一眼能看出哪些能离线读。
+              if (isDownloaded)
+                Padding(
+                  padding: const EdgeInsets.only(right: 6),
+                  child: Icon(
+                    Icons.offline_pin_outlined,
+                    size: 16,
+                    color: context.colorScheme.primary.toOpacity(0.7),
+                  ),
+                ),
+              if (isCurrent)
+                Icon(
                   Icons.play_arrow_rounded,
                   size: 18,
                   color: context.colorScheme.primary,
-                )
-              : null,
+                ),
+            ],
+          ),
           onTap: () => _readChapter(entry.key),
         );
       },

@@ -67,6 +67,23 @@ class DownloadBackground {
 
   int _lastPushMs = 0;
 
+  /// 上一次尝试拉起服务的时刻（毫秒）。
+  ///
+  /// 拉起失败（冷启动时序不对、后台启动被拒）不能就此放弃：进程一旦被打成
+  /// 「缓存进程」，切到后台一两分钟就会被系统冻住 —— 用户看到的就是「下载
+  /// 自己停了」。这里按 5 秒的间隔重试，直到成功为止。
+  int _lastStartAttemptMs = 0;
+
+  static const _startRetryIntervalMs = 5000;
+
+  /// 服务活着的时候多久重新声明一次。
+  ///
+  /// 原生侧靠 wakelock 定时续期活着，这条是兜底：进程被系统回收后重建、
+  /// 服务被 ROM 的省电策略掐掉，都能被这条发现并拉回来。
+  static const _keepAliveIntervalMs = 4 * 60 * 1000;
+
+  int _lastKeepAliveMs = 0;
+
   bool get enabled => appdata.settings['backgroundDownload'] != false;
 
   /// 任务增删/启停时调用。有任务在跑就确保服务活着，全停了就摘掉通知。
@@ -92,13 +109,19 @@ class DownloadBackground {
   }
 
   Future<void> _begin() async {
+    _lastStartAttemptMs = DateTime.now().millisecondsSinceEpoch;
     // 通知权限没给的话服务照样能跑，只是用户看不到进度，所以顺手问一次。
     // 拒绝也继续下载，不让权限挡住下载。
     try {
       if (!_permissionRequested) {
         _permissionRequested = true;
         if (!await NotificationService.hasPermission()) {
-          await NotificationService.requestPermission();
+          if (!NotificationService.isForeground) {
+            // 后台时弹权限框系统不认，等下次在前台再问
+            _permissionRequested = false;
+          } else {
+            await NotificationService.requestPermission();
+          }
         }
       }
     } catch (_) {}
@@ -120,16 +143,25 @@ class DownloadBackground {
     });
     if (!ok) {
       // 冷启动时序不对（进程还没被系统当成前台）时会被拒。别把状态留在
-      // 「已启动」上，等下次事件或回到前台时再试一次。
+      // 「已启动」上，ticker 会隔几秒再试一次。
       _active = false;
       _started = false;
       return;
     }
     _started = true;
+    _lastKeepAliveMs = DateTime.now().millisecondsSinceEpoch;
   }
 
   void _push() {
-    if (!_active || !_started) {
+    final now = DateTime.now().millisecondsSinceEpoch;
+    if (!_active) {
+      return;
+    }
+    if (!_started) {
+      // 没拉起来就按间隔重试，别等下一次任务事件——很可能再也不会有。
+      if (now - _lastStartAttemptMs >= _startRetryIntervalMs) {
+        unawaited(_begin());
+      }
       return;
     }
     final summary = summaryProvider?.call();
@@ -137,7 +169,12 @@ class DownloadBackground {
       _stop();
       return;
     }
-    var now = DateTime.now().millisecondsSinceEpoch;
+    // 隔几分钟重新声明一次，顺便让原生侧把 wakelock 续上。
+    if (now - _lastKeepAliveMs >= _keepAliveIntervalMs) {
+      _lastKeepAliveMs = now;
+      unawaited(_begin());
+      return;
+    }
     if (now - _lastPushMs < 900) {
       return;
     }
@@ -205,10 +242,42 @@ class DownloadBackground {
     return (summary.progress * 100).floor().clamp(0, 100);
   }
 
+  /// 是否已经在系统的「不优化」白名单里。
+  Future<bool> get ignoringBatteryOptimizations async {
+    if (!App.isAndroid) {
+      return true;
+    }
+    try {
+      return await _channel.invokeMethod<bool>(
+            "isIgnoringBatteryOptimizations",
+          ) ??
+          false;
+    } catch (_) {
+      return true;
+    }
+  }
+
+  /// 拉起系统的「电池优化」申请页。
+  Future<bool> requestIgnoreBatteryOptimizations() async {
+    if (!App.isAndroid) {
+      return true;
+    }
+    try {
+      return await _channel.invokeMethod<bool>(
+            "requestIgnoreBatteryOptimizations",
+          ) ??
+          false;
+    } catch (_) {
+      return false;
+    }
+  }
+
   Future<bool> _invoke(String method, Map<String, Object?> args) async {
     try {
-      await _channel.invokeMethod<bool>(method, args);
-      return true;
+      // 原生侧会明确回答「服务到底拉起来没有」，不能只看有没有抛异常：
+      // startForeground 被系统拒绝时是内部 catch 掉的。
+      var result = await _channel.invokeMethod<bool>(method, args);
+      return result ?? false;
     } catch (e, s) {
       // 桌面端 / widget 测试里没有这条通道，失败不影响下载本身
       Log.error("Download", "Background service $method failed: $e", s);
