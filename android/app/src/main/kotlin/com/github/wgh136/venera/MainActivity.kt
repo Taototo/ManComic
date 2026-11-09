@@ -458,6 +458,15 @@ class MainActivity : FlutterFragmentActivity() {
                     res.success(true)
                 }
 
+                // 没有字节要收的时候把 wakelock 放掉：服务会长时间保活，
+                // 一直攥着锁会在「源站挂了、任务全在等重试」时把电耗光。
+                "setDownloadWakeLock" -> {
+                    ComicDownloadService.setWakeLock(
+                        call.argument<Boolean>("hold") ?: true
+                    )
+                    res.success(true)
+                }
+
                 "getDirectoryPath" -> {
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)

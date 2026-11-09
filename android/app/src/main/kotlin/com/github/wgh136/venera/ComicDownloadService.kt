@@ -88,6 +88,20 @@ class ComicDownloadService : Service() {
             }
         }
 
+        /**
+         * 只在真的有传输时持 wakelock。
+         *
+         * Dart 侧现在会把「任务全在等重试」也算作还有活，服务会长时间活着。
+         * 一直攥着 partial wakelock 的话，源站挂掉一整夜就等于亮一整夜的
+         * CPU；没有字节要收的时候把锁放掉，等下一轮重试真跑起来再拿回来。
+         */
+        fun setWakeLock(hold: Boolean) {
+            instance?.setWakeLockWanted(hold)
+        }
+
+        @Volatile
+        private var instance: ComicDownloadService? = null
+
         fun stop(context: Context) {
             try {
                 context.stopService(Intent(context, ComicDownloadService::class.java))
@@ -156,7 +170,21 @@ class ComicDownloadService : Service() {
 
     private var wakeLock: PowerManager.WakeLock? = null
 
+    /** 现在需不需要这把锁。没字节要收的时候置 false。 */
+    @Volatile
+    private var wakeLockWanted = true
+
     private val handler = Handler(Looper.getMainLooper())
+
+    private fun setWakeLockWanted(hold: Boolean) {
+        if (hold == wakeLockWanted) return
+        wakeLockWanted = hold
+        if (hold) {
+            acquireWakeLock()
+        } else {
+            releaseWakeLock()
+        }
+    }
 
     /**
      * 定时续期 wakelock。
@@ -176,6 +204,7 @@ class ComicDownloadService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        instance = this
         acquireWakeLock()
         handler.postDelayed(renewRunnable, 25 * 60 * 1000L)
     }
@@ -188,6 +217,7 @@ class ComicDownloadService : Service() {
      */
     private fun acquireWakeLock() {
         try {
+            if (!wakeLockWanted) return
             if (wakeLock?.isHeld == true) return
             val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
             wakeLock = pm.newWakeLock(
@@ -256,6 +286,9 @@ class ComicDownloadService : Service() {
     }
 
     override fun onDestroy() {
+        if (instance === this) {
+            instance = null
+        }
         handler.removeCallbacks(renewRunnable)
         releaseWakeLock()
         try {

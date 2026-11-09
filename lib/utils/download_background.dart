@@ -108,6 +108,13 @@ class DownloadBackground {
 
   int _lastKeepAliveMs = 0;
 
+  /// 当前是否让原生侧攥着 wakelock。
+  ///
+  /// 服务现在会一直保活到「所有任务都做完/被用户暂停」为止。如果源站挂了、
+  /// 任务全在等重试，还一直持着 partial wakelock，整夜就是亮着 CPU 空转。
+  /// 所以在没有任务真正在收字节的时候把锁放掉。
+  bool _wakeLockHeld = true;
+
   bool get enabled => appdata.settings['backgroundDownload'] != false;
 
   /// 任务增删/启停时调用。还有没做完的任务就确保服务活着，全做完了才摘通知。
@@ -196,6 +203,9 @@ class DownloadBackground {
     }
     _failCount = 0;
     _started = true;
+    // 服务刚起来，原生侧在 onCreate 里已经拿了锁；下一拍 _push 再按实际
+    // 情况放开。这里先把记账对齐，避免多打一次通道调用。
+    _wakeLockHeld = true;
     _lastKeepAliveMs = DateTime.now().millisecondsSinceEpoch;
     unawaited(_ensureNotificationPermission());
   }
@@ -238,6 +248,7 @@ class DownloadBackground {
       _stop();
       return;
     }
+    _syncWakeLock(summary.running > 0);
     // 隔几分钟重新声明一次，顺便让原生侧把 wakelock 续上。
     if (now - _lastKeepAliveMs >= _keepAliveIntervalMs) {
       _lastKeepAliveMs = now;
@@ -262,6 +273,15 @@ class DownloadBackground {
         "progress": percent,
       }).then<void>((_) {}),
     );
+  }
+
+  /// 有任务在收字节才持锁。
+  void _syncWakeLock(bool hold) {
+    if (hold == _wakeLockHeld) {
+      return;
+    }
+    _wakeLockHeld = hold;
+    unawaited(_invoke("setDownloadWakeLock", {"hold": hold}).then<void>((_) {}));
   }
 
   void _stop() {
