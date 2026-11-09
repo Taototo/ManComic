@@ -54,6 +54,33 @@ void main() {
       // 估算必须用最近样本，不能拿累计平均（第一张长图能放大几十倍）
       expect(download.contains('recentPageBytes'), isTrue);
     });
+
+    test('地址表没落盘也能算出分母', () {
+      var download = read('lib/network/download.dart');
+      // 每章页数写进进度快照，恢复时不依赖那张几百 KB 的地址表
+      expect(download.contains('"chapterPages"'), isTrue);
+      expect(download.contains('_chapterPageHint'), isTrue);
+    });
+
+    test('空地址表不会被当成已经下完', () {
+      var download = read('lib/network/download.dart');
+      expect(download.contains('_images!.isEmpty'), isTrue);
+    });
+
+    test('目录没就绪 / 扫不到文件时不把进度抹成 0', () {
+      var download = read('lib/network/download.dart');
+      expect(download.contains('is not ready'), isTrue);
+      expect(download.contains('No page found on disk'), isTrue);
+    });
+
+    test('目录记录丢了会找回旧目录', () {
+      var local = read('lib/foundation/local.dart');
+      expect(local.contains('findReusableDirectory'), isTrue);
+      var download = read('lib/network/download.dart');
+      expect(download.contains('findReusableDirectory'), isTrue);
+      // 任务表坏了只备份，不再整份删除
+      expect(local.contains('.bak'), isTrue);
+    });
   });
 
   group('本地详情页的目录跟网络源一致', () {

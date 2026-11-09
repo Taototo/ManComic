@@ -358,16 +358,66 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   /// 磁盘上每页的大小，key 是章节名，value 是「页码 → 字节数」。
   final _diskBytes = <String, Map<int, int>>{};
 
+  /// 进度文件里带回来的「每章几页」。
+  ///
+  /// 只为了在拿不到地址表时也能算出分母，让恢复后的进度不是 0。
+  Map<String, int>? _chapterPageHint;
+
   Future<Set<int>> _pagesOnDisk(String chapterName) async {
     return _diskPages[chapterName] ??= await _scanChapterPages(chapterName);
   }
 
+  /// 恢复时算进度用的「每章几页」。
+  ///
+  /// 优先用真地址表；没有就用进度文件里记的那几行数字。地址表有几百 KB，
+  /// 而进度文件只有几 KB——进程在「地址表刚拉完、还没写盘」的窗口里被杀，
+  /// 任务文件里 `images` 就是空的，这时候只有进度文件还知道分母是多少。
+  Map<String, int>? _pageCountsForReconcile() {
+    if (_images != null && _images!.isNotEmpty) {
+      return _images!.map((key, value) => MapEntry(key, value.length));
+    }
+    var hint = _chapterPageHint;
+    if (hint != null && hint.isNotEmpty) {
+      return hint;
+    }
+    return null;
+  }
+
+  Future<void>? _reconcileChain;
+
   /// 用磁盘上的实际文件重建进度，并把游标挪到第一个缺页。
   ///
-  /// 恢复时的「快」就来自这里：不用从上次记账的位置重新下一遍，也不用
-  /// 清空目录重来。整本扫一遍目录，缺哪页补哪页。
-  Future<void> _reconcileWithDisk() async {
-    if (_images == null || path == null) {
+  /// 恢复时有两处会触发（启动后扫一次、resume 开头再扫一次）。两次并发地
+  /// clear + 重扫会把 [_diskPages] 搅成半新半旧，所以串行化：后来的直接
+  /// 复用正在跑的那一次。
+  Future<void> _reconcileWithDisk() {
+    return _reconcileChain ??= _doReconcile()
+        .catchError(
+          (Object e, StackTrace s) =>
+              Log.error("Download", "Failed to reconcile with disk: $e", s),
+        )
+        .whenComplete(() {
+          _reconcileChain = null;
+        });
+  }
+
+  Future<void> _doReconcile() async {
+    if (path == null) {
+      return;
+    }
+    var counts = _pageCountsForReconcile();
+    if (counts == null || counts.isEmpty) {
+      // 连「每章几页」都不知道，扫出来的页数没有分母，算不出百分比。
+      // 这里什么都不动，等拿到地址表之后那次重算。
+      return;
+    }
+    // 目录还不存在（外部存储刚重挂、权限没就绪）时不要下结论：这时扫出来
+    // 必然是 0 页，写进 UI 就成了「进度归零」。保持原样，下次再来。
+    if (!await Directory(path!).exists()) {
+      Log.warning(
+        "Download",
+        "Skip reconcile for $title, ${path!} is not ready",
+      );
       return;
     }
     // 每次恢复都重扫：暂停/取消发生在写盘中途时，`_diskPages` 可能和
@@ -376,14 +426,27 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _diskBytes.clear();
     var pageCounts = <int>[];
     var existing = <List<int>>[];
-    for (var entry in _images!.entries) {
-      pageCounts.add(entry.value.length);
+    for (var entry in counts.entries) {
+      pageCounts.add(entry.value);
       existing.add((await _pagesOnDisk(entry.key)).toList());
     }
     var point = computeResumePoint(
       pageCounts: pageCounts,
       existingPages: existing,
     );
+    if (point.total == 0) {
+      return;
+    }
+    // 记录里明明下过几百页，磁盘上一页都没扫到：要么目录被清过，要么页码
+    // 命名对不上。先把旧数字留着（日志里留个线索），总好过把进度抹成 0
+    // ——那正是用户最不能接受的那种「回到起点」。
+    if (point.downloaded == 0 && _downloadedCount > 0) {
+      Log.warning(
+        "Download",
+        "No page found on disk for $title, keep $_downloadedCount/$_totalCount",
+      );
+      return;
+    }
     _totalCount = point.total;
     _downloadedCount = point.downloaded;
     // 字节数也以磁盘为准。以前只有「页数」按磁盘重算、字节数沿用 JSON，
@@ -391,12 +454,12 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     // 一会儿几个 G 一会儿几百 K。磁盘上有什么就算什么，最省事也最准。
     var diskBytes = 0;
     var samples = <int>[];
-    for (var entry in _images!.entries) {
+    for (var entry in counts.entries) {
       var sizes = _diskBytes[entry.key];
       if (sizes == null) {
         continue;
       }
-      var limit = entry.value.length;
+      var limit = entry.value;
       var ordered = sizes.keys.where((i) => i < limit).toList()..sort();
       for (var page in ordered) {
         diskBytes += sizes[page]!;
@@ -412,9 +475,12 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
             : samples);
     }
     // 全部都在磁盘上了（上次下完但没来得及入库）：游标推到末尾，让下面
-    // 的循环立刻结束并入库。
-    _chapter = point.chapter;
-    _index = point.index;
+    // 的循环立刻结束并入库。用「每章几页」估出来的顺序不一定就是地址表
+    // 的顺序，所以只在真地址表在手时才挪游标。
+    if (_images != null && _images!.isNotEmpty) {
+      _chapter = point.chapter;
+      _index = point.index;
+    }
     _message = "$_downloadedCount/$_totalCount";
     notifyListeners();
   }
@@ -497,11 +563,26 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
 
     if (path == null) {
       try {
-        var dir = await LocalManager().findValidDirectory(
-          comicId,
-          comicType,
-          comic!.title,
-        );
+        // 任务自述「下过东西」但没有目录：先找回旧目录，别新建一个
+        // `标题(1)` 把已经下了一半的图扔在那儿。
+        Directory? reused;
+        var hadProgress = _downloadedCount > 0 ||
+            (_chapterPageHint?.isNotEmpty ?? false);
+        if (hadProgress) {
+          reused = LocalManager().findReusableDirectory(comic!.title);
+          if (reused != null) {
+            Log.warning(
+              "Download",
+              "Reusing existing directory ${reused.path} for $comicId",
+            );
+          }
+        }
+        var dir = reused ??
+            await LocalManager().findValidDirectory(
+              comicId,
+              comicType,
+              comic!.title,
+            );
         if (!(await dir.exists())) {
           await dir.create();
         }
@@ -519,7 +600,18 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     // 跟着消失，不需要额外的清理逻辑。
     ComicDetailsCache.save(comic!, comicType, directory: path);
 
+    // 先按磁盘把进度找回来，再往下走。
+    //
+    // 这一步不需要网络，所以哪怕接下来拉章节表/封面失败（断网、源站挂了），
+    // 用户看到的也是「已经下了多少页」，而不是 0。以前这里先 full 落一次盘，
+    // 那时 `_downloadedCount` 还是 JSON 里的旧值甚至 0，一旦进程在这附近被
+    // 杀，看起来就是「进度回到起点」。
+    await _reconcileWithDisk();
     await LocalManager().saveCurrentDownloadingTasks(full: true);
+
+    if (!_isRunning) {
+      return;
+    }
 
     // 上次中断可能把半张封面留在了磁盘上：记录里写着「封面已下载」，文件
     // 却解不出来。这里先验一遍，不通过就当没下过——否则 `_cover != null`
@@ -570,7 +662,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       await LocalManager().saveCurrentDownloadingTasks(full: true);
     }
 
-    if (_images == null) {
+    // 空的地址表等于没有：以前只在 `== null` 时重拉，于是恢复出来的
+    // `{}` 会让下面的循环一页都不下、直接判定「下完了」，任务原地消失。
+    if (_images == null || _images!.isEmpty) {
       if (comic!.chapters == null) {
         _message = "Fetching image list...";
         notifyListeners();
@@ -789,6 +883,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         "downloadedBytes": _downloadedBytes,
         "totalCount": _totalCount,
         "userPaused": userPaused,
+        // 每章页数 + 目录：几 KB，但足够在地址表缺失时把进度算回来。
+        "chapterPages": _images?.map((k, v) => MapEntry(k, v.length)),
+        "path": path,
       };
 
   @override
@@ -800,6 +897,13 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     _downloadedBytes = json["downloadedBytes"] ?? _downloadedBytes;
     _totalCount = json["totalCount"] ?? _totalCount;
     userPaused = json["userPaused"] ?? userPaused;
+    var pages = json["chapterPages"];
+    if (pages is Map && pages.isNotEmpty) {
+      _chapterPageHint = pages.map((k, v) => MapEntry("$k", (v as num).toInt()));
+    }
+    // 目录以前没存，老版本的进度文件里没有；任务文件里的 path 才是准的，
+    // 只有在任务文件丢了 path 时才用它兜底。
+    path ??= json["path"];
   }
 
   @override
@@ -823,6 +927,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       "path": path,
       "cover": _cover,
       "images": _images,
+      "chapterPages": _images?.map((k, v) => MapEntry(k, v.length)),
       "downloadedCount": _downloadedCount,
       "downloadedBytes": _downloadedBytes,
       "totalCount": _totalCount,
@@ -855,6 +960,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       ..path = json["path"]
       .._cover = json["cover"]
       .._images = images
+      .._chapterPageHint = (json["chapterPages"] as Map?)?.map(
+        (k, v) => MapEntry("$k", (v as num).toInt()),
+      )
       .._downloadedCount = json["downloadedCount"] ?? 0
       .._downloadedBytes = json["downloadedBytes"] ?? 0
       .._totalCount = json["totalCount"] ?? 0

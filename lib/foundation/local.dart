@@ -712,6 +712,33 @@ class LocalManager with ChangeNotifier {
     return Directory(FilePath.join(path, dir)).create().then((value) => value);
   }
 
+  /// 找出「已经下过东西」的同名目录。
+  ///
+  /// 断点续传靠的是任务里记的 `path`。万一那条记录没落盘（进程正好在
+  /// 「算好目录、还没写任务文件」那一瞬被杀），`findValidDirectory` 会
+  /// 因为同名目录已存在而新建一个 `标题(1)`——旧目录里下了一半的图全部
+  /// 变成孤儿，界面上就是「进度回到 0、从头再来一遍」。
+  ///
+  /// 只有任务自述「已经下过东西」时才会调到这里，所以命中的目录必然是
+  /// 这个任务自己建的（同名不同源属于极端情况，那时拿到的也只是多下的
+  /// 章节，会在下面按页重算时被纠正）。
+  Directory? findReusableDirectory(String name) {
+    const comicDirectoryMaxLength = 80;
+    if (name.length > comicDirectoryMaxLength) {
+      name = name.substring(0, comicDirectoryMaxLength);
+    }
+    for (var i = 0; i < 20; i++) {
+      var candidate = i == 0 ? name : "$name($i)";
+      var dir = Directory(FilePath.join(path, sanitizeFileName(candidate)));
+      try {
+        if (dir.existsSync() && dir.listSync().isNotEmpty) {
+          return dir;
+        }
+      } catch (_) {}
+    }
+    return null;
+  }
+
   void completeTask(DownloadTask task) {
     add(task.toLocalComic());
     downloadingTasks.remove(task);
@@ -825,14 +852,32 @@ class LocalManager with ChangeNotifier {
     if (file.existsSync()) {
       try {
         var tasks = jsonDecode(file.readAsStringSync());
-        for (var e in tasks) {
-          var task = DownloadTask.fromJson(e);
-          if (task != null) {
-            downloadingTasks.add(task);
+        if (tasks is List) {
+          for (var e in tasks) {
+            // 单个任务解析失败（源被删了、某个字段对不上）只跳过它，
+            // 不能因为一条坏记录就把整份任务表删掉——那样用户已下的
+            // 几十 GB 会瞬间变成「没有任务」。
+            try {
+              var task = DownloadTask.fromJson(Map<String, dynamic>.from(e));
+              if (task != null) {
+                downloadingTasks.add(task);
+              } else {
+                Log.error(
+                  "LocalManager",
+                  "Skip unknown downloading task: ${e['type']}",
+                );
+              }
+            } catch (e, s) {
+              Log.error("LocalManager", "Failed to restore one task: $e", s);
+            }
           }
         }
       } catch (e) {
-        file.delete();
+        // 整个文件坏了（写到一半断电之类）：留一份 .bak 方便排查，
+        // 不要直接删。
+        try {
+          file.renameSync('${file.path}.bak');
+        } catch (_) {}
         Log.error("LocalManager", "Failed to restore downloading tasks: $e");
       }
     }
@@ -841,10 +886,12 @@ class LocalManager with ChangeNotifier {
     // 划掉、系统清内存）时可能落后几页，甚至整段丢失——用户看到的就成了
     // 「明明下了一半，回来变成 0%」。恢复后先按目录扫一遍，以磁盘为准。
     for (var task in downloadingTasks) {
-      if (task.isPaused) {
-        unawaited(task.reconcileProgress());
-      }
+      unawaited(task.reconcileProgress());
     }
+    Log.info(
+      "LocalManager",
+      "Restored ${downloadingTasks.length} downloading tasks",
+    );
     // 上次没下完的接着下。用户之前手动暂停过的（userPaused）保持暂停，
     // 剩下的是「排到一半进程被杀」，属于断点续传该管的部分。
     pumpQueue();
