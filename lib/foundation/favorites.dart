@@ -17,6 +17,7 @@ import 'dart:io';
 import 'app.dart';
 import 'comic_source/comic_source.dart';
 import 'comic_type.dart';
+import 'source_health.dart';
 
 String _getTimeString(DateTime time) {
   return time.toIso8601String().replaceFirst("T", " ").substring(0, 19);
@@ -1327,7 +1328,18 @@ class LocalFavoritesManager with ChangeNotifier {
     if (item.type == ComicType.local) {
       return LocalManager().find(item.id, item.type) == null;
     }
-    return item.type.comicSource == null;
+    final source = item.type.comicSource;
+    if (source == null) {
+      // 源被卸载/删掉了：这本书没有任何地方能打开。
+      return true;
+    }
+    // 源还在，但源检测刚测出「失败」（超时、403、站挂了）。以前这里只看源
+    // 对象在不在，于是这些源下的收藏一条也挪不动——用户在源检测页明明看到
+    // 是红的，点「一键清理失效」却提示「没有失效的漫画」。
+    //
+    // 结果按 key 落盘（见 SourceHealthService），重启后依然有效；源恢复正常
+    // 并重新检测通过后，这些作品可以在失效页「重新检测失效」里原路退回。
+    return SourceHealthService.instance.hasFailed(source.key);
   }
 
   /// 把失效的收藏从各分类里挪进「失效」表。

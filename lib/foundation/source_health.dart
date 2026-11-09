@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/translations.dart';
@@ -114,9 +115,37 @@ class SourceHealth {
 
 /// 全源体检。单例，结果常驻内存，所以从源列表点进体检页不会重跑一遍。
 class SourceHealthService extends ChangeNotifier {
-  SourceHealthService._();
+  SourceHealthService._() {
+    final saved = appdata.implicitData[_failedKeysKey];
+    if (saved is List) {
+      _failedKeys.addAll(saved.whereType<String>());
+    }
+  }
 
   static final SourceHealthService instance = SourceHealthService._();
+
+  /// 上次测出「失败」的源 key，跟着 implicitData 落盘。
+  ///
+  /// 体检结果本身只在内存里，重启就没了。但「收藏 → 一键清理失效」要靠它
+  /// 判断哪些源挂了——只放内存的话，重启后第一次清理会把那些源当成正常，
+  /// 一条也挪不动。源重新测通就从这个集合里删掉。
+  static const _failedKeysKey = 'sourceHealthFailedKeys';
+
+  final _failedKeys = <String>{};
+
+  /// 这个源上次体检是不是失败的。
+  bool hasFailed(String key) => _failedKeys.contains(key);
+
+  void _recordFailed(SourceHealth item) {
+    final key = item.source.key;
+    final changed = item.status == SourceHealthStatus.error
+        ? _failedKeys.add(key)
+        : _failedKeys.remove(key);
+    if (changed) {
+      appdata.implicitData[_failedKeysKey] = _failedKeys.toList();
+      unawaited(appdata.writeImplicitData());
+    }
+  }
 
   /// 用尽量短的常见字探测，多数源都能返回结果
   static const probeKeyword = "a";
@@ -153,6 +182,7 @@ class SourceHealthService extends ChangeNotifier {
 
   /// 源被删除/重装后清掉它的结果
   void forget(String key) {
+    _failedKeys.remove(key);
     if (_cache.remove(key) != null) {
       notifyListeners();
     }
@@ -221,6 +251,7 @@ class SourceHealthService extends ChangeNotifier {
         item
           ..status = SourceHealthStatus.unsupported
           ..checkedAt = DateTime.now();
+        _recordFailed(item);
         notifyListeners();
         return;
       }
@@ -249,6 +280,7 @@ class SourceHealthService extends ChangeNotifier {
             : e.toString().split("\n").first;
     }
     item.checkedAt = DateTime.now();
+    _recordFailed(item);
     notifyListeners();
   }
 }

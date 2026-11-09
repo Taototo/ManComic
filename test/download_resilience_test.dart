@@ -74,4 +74,55 @@ void main() {
       expect(page.contains('recheckInvalid'), isTrue);
     });
   });
+
+  group('下载不再显示预估体积', () {
+    test('下载页只报剩余百分比', () {
+      var page = read('lib/pages/downloading_page.dart');
+      expect(page.contains('_remainingText'), isTrue);
+      // 「≈ 2.1 GB」这类外推值会让用户以为下载算错了
+      expect(page.contains('≈'), isFalse);
+      expect(page.contains('_sizeText'), isFalse);
+      expect(page.contains('totalBytes'), isFalse);
+    });
+
+    test('通知栏进度也按页数算，不用字节估算', () {
+      var local = read('lib/foundation/local.dart');
+      expect(local.contains('progress += task.progress'), isTrue);
+    });
+  });
+
+  group('源检测失败也算失效', () {
+    test('一键清理会带上体检挂掉的源', () {
+      var favorites = read('lib/foundation/favorites.dart');
+      expect(favorites.contains('SourceHealthService.instance.hasFailed'), isTrue);
+    });
+
+    test('失败结果落盘，重启后清理仍然有效', () {
+      var health = read('lib/foundation/source_health.dart');
+      expect(health.contains('sourceHealthFailedKeys'), isTrue);
+      expect(health.contains('_recordFailed'), isTrue);
+      // 测通之后要把旧的失败记录删掉，否则角标永远恢复不了
+      expect(health.contains('_failedKeys.remove'), isTrue);
+    });
+
+    test('清理弹窗要提示会连源检测失败的一起移', () {
+      var page = read('lib/pages/favorites/local_favorites_page.dart');
+      expect(
+        page.contains('failed the health check are moved too'),
+        isTrue,
+      );
+    });
+  });
+
+  group('本地目录和网络源同一套样式', () {
+    test('章节表是网格，并且能切正序/倒序', () {
+      var page = read('lib/pages/local_comic_page.dart');
+      expect(page.contains('_ChapterSection'), isTrue);
+      expect(page.contains('SliverGridDelegateWithFixedHeight'), isTrue);
+      // 倒序按钮：和网络源详情页一样的图标
+      expect(page.contains('vertical_align_bottom_outlined'), isTrue);
+      // 初值读同一个设置项，两边切换口径一致
+      expect(page.contains('reverseChapterOrder'), isTrue);
+    });
+  });
 }

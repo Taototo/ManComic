@@ -900,8 +900,7 @@ class LocalManager with ChangeNotifier {
     var running = 0;
     var queued = 0;
     var speed = 0;
-    var downloaded = 0;
-    var total = 0;
+    var progress = 0.0;
     String? title;
     for (var task in downloadingTasks) {
       if (task.isError) {
@@ -916,18 +915,16 @@ class LocalManager with ChangeNotifier {
       running++;
       speed += task.speed;
       title ??= task.title;
-      // 还没估出总量的任务（样本不足 5 页）只算速度，不算进百分比：
-      // 否则「已下 2MB / 总量 2MB」会让通知栏直接显示 100%。
-      if (task.totalBytes > task.downloadedBytes) {
-        downloaded += task.downloadedBytes;
-        total += task.totalBytes;
-      }
+      // 百分比按页数算（task.progress），不按字节估算：整本的体积是「已下
+      // 页外推」出来的，一页长条图就能让它从 100MB 跳到几个 G。多条任务时
+      // 取平均，进度条整体走势仍然单调向上。
+      progress += task.progress.clamp(0.0, 1.0);
     }
     return DownloadSummary(
       running: running,
       queued: queued,
       speed: speed,
-      progress: total > 0 ? (downloaded / total).clamp(0.0, 1.0) : 0,
+      progress: running > 0 ? (progress / running).clamp(0.0, 1.0) : 0,
       title: title,
     );
   }

@@ -244,17 +244,14 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
     return context.colorScheme.onSurface.toOpacity(0.6);
   }
 
-  /// 容量文案。总量是估算的（逐页拉取时无法预知后面几页多大），所以
-  /// 前面加个「≈」，别让用户把它当精确值。
-  String get _sizeText {
-    if (task.downloadedBytes <= 0) {
-      return "--";
-    }
-    final downloaded = bytesToReadableString(task.downloadedBytes);
-    if (task.totalBytes <= task.downloadedBytes) {
-      return downloaded;
-    }
-    return "$downloaded / ≈${bytesToReadableString(task.totalBytes)}";
+  /// 剩余百分比。
+  ///
+  /// 整本体积只能靠已下页外推，长条图多的漫画会凭空多出几个 G；把它摆在
+  /// 用户眼前只会让人怀疑下载算错了。进度本身是按页数算的，稳定可靠，
+  /// 所以这里只报剩余百分比，不报体积。
+  String get _remainingText {
+    final left = ((1 - task.progress.clamp(0.0, 1.0)) * 100).round();
+    return "@a% left".tlParams({"a": left});
   }
 
   @override
@@ -355,7 +352,7 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
                     const SizedBox(width: 8),
                     Flexible(
                       child: Text(
-                        _sizeText,
+                        _remainingText,
                         style: ts.s12,
                         maxLines: 1,
                         overflow: TextOverflow.ellipsis,
@@ -395,11 +392,6 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
                               maxLines: 1,
                               overflow: TextOverflow.ellipsis,
                             ),
-                    ),
-                    const SizedBox(width: 8),
-                    Text(
-                      "${(task.progress * 100).toStringAsFixed(0)}%",
-                      style: ts.s12.bold,
                     ),
                   ],
                 ),

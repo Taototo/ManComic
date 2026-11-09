@@ -1,8 +1,11 @@
+import 'dart:math' as math;
+
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_details_cache.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
@@ -99,13 +102,23 @@ class _LocalComicPageState extends State<LocalComicPage> {
     super.initState();
     _load();
     _scrollController.addListener(_onScroll);
+    // 下载在后台把某一话写完时，这页的「已下载」标记得跟着变。
+    LocalManager().addListener(_onLocalChanged);
     _loadRemoteChapters();
+  }
+
+  void _onLocalChanged() {
+    if (!mounted) {
+      return;
+    }
+    setState(_load);
   }
 
   @override
   void dispose() {
     _scrollController.removeListener(_onScroll);
     _scrollController.dispose();
+    LocalManager().removeListener(_onLocalChanged);
     super.dispose();
   }
 
@@ -729,110 +742,31 @@ class _LocalComicPageState extends State<LocalComicPage> {
     if (chapters == null || chapters.length == 0) {
       return;
     }
-    final entries = chapters.allChapters.entries.toList();
     // 快照模式（整本还没下完、库里没有它）拿不到「哪几话真的落盘了」：
     // 任务的 downloadedChapters 记的是「选了哪几话」，不是「下完了哪几话」。
     // 与其把没下的也标成已下载，不如这一屏先不标。
     final downloaded = _fromSnapshot
         ? const <String>{}
         : comic.downloadedChapters.toSet();
-    final downloadedCount = entries.where((e) => downloaded.contains(e.key)).length;
-    yield SliverToBoxAdapter(
-      child: ListTile(
-        title: Text("Chapters".tl),
-        subtitle: downloadedCount > 0 && downloadedCount < entries.length
-            ? Text(
-                "@a of @b downloaded"
-                    .tlParams({"a": downloadedCount, "b": entries.length}),
-                style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
-              )
-            : null,
-        trailing: Row(
-          mainAxisSize: MainAxisSize.min,
-          children: [
-            if (_loadingChapters)
-              const SizedBox(
-                width: 16,
-                height: 16,
-                child: CircularProgressIndicator(strokeWidth: 2),
-              )
-            else if (widget.comicType != ComicType.local)
-              IconButton(
-                tooltip: "Refresh".tl,
-                visualDensity: VisualDensity.compact,
-                icon: const Icon(Icons.refresh, size: 18),
-                onPressed: () {
-                  _loadRemoteChapters();
-                },
-              ),
-            Text(
-              "${entries.length}",
-              style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
-            ),
-          ],
-        ),
-      ),
+    final downloadedCount = chapters.ids
+        .where(downloaded.contains)
+        .length;
+    yield _ChapterSection(
+      comicId: comic.id,
+      comicType: comic.comicType,
+      chapters: chapters,
+      downloaded: downloaded,
+      showRefresh: widget.comicType != ComicType.local,
+      loading: _loadingChapters,
+      onRefresh: _loadRemoteChapters,
+      onRead: _readChapter,
+      subtitle: downloadedCount > 0 && downloadedCount < chapters.length
+          ? "@a of @b downloaded".tlParams({
+              "a": downloadedCount,
+              "b": chapters.length,
+            })
+          : null,
     );
-    yield SliverList.builder(
-      itemCount: entries.length,
-      itemBuilder: (context, index) {
-        final entry = entries[index];
-        final read = HistoryManager().find(comic.id, comic.comicType);
-        final isCurrent = read != null &&
-            _epIndexOf(chapters, entry.key) == read.ep;
-        final isDownloaded = downloaded.contains(entry.key);
-        return ListTile(
-          title: Text(entry.value),
-          leading: SizedBox(
-            width: 24,
-            child: Center(
-              child: Text(
-                "${index + 1}",
-                style: ts.s12.withColor(
-                  context.colorScheme.onSurfaceVariant.toOpacity(0.7),
-                ),
-              ),
-            ),
-          ),
-          trailing: Row(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // 这一话在手机上：给个小图标，用户一眼能看出哪些能离线读。
-              if (isDownloaded)
-                Padding(
-                  padding: const EdgeInsets.only(right: 6),
-                  child: Icon(
-                    Icons.offline_pin_outlined,
-                    size: 16,
-                    color: context.colorScheme.primary.toOpacity(0.7),
-                  ),
-                ),
-              if (isCurrent)
-                Icon(
-                  Icons.play_arrow_rounded,
-                  size: 18,
-                  color: context.colorScheme.primary,
-                ),
-            ],
-          ),
-          onTap: () => _readChapter(entry.key),
-        );
-      },
-    );
-  }
-
-  static int _epIndexOf(ComicChapters chapters, String chapterId) {
-    if (chapters.isGrouped) {
-      for (var i = 0; i < chapters.groupCount; i++) {
-        final group = chapters.getGroupByIndex(i);
-        final index = group.keys.toList().indexOf(chapterId);
-        if (index >= 0) {
-          return index + 1;
-        }
-      }
-      return 0;
-    }
-    return chapters.allChapters.keys.toList().indexOf(chapterId) + 1;
   }
 }
 
@@ -885,5 +819,338 @@ class _LocalActionButton extends StatelessWidget {
         ),
       ),
     );
+  }
+}
+
+/// 章节表。
+///
+/// 样式和网络源详情页保持一套：一格一话、圆角块、右上角切换正序/倒序。
+/// 本地页原来用的是一行一话的 ListTile，同一个源、同一本书，从在线详情页
+/// 进和从本地页进看到两种目录，很难不让人以为「本地少了什么」。
+///
+/// 做成 sliver（SliverMainAxisGroup）而不是塞进 SliverToBoxAdapter：几百话的
+/// 漫画会被一次性构建出来，首帧直接卡住。
+class _ChapterSection extends StatefulWidget {
+  const _ChapterSection({
+    required this.comicId,
+    required this.comicType,
+    required this.chapters,
+    required this.downloaded,
+    required this.showRefresh,
+    required this.loading,
+    required this.onRefresh,
+    required this.onRead,
+    this.subtitle,
+  });
+
+  final String comicId;
+
+  final ComicType comicType;
+
+  final ComicChapters chapters;
+
+  /// 已经落到磁盘上的章节 id。
+  final Set<String> downloaded;
+
+  final bool showRefresh;
+
+  final bool loading;
+
+  final VoidCallback onRefresh;
+
+  final ValueChanged<String> onRead;
+
+  final String? subtitle;
+
+  @override
+  State<_ChapterSection> createState() => _ChapterSectionState();
+}
+
+class _ChapterSectionState extends State<_ChapterSection>
+    with SingleTickerProviderStateMixin {
+  /// 初值和网络源详情页读的是同一个设置项，用户在哪边切都符合预期。
+  late bool reverse = appdata.settings["reverseChapterOrder"] ?? false;
+
+  bool showAll = false;
+
+  TabController? tabController;
+
+  int groupIndex = 0;
+
+  History? get _history =>
+      HistoryManager().find(widget.comicId, widget.comicType);
+
+  @override
+  void initState() {
+    super.initState();
+    HistoryManager().addListener(_onHistoryChanged);
+    _syncController();
+  }
+
+  @override
+  void didUpdateWidget(covariant _ChapterSection oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    // 章节表是异步换进来的（进页面时向源要一次），分组数变了必须重建
+    // TabController，否则页签数对不上会直接抛异常。
+    if (!identical(oldWidget.chapters, widget.chapters) ||
+        oldWidget.comicId != widget.comicId) {
+      _syncController();
+    }
+  }
+
+  @override
+  void dispose() {
+    HistoryManager().removeListener(_onHistoryChanged);
+    tabController?.dispose();
+    super.dispose();
+  }
+
+  void _onHistoryChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  void _syncController() {
+    final chapters = widget.chapters;
+    if (!chapters.isGrouped) {
+      tabController?.dispose();
+      tabController = null;
+      groupIndex = 0;
+      return;
+    }
+    if (tabController != null && tabController!.length == chapters.groupCount) {
+      return;
+    }
+    if (chapters.groupCount == 0) {
+      return;
+    }
+    tabController?.dispose();
+    final group = _history?.group ?? 1;
+    groupIndex = (group - 1).clamp(0, chapters.groupCount - 1);
+    tabController = TabController(
+      length: chapters.groupCount,
+      initialIndex: groupIndex,
+      vsync: this,
+    )..addListener(_onTabChanged);
+  }
+
+  void _onTabChanged() {
+    final controller = tabController;
+    if (controller == null || controller.index == groupIndex) {
+      return;
+    }
+    setState(() {
+      groupIndex = controller.index;
+      // 换卷之后「显示全部」该重新收起，不然几百话一次铺开。
+      showAll = false;
+    });
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final chapters = widget.chapters;
+    final history = _history;
+    final grouped = chapters.isGrouped;
+    final items = grouped
+        ? chapters.getGroupByIndex(groupIndex).entries.toList()
+        : chapters.allChapters.entries.toList();
+    // 这一话在整本里的序号（1 起），分组时要把前面几卷的章数累加。
+    final baseIndex = grouped
+        ? List.generate(groupIndex, (i) => chapters.getGroupByIndex(i).length)
+            .fold<int>(0, (a, b) => a + b)
+        : 0;
+
+    return SliverLayoutBuilder(
+      builder: (context, constraints) {
+        var visible = items.length;
+        var canShowAll = showAll;
+        if (!showAll) {
+          final width = constraints.crossAxisExtent - 16;
+          var crossItems = width ~/ 200;
+          if (width % 200 != 0) {
+            crossItems += 1;
+          }
+          visible = math.min(items.length, math.max(crossItems, 1) * 8);
+          if (visible == items.length) {
+            canShowAll = true;
+          }
+        }
+
+        return SliverMainAxisGroup(
+          slivers: [
+            SliverToBoxAdapter(child: _buildHeader(context, items.length)),
+            if (grouped)
+              SliverToBoxAdapter(
+                child: AppTabBar(
+                  withUnderLine: false,
+                  controller: tabController,
+                  tabs: chapters.groups.map((e) => Tab(text: e)).toList(),
+                ),
+              ),
+            if (grouped) SliverPadding(padding: const EdgeInsets.only(top: 8)),
+            SliverGrid(
+              delegate: SliverChildBuilderDelegate(
+                childCount: visible,
+                (context, i) {
+                  // 倒序是把「最新的一话」排到最前面，而不是把网格整个翻转，
+                  // 所以先算真实下标再取章节。
+                  final index = reverse ? items.length - i - 1 : i;
+                  final entry = items[index];
+                  return _buildCell(
+                    context,
+                    entry.key,
+                    entry.value,
+                    index: index,
+                    chapterNumber: baseIndex + index + 1,
+                    history: history,
+                  );
+                },
+              ),
+              gridDelegate: const SliverGridDelegateWithFixedHeight(
+                maxCrossAxisExtent: 250,
+                itemHeight: 48,
+              ),
+            ).sliverPadding(const EdgeInsets.symmetric(horizontal: 8)),
+            if (!canShowAll)
+              SliverToBoxAdapter(
+                child: Align(
+                  alignment: Alignment.center,
+                  child: TextButton.icon(
+                    icon: const Icon(Icons.arrow_drop_down),
+                    onPressed: () {
+                      setState(() {
+                        showAll = true;
+                      });
+                    },
+                    label: Text("${"Show all".tl} (${items.length})"),
+                  ).paddingTop(12),
+                ),
+              ),
+            const SliverToBoxAdapter(child: Divider()),
+          ],
+        );
+      },
+    );
+  }
+
+  Widget _buildHeader(BuildContext context, int count) {
+    final colors = context.colorScheme;
+    return ListTile(
+      title: Text("Chapters".tl),
+      subtitle: widget.subtitle == null
+          ? null
+          : Text(
+              widget.subtitle!,
+              style: ts.s12.withColor(colors.onSurfaceVariant),
+            ),
+      trailing: Row(
+        mainAxisSize: MainAxisSize.min,
+        children: [
+          if (widget.loading)
+            const SizedBox(
+              width: 16,
+              height: 16,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          else if (widget.showRefresh)
+            IconButton(
+              tooltip: "Refresh".tl,
+              visualDensity: VisualDensity.compact,
+              icon: const Icon(Icons.refresh, size: 18),
+              onPressed: widget.onRefresh,
+            ),
+          Tooltip(
+            message: "Order".tl,
+            child: IconButton(
+              visualDensity: VisualDensity.compact,
+              icon: Icon(
+                reverse
+                    ? Icons.vertical_align_top
+                    : Icons.vertical_align_bottom_outlined,
+                size: 18,
+              ),
+              onPressed: () {
+                setState(() {
+                  reverse = !reverse;
+                });
+              },
+            ),
+          ),
+          Text("$count", style: ts.s12.withColor(colors.onSurfaceVariant)),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildCell(
+    BuildContext context,
+    String id,
+    String title, {
+    required int index,
+    required int chapterNumber,
+    required History? history,
+  }) {
+    final colors = context.colorScheme;
+    final downloaded = widget.downloaded.contains(id);
+    final current = _isCurrent(index: index, chapterNumber: chapterNumber);
+    final visited = history?.readEpisode.contains("$chapterNumber") == true ||
+        history?.readEpisode.contains("${groupIndex + 1}-${index + 1}") == true;
+    return Padding(
+      padding: const EdgeInsets.all(4),
+      child: Material(
+        color: colors.surfaceContainer,
+        borderRadius: BorderRadius.circular(16),
+        child: InkWell(
+          onTap: () => widget.onRead(id),
+          borderRadius: BorderRadius.circular(16),
+          child: Stack(
+            children: [
+              Padding(
+                padding: EdgeInsets.symmetric(horizontal: downloaded ? 16 : 8),
+                child: Center(
+                  child: Text(
+                    title,
+                    maxLines: 1,
+                    textAlign: TextAlign.center,
+                    overflow: TextOverflow.ellipsis,
+                    style: TextStyle(
+                      color: current
+                          ? colors.primary
+                          : (visited ? colors.outline : null),
+                      fontWeight: current ? FontWeight.w600 : null,
+                    ),
+                  ),
+                ),
+              ),
+              // 已经下到手机上的那一话：角上一个实心图钉，和在线目录的
+              // 「已读变灰」不冲突，一眼能看出哪些离线也能读。
+              if (downloaded)
+                Positioned(
+                  right: 4,
+                  top: 4,
+                  child: Icon(
+                    Icons.offline_pin,
+                    size: 11,
+                    color: colors.primary.toOpacity(0.75),
+                  ),
+                ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  /// 正在读的那一话。
+  bool _isCurrent({required int index, required int chapterNumber}) {
+    final history = _history;
+    if (history == null) {
+      return false;
+    }
+    if (widget.chapters.isGrouped) {
+      return history.group == groupIndex + 1 && history.ep == index + 1;
+    }
+    return history.ep == chapterNumber;
   }
 }

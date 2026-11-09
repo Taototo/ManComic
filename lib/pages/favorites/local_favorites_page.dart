@@ -415,7 +415,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     showConfirmDialog(
       context: App.rootContext,
       title: "Clean up invalid".tl,
-      content: "Move comics that can't be opened to \"Invalid\"?".tl,
+      content: [
+        "Move comics that can't be opened to \"Invalid\"?".tl,
+        "",
+        "Comics from sources that failed the health check are moved too".tl,
+      ].join("\n"),
       onConfirm: () async {
         var controller = showLoadingDialog(App.rootContext);
         var count = await LocalFavoritesManager().cleanupInvalid();

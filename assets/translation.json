@@ -906,7 +906,9 @@
     "WebDAV denied access to this folder": "WebDAV 拒绝访问该目录",
     "WebDAV folder does not exist": "WebDAV 目录不存在",
     "WebDAV storage is full": "WebDAV 空间已满",
-    "The WebDAV server has no synced data yet": "服务器上还没有同步数据"
+    "The WebDAV server has no synced data yet": "服务器上还没有同步数据",
+    "@a% left": "剩余 @a%",
+    "Comics from sources that failed the health check are moved too": "源检测失败的作品也会一起移入"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1815,6 +1817,8 @@
     "WebDAV denied access to this folder": "WebDAV 拒絕存取該目錄",
     "WebDAV folder does not exist": "WebDAV 目錄不存在",
     "WebDAV storage is full": "WebDAV 空間已滿",
-    "The WebDAV server has no synced data yet": "伺服器上還沒有同步資料"
+    "The WebDAV server has no synced data yet": "伺服器上還沒有同步資料",
+    "@a% left": "剩餘 @a%",
+    "Comics from sources that failed the health check are moved too": "源檢測失敗的作品也會一起移入"
   }
 }
