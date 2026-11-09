@@ -265,4 +265,17 @@ class ComicDownloadService : Service() {
         }
         super.onDestroy()
     }
+
+    /**
+     * Android 15 起 dataSync 类型的前台服务有累计时长上限（24 小时内 6 小时）。
+     *
+     * 到点系统会回调这里，应用必须主动停掉服务；不停的话系统会抛
+     * RemoteServiceException 把进程直接带走——表现就是「下载突然没了，
+     * 连一条日志都没留下」。这里留一条日志并干净地停掉：进度已经落盘，
+     * 回到应用会接着下。
+     */
+    override fun onTimeout(startId: Int, fgsType: Int) {
+        Log.w(TAG, "Foreground service hit its time limit, stop (startId=$startId)")
+        stopSelf()
+    }
 }

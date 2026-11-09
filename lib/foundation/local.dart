@@ -635,12 +635,107 @@ class LocalManager with ChangeNotifier {
     }
     // 排队里的任务被拉起来也算状态变化：下载页的秒级刷新、前台服务的
     // 通知都靠这个信号（单任务的 resume 只通知它自己的监听者）。
+    _ensureWatchdog();
     notifyListeners();
     DownloadBackground.instance.refresh();
   }
 
   /// 让前台服务跟上当前状态（任务开跑/停下时调）。
   void refreshBackgroundService() {
+    _ensureWatchdog();
+    DownloadBackground.instance.refresh();
+  }
+
+  /// 后台下载看门狗。
+  ///
+  /// 前台服务只保证进程不被系统回收，**不保证下载还在动**：网络抖一下把
+  /// 任务打成 error 之后，退避阶梯（5~160 秒）用完就彻底不动了，而后台没有
+  /// 人去点「重试」，任务就那样一直躺到用户再打开应用为止——用户看到的
+  /// 就是「切后台一段时间后下载自己停了，也不知道什么时候停的」。
+  ///
+  /// 这里每隔二十秒巡一次：补满并发槽、把出错的任务按分钟级节奏拉起来、
+  /// 顺便确认前台服务还在。断网一小时回来也能自己接上。
+  Timer? _downloadWatchdog;
+
+  /// 每个任务上一次被看门狗拉起的时间（毫秒），键是 [DownloadTask.progressKey]。
+  final Map<String, int> _lastWatchdogRetry = {};
+
+  /// 每个任务被看门狗拉起过几次，用来把节奏放慢。
+  final Map<String, int> _watchdogAttempts = {};
+
+  static const _watchdogInterval = Duration(seconds: 20);
+
+  /// 同一个任务两次自动复活的最小间隔。
+  static const watchdogRetryIntervalMs = 60 * 1000;
+
+  void _ensureWatchdog() {
+    // 桌面端没有「后台被冻」这回事，也不需要凭空多一个定时器。
+    if (!App.isAndroid) {
+      return;
+    }
+    if (_downloadWatchdog != null) {
+      return;
+    }
+    if (!downloadingTasks.any((e) => !e.userPaused)) {
+      return;
+    }
+    _downloadWatchdog = Timer.periodic(_watchdogInterval, (_) {
+      try {
+        _watchdogTick();
+      } catch (e, s) {
+        Log.error("Download", "Watchdog tick failed: $e", s);
+      }
+    });
+  }
+
+  void _watchdogTick() {
+    var pending = downloadingTasks.where((e) => !e.userPaused).toList();
+    if (pending.isEmpty) {
+      _downloadWatchdog?.cancel();
+      _downloadWatchdog = null;
+      DownloadBackground.instance.refresh();
+      return;
+    }
+    var now = DateTime.now().millisecondsSinceEpoch;
+    var slots = maxConcurrentTasks;
+    for (var task in pending) {
+      if (!task.isPaused && !task.isError) {
+        slots--;
+      }
+    }
+    var retried = 0;
+    for (var task in pending) {
+      var key = task.progressKey;
+      if (!task.isError) {
+        // 又跑起来了：记账清零，下次真出错时从快节奏重新开始
+        _lastWatchdogRetry.remove(key);
+        _watchdogAttempts.remove(key);
+        continue;
+      }
+      if (slots <= 0) {
+        break;
+      }
+      var attempts = _watchdogAttempts[key] ?? 0;
+      if (!shouldRetryErroredTask(
+        isError: task.isError,
+        userPaused: task.userPaused,
+        nowMs: now,
+        lastAttemptMs: _lastWatchdogRetry[key] ?? 0,
+        intervalMs: watchdogRetryInterval(attempts),
+      )) {
+        continue;
+      }
+      _watchdogAttempts[key] = attempts + 1;
+      _lastWatchdogRetry[key] = now;
+      Log.info("Download", "Watchdog: retry ${task.title} (${task.message})");
+      task.resume();
+      slots--;
+      retried++;
+    }
+    if (retried > 0) {
+      saveCurrentDownloadingTasks(full: true);
+    }
+    pumpQueue();
     DownloadBackground.instance.refresh();
   }
 
@@ -672,7 +767,8 @@ class LocalManager with ChangeNotifier {
   }
 
   /// 暂停所有任务（含排队中的），并记住这是用户的意思。
-  void pauseAll() {    for (var task in downloadingTasks) {
+  void pauseAll() {
+    for (var task in downloadingTasks) {
       if (!task.isPaused) {
         task.pause();
       } else {
@@ -765,7 +861,9 @@ class LocalManager with ChangeNotifier {
       if (json is! Map) {
         return true;
       }
-      if (comicId != null && json['comicId'] != null && json['comicId'] != comicId) {
+      if (comicId != null &&
+          json['comicId'] != null &&
+          json['comicId'] != comicId) {
         return false;
       }
       if (sourceKey != null &&
@@ -986,11 +1084,16 @@ class LocalManager with ChangeNotifier {
   DownloadSummary downloadSummary() {
     var running = 0;
     var queued = 0;
+    var waiting = 0;
     var speed = 0;
     var progress = 0.0;
     String? title;
     for (var task in downloadingTasks) {
       if (task.isError) {
+        // 出错待重试的也算「有活」：网络回来还要接着下，前台服务不能摘。
+        if (!task.userPaused) {
+          waiting++;
+        }
         continue;
       }
       if (task.isPaused) {
@@ -1010,6 +1113,7 @@ class LocalManager with ChangeNotifier {
     return DownloadSummary(
       running: running,
       queued: queued,
+      waiting: waiting,
       speed: speed,
       progress: running > 0 ? (progress / running).clamp(0.0, 1.0) : 0,
       title: title,
@@ -1189,4 +1293,30 @@ enum LocalSortType {
     }
     return name;
   }
+}
+
+/// 看门狗判定：这条出错的任务该不该在这一轮巡查里被重新拉起来。
+///
+/// 抽成纯函数是为了能测：真跑 `Timer.periodic` 的用例既慢又不稳，而这里
+/// 真正的规则只有「出错 + 不是用户暂停 + 距上次尝试够久」三条。
+/// 看门狗重试节奏：前十次一分钟一次（断网一两分钟就能自己接上），之后降到
+/// 五分钟一次 —— 源站真挂了的时候，没必要每分钟都开着 wakelock 去试。
+int watchdogRetryInterval(int attempts) {
+  return attempts < 10 ? LocalManager.watchdogRetryIntervalMs : 5 * 60 * 1000;
+}
+
+bool shouldRetryErroredTask({
+  required bool isError,
+  required bool userPaused,
+  required int nowMs,
+  required int lastAttemptMs,
+  int intervalMs = LocalManager.watchdogRetryIntervalMs,
+}) {
+  if (!isError || userPaused) {
+    return false;
+  }
+  if (lastAttemptMs <= 0) {
+    return true;
+  }
+  return nowMs - lastAttemptMs >= intervalMs;
 }

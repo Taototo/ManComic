@@ -538,6 +538,10 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     notifyListeners();
     runRecorder();
     LocalManager().saveCurrentDownloadingTasks();
+    // 任务动了就要确认前台服务还在。自动重试是定时器拉起来的，不经过
+    // pumpQueue，不在这里补一刀的话「服务已停 + 任务又开始跑」会一直成立，
+    // 进程始终是缓存优先级，系统一冻就又是「下载自己停了」。
+    LocalManager().refreshBackgroundService();
 
     if (comic == null) {
       _message = "Fetching comic info...";
@@ -554,7 +558,9 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         return;
       }
       if (res.error) {
-        _setError("Error: ${res.errorMessage}");
+        // 这些阶段以前都不自动重试：网络抖一下任务就停在「拉详情失败」，
+        // 后台没人点重试，于是一直躺到用户回来。现在和逐页下载一视同仁。
+        _setError("Error: ${res.errorMessage}", autoRetry: true);
         return;
       } else {
         comic = res.data;
@@ -657,7 +663,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       });
       if (res.error) {
         Log.error("Download", res.errorMessage!);
-        _setError("Error: ${res.errorMessage}");
+        _setError("Error: ${res.errorMessage}", autoRetry: true);
         return;
       } else {
         _cover = res.data;
@@ -685,7 +691,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         }
         if (res.error) {
           Log.error("Download", res.errorMessage!);
-          _setError("Error: ${res.errorMessage}");
+          _setError("Error: ${res.errorMessage}", autoRetry: true);
           return;
         } else {
           _images = {'': res.data};
@@ -728,7 +734,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           for (var entry in results) {
             if (entry.value.error) {
               Log.error("Download", entry.value.errorMessage!);
-              _setError("Error: ${entry.value.errorMessage}");
+              // 地址表只拉到一半：整份作废，下一轮重来。留着半份的话，
+              // 重试时会因为「已经有地址表」跳过拉取，把没问到的章节当成
+              // 不存在，下完还判完成——缺章，而且一句提示都没有。
+              _images = null;
+              _setError("Error: ${entry.value.errorMessage}", autoRetry: true);
               return;
             }
             _images![entry.key] = entry.value.data;
@@ -1175,6 +1185,14 @@ class _ImageDownloadWrapper {
 
   var retry = 3;
 
+  /// 多久收不到下一个字节就算这一页「假死」。
+  ///
+  /// 切后台、锁屏时 socket 有时既不断也不报错，就是再也不来数据。主循环
+  /// `await task.wait()` 会一直等下去：通知栏还挂着，速度 0，进度不动，
+  /// 看起来就是「下载停了」，而且永远不会自己恢复。流上挂一个超时，超时
+  /// 直接抛给下面的 catch 走重试，比干等强。
+  static const _stallTimeout = Duration(seconds: 90);
+
   void start() async {
     int lastBytes = 0;
     try {
@@ -1187,7 +1205,7 @@ class _ImageDownloadWrapper {
         // 一次下载变两次写盘，还要多一条缓存库记录。多任务并发时这部分
         // IO 是下载页卡顿的主要来源之一。
         useCache: false,
-      )) {
+      ).timeout(_stallTimeout)) {
         if (isCancelled) {
           return;
         }

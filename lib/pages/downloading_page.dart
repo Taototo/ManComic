@@ -4,8 +4,10 @@ import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/components/downloading_card.dart';
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/download.dart';
+import 'package:venera/utils/download_background.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
@@ -16,7 +18,8 @@ class DownloadingPage extends StatefulWidget {
   State<DownloadingPage> createState() => _DownloadingPageState();
 }
 
-class _DownloadingPageState extends State<DownloadingPage> {
+class _DownloadingPageState extends State<DownloadingPage>
+    with WidgetsBindingObserver {
   /// 顶部汇总只按秒刷新。
   ///
   /// 以前是把每个任务都挂成监听：N 个任务每秒各 notify 一次 → 页面 setState
@@ -25,18 +28,78 @@ class _DownloadingPageState extends State<DownloadingPage> {
   /// 单张卡的进度由卡片自己刷。
   Timer? _ticker;
 
+  /// 是否已在系统的「电池不优化」名单里（null = 还没问到）。
+  ///
+  /// 前台服务 + wakelock 在原生 Android 上够用，但国内 ROM 会把后台进程整个
+  /// 冻住，表现就是「切出去一会儿下载就停了」。入口从设置里搬到这一页：
+  /// 正在下载的人才会关心，也才找得到。
+  bool? _ignoringBatteryOptimizations;
+
   @override
   void initState() {
     super.initState();
     LocalManager().addListener(_onTasksChanged);
+    WidgetsBinding.instance.addObserver(this);
     _onTasksChanged();
+    _checkBatteryOptimizations();
   }
 
   @override
   void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
     LocalManager().removeListener(_onTasksChanged);
     _ticker?.cancel();
     super.dispose();
+  }
+
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    // 从系统设置页回来时再问一次：用户可能刚点了「允许」。
+    if (state == AppLifecycleState.resumed) {
+      _checkBatteryOptimizations();
+    }
+  }
+
+  Future<void> _checkBatteryOptimizations() async {
+    if (!App.isAndroid) {
+      return;
+    }
+    try {
+      final ok = await DownloadBackground.instance.ignoringBatteryOptimizations;
+      if (!mounted) {
+        return;
+      }
+      setState(() => _ignoringBatteryOptimizations = ok);
+    } catch (_) {}
+  }
+
+  Future<void> _allowBackgroundRun() async {
+    await DownloadBackground.instance.requestIgnoreBatteryOptimizations();
+    await _checkBatteryOptimizations();
+  }
+
+  void _dismissBackgroundHint() {
+    // 提示一次就够，关掉之后不再出现（存 implicitData，不跟着设置同步走）
+    appdata.implicitData['backgroundHintDismissed'] = true;
+    unawaited(appdata.writeImplicitData());
+    setState(() {});
+  }
+
+  bool get _showBackgroundHint {
+    if (!App.isAndroid) {
+      return false;
+    }
+    if (_ignoringBatteryOptimizations != false) {
+      return false;
+    }
+    if (appdata.settings['backgroundDownload'] == false) {
+      return false;
+    }
+    if (appdata.implicitData['backgroundHintDismissed'] == true) {
+      return false;
+    }
+    // 没有在下的任务时不打扰
+    return LocalManager().downloadingTasks.any((e) => !e.userPaused);
   }
 
   void _onTasksChanged() {
@@ -93,6 +156,62 @@ class _DownloadingPageState extends State<DownloadingPage> {
   }
 
   Widget buildTop(List<DownloadTask> tasks) {
+    return Column(
+      mainAxisSize: MainAxisSize.min,
+      children: [
+        _buildSummary(tasks),
+        if (_showBackgroundHint) _buildBackgroundHint(context),
+      ],
+    );
+  }
+
+  /// 「允许后台运行」提示条。
+  ///
+  /// 判断不了 ROM，就按「没进不优化名单」来提示；点一下直接跳系统页，
+  /// 关掉之后不再出现。
+  Widget _buildBackgroundHint(BuildContext context) {
+    return Container(
+      margin: const EdgeInsets.fromLTRB(12, 8, 12, 0),
+      padding: const EdgeInsets.fromLTRB(12, 6, 4, 6),
+      decoration: BoxDecoration(
+        color: context.colorScheme.secondaryContainer,
+        borderRadius: BorderRadius.circular(10),
+      ),
+      child: Row(
+        children: [
+          Icon(
+            Icons.battery_alert_outlined,
+            size: 18,
+            color: context.colorScheme.onSecondaryContainer,
+          ),
+          const SizedBox(width: 8),
+          Expanded(
+            child: Text(
+              "Exempt from battery optimization so downloads survive in the background"
+                  .tl,
+              style: ts.s12.copyWith(
+                color: context.colorScheme.onSecondaryContainer,
+              ),
+              maxLines: 2,
+              overflow: TextOverflow.ellipsis,
+            ),
+          ),
+          TextButton(onPressed: _allowBackgroundRun, child: Text("Allow".tl)),
+          IconButton(
+            visualDensity: VisualDensity.compact,
+            iconSize: 16,
+            icon: Icon(
+              Icons.close,
+              color: context.colorScheme.onSecondaryContainer,
+            ),
+            onPressed: _dismissBackgroundHint,
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSummary(List<DownloadTask> tasks) {
     var speed = 0;
     var running = 0;
     for (var task in tasks) {
