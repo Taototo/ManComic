@@ -37,6 +37,8 @@ class LocalComicPage extends StatefulWidget {
     required this.id,
     required this.comicType,
     this.heroID,
+    this.fallback,
+    this.detailsFallback,
   });
 
   final String id;
@@ -44,6 +46,16 @@ class LocalComicPage extends StatefulWidget {
   final ComicType comicType;
 
   final int? heroID;
+
+  /// 库里查不到时用的快照。
+  ///
+  /// 下载管理页点进来的漫画可能还没下完——`LocalManager.add` 要等整本结束
+  /// 才写，那之前库里没有它。快照由下载任务自己给出，指向同一个目录。
+  final LocalComic? fallback;
+
+  /// 快照模式下没有 `details.json`（那是完成时才写的），详情直接用任务手里
+  /// 的那份 [ComicDetails]。
+  final ComicDetails? detailsFallback;
 
   static void open(BuildContext context, LocalComic comic, {int? heroID}) {
     context.to(
@@ -70,6 +82,9 @@ class _LocalComicPageState extends State<LocalComicPage> {
 
   bool _showAppbarTitle = false;
 
+  /// 这页是从下载任务的快照打开的（书还没下完、库里没有）。
+  bool _fromSnapshot = false;
+
   @override
   void initState() {
     super.initState();
@@ -85,8 +100,11 @@ class _LocalComicPageState extends State<LocalComicPage> {
   }
 
   void _load() {
-    _comic = LocalManager().find(widget.id, widget.comicType);
-    _details = ComicDetailsCache.load(widget.id, widget.comicType);
+    final stored = LocalManager().find(widget.id, widget.comicType);
+    _fromSnapshot = stored == null && widget.fallback != null;
+    _comic = stored ?? widget.fallback;
+    _details = ComicDetailsCache.load(widget.id, widget.comicType) ??
+        widget.detailsFallback;
   }
 
   void _onScroll() {
@@ -439,6 +457,32 @@ class _LocalComicPageState extends State<LocalComicPage> {
                         ],
                       ),
                     ),
+                    if (_fromSnapshot)
+                      Container(
+                        padding: const EdgeInsets.symmetric(
+                          horizontal: 8,
+                          vertical: 2,
+                        ),
+                        decoration: BoxDecoration(
+                          color: colors.tertiary.withValues(alpha: 0.14),
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          mainAxisSize: MainAxisSize.min,
+                          children: [
+                            Icon(
+                              Icons.downloading_rounded,
+                              size: 12,
+                              color: colors.tertiary,
+                            ),
+                            const SizedBox(width: 4),
+                            Text(
+                              "Downloading".tl,
+                              style: ts.s12.withColor(colors.tertiary),
+                            ),
+                          ],
+                        ),
+                      ),
                     if (_originSourceName != null)
                       Text(
                         _originSourceName!,

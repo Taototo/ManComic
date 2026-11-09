@@ -5,7 +5,6 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/notification_service.dart';
-import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
 /// 前台服务要展示的汇总。
@@ -175,11 +174,28 @@ class DownloadBackground {
   }
 
   String _describe(DownloadSummary summary) {
+    // 速度必须排在最前面。
+    //
+    // 通知栏收起来只给一行，原来写成「3 个下载中 · 2 个排队 · 1.2 MB/s」，
+    // 窄屏或者系统字体调大之后尾巴直接被省略号吃掉——用户看到的就是「只有
+    // 状态没有速度」。放到开头，即使后面被截断，速度也还在。
     return [
-      "@n downloading".tlParams({"n": summary.running}),
+      if (summary.speed > 0) "${_speedText(summary.speed)}/s",
+      if (summary.running > 0) "@n downloading".tlParams({"n": summary.running}),
       if (summary.queued > 0) "@n queued".tlParams({"n": summary.queued}),
-      if (summary.speed > 0) "${bytesToReadableString(summary.speed)}/s",
     ].join(" · ");
+  }
+
+  /// 通知栏里的速度用短格式：`12.3 MB/s` 而不是 `12.34 MB/s`，
+  /// 单行放得下更多字，也不至于每秒跳一下宽度。
+  String _speedText(int bytesPerSecond) {
+    if (bytesPerSecond < 1024) {
+      return "$bytesPerSecond B";
+    }
+    if (bytesPerSecond < 1024 * 1024) {
+      return "${(bytesPerSecond / 1024).toStringAsFixed(0)} KB";
+    }
+    return "${(bytesPerSecond / 1024 / 1024).toStringAsFixed(1)} MB";
   }
 
   int _percent(DownloadSummary summary) {

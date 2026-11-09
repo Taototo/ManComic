@@ -4,13 +4,18 @@ import 'package:venera/components/components.dart';
 import 'package:venera/components/downloading_card.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/image_provider/cached_image.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:venera/foundation/local_insights.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/network/download.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 import 'package:venera/pages/local_comic_page.dart';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/epub.dart';
+import 'package:venera/utils/haptics.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/pdf.dart';
 import 'package:venera/utils/translations.dart';
@@ -47,6 +52,9 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
         comics = LocalManager().search(keyword);
       });
     }
+    // 本地库变动（下完一本、删一本）之后顺手补一轮更新检查。内部有 TTL
+    // 和每轮上限，重复调用不会变成连续请求。
+    LocalInsights().autoCheck(comics);
   }
 
   @override
@@ -56,6 +64,12 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     comics = LocalManager().getComics(sortType);
     LocalManager().addListener(update);
     super.initState();
+    // 首帧之后再发请求：进页面先出列表，角标晚几秒到不影响。
+    WidgetsBinding.instance.addPostFrameCallback((_) {
+      if (mounted) {
+        LocalInsights().autoCheck(comics);
+      }
+    });
   }
 
   @override
@@ -110,6 +124,49 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
         });
       },
     );
+  }
+
+  /// 手动查一轮更新。
+  ///
+  /// 进页面时已经自动查过一批（带 TTL、每轮上限），这颗按钮是「我现在就想
+  /// 知道」——所以忽略 TTL，把整页都查一遍。
+  Future<void> _checkUpdates() async {
+    final targets = comics.where((c) => LocalInsights().isCheckable(c)).toList();
+    if (targets.isEmpty) {
+      context.showMessage(message: "No comics to check".tl);
+      return;
+    }
+    var canceled = false;
+    final controller = showLoadingDialog(
+      context,
+      message: "Checking updates".tl,
+      withProgress: true,
+      onCancel: () => canceled = true,
+    );
+    final result = await LocalInsights().checkAll(
+      targets,
+      force: true,
+      onProgress: (done, total) {
+        if (canceled || controller.closed) {
+          return;
+        }
+        controller.setMessage("${"Checking updates".tl} $done/$total");
+        controller.setProgress(total == 0 ? null : done / total);
+      },
+    );
+    controller.close();
+    if (!mounted || canceled) {
+      return;
+    }
+    if (result.failed == targets.length && result.checked > 0) {
+      context.showMessage(message: "Failed to check updates".tl);
+    } else if (result.updated > 0) {
+      context.showMessage(
+        message: "@n comics have updates".tlParams({"n": result.updated}),
+      );
+    } else {
+      context.showMessage(message: "No updates found".tl);
+    }
   }
 
   Widget buildMultiSelectMenu() {
@@ -196,6 +253,13 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     ];
 
     List<Widget> normalActions = [
+      Tooltip(
+        message: "Check updates".tl,
+        child: IconButton(
+          icon: const Icon(Icons.sync),
+          onPressed: _checkUpdates,
+        ),
+      ),
       Tooltip(
         message: "Search".tl,
         child: IconButton(
@@ -297,64 +361,81 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
             // widget 实例相同（const），Flutter 会跳过子树更新，横条就会
             // 停在第一次渲染时的任务数上。
             SliverToBoxAdapter(child: _DownloadingSection()),
-          SliverGridComics(
-            comics: comics,
-            selections: selectedComics,
-            onLongPressed: (c, heroID) {
-              setState(() {
-                multiSelectMode = true;
-                selectedComics[c as LocalComic] = true;
-              });
-            },
-            onTap: (c, heroID) {
-              if (multiSelectMode) {
-                setState(() {
-                  if (selectedComics.containsKey(c as LocalComic)) {
-                    selectedComics.remove(c);
-                  } else {
-                    selectedComics[c] = true;
-                  }
-                  if (selectedComics.isEmpty) {
-                    multiSelectMode = false;
-                  }
-                });
-              } else {
-                // 点封面进详情页，不再一步跳进阅读器：简介、章节、来源都在
-                // 详情页上，想直接读点「开始阅读」也只多一下。
-                LocalComicPage.open(
-                  context,
-                  c as LocalComic,
-                  heroID: heroID,
-                );
-              }
-            },
-            menuBuilder: (c) {
-              return [
-                MenuEntry(
-                  icon: Icons.folder_open,
-                  text: "Open Folder".tl,
-                  onClick: () {
-                    openComicFolder(c as LocalComic);
-                  },
-                ),
-                MenuEntry(
-                  icon: Icons.delete,
-                  text: "Delete".tl,
-                  onClick: () {
-                    deleteComics([c as LocalComic]).then((value) {
-                      if (value && multiSelectMode) {
-                        setState(() {
+          if (comics.isEmpty)
+            SliverToBoxAdapter(
+              child: _LocalEmptyHint(
+                hasKeyword: keyword.isNotEmpty,
+              ),
+            )
+          else
+            SliverList.builder(
+              itemCount: comics.length,
+              itemBuilder: (context, index) {
+                final comic = comics[index];
+                return _LocalComicTile(
+                  key: ValueKey("${comic.comicType.value}:${comic.id}"),
+                  comic: comic,
+                  heroID: index,
+                  selected: selectedComics.containsKey(comic),
+                  selecting: multiSelectMode,
+                  onTap: () {
+                    if (multiSelectMode) {
+                      setState(() {
+                        if (selectedComics.containsKey(comic)) {
+                          selectedComics.remove(comic);
+                        } else {
+                          selectedComics[comic] = true;
+                        }
+                        if (selectedComics.isEmpty) {
                           multiSelectMode = false;
-                          selectedComics.clear();
-                        });
-                      }
+                        }
+                      });
+                    } else {
+                      // 点封面进详情页，不再一步跳进阅读器：简介、章节、来源
+                      // 都在详情页上，想直接读点「开始阅读」也只多一下。
+                      LocalComicPage.open(context, comic, heroID: index);
+                    }
+                  },
+                  onLongPress: () {
+                    setState(() {
+                      multiSelectMode = true;
+                      selectedComics[comic] = true;
                     });
                   },
-                ),
-                ...exportActions([c as LocalComic]),
-              ];
-            },
-          ),
+                  menu: [
+                    MenuEntry(
+                      icon: Icons.chrome_reader_mode_outlined,
+                      text: "View Detail".tl,
+                      onClick: () {
+                        LocalComicPage.open(context, comic, heroID: index);
+                      },
+                    ),
+                    MenuEntry(
+                      icon: Icons.folder_open,
+                      text: "Open Folder".tl,
+                      onClick: () {
+                        openComicFolder(comic);
+                      },
+                    ),
+                    MenuEntry(
+                      icon: Icons.delete,
+                      text: "Delete".tl,
+                      onClick: () {
+                        deleteComics([comic]).then((value) {
+                          if (value && multiSelectMode) {
+                            setState(() {
+                              multiSelectMode = false;
+                              selectedComics.clear();
+                            });
+                          }
+                        });
+                      },
+                    ),
+                    ...exportActions([comic]),
+                  ],
+                );
+              },
+            ),
         ],
       ),
     );
@@ -429,6 +510,11 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                     removeComicFile,
                     removeFavoriteAndHistory,
                   );
+                  // 删掉的书不该继续在隐式缓存里留着体积和更新记录。
+                  for (final comic in comics) {
+                    LocalInsights().forgetSize(comic);
+                    LocalInsights().forgetUpdates(comic);
+                  }
                   isDeleted = true;
                 },
                 child: Text("Confirm".tl),
@@ -715,6 +801,20 @@ void showDeleteChaptersPopWindow(BuildContext context, LocalComic comic) {
 class _DownloadingSection extends StatelessWidget {
   const _DownloadingSection();
 
+  /// 点封面 = 暂停/继续。
+  ///
+  /// 队列里等着（不是用户按的暂停）的任务不吃这一下：它本来就在排队，点一下
+  /// 就开始会绕过并发上限。交给调度器自己拉起来。
+  void _toggle(DownloadTask task) {
+    Haptics.tap();
+    if (!task.isPaused) {
+      task.pause();
+    } else if (task.userPaused) {
+      task.resume();
+    }
+    LocalManager().pumpQueue();
+  }
+
   @override
   Widget build(BuildContext context) {
     final tasks = LocalManager().downloadingTasks;
@@ -759,12 +859,301 @@ class _DownloadingSection extends StatelessWidget {
               itemCount: tasks.length,
               separatorBuilder: (_, __) => const SizedBox(width: 10),
               itemBuilder: (context, i) {
+                final task = tasks[i];
                 return DownloadingCard(
-                  key: ValueKey(tasks[i]),
-                  task: tasks[i],
+                  key: ValueKey(task),
+                  task: task,
+                  onCoverTap: () => _toggle(task),
+                  onLongPress: () => openDownloadingDetail(context, task),
                 );
               },
             ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+/// 本地漫画列表的一行。
+///
+/// 原来是封面网格，一眼只能看到标题。改成横排之后一行能说清三件事：占了多少
+/// 空间、读到哪了、网源那边有没有新章节——这三个都是「要不要点进去」的判断
+/// 依据，藏在详情页里就白做了。
+class _LocalComicTile extends StatefulWidget {
+  const _LocalComicTile({
+    super.key,
+    required this.comic,
+    required this.heroID,
+    required this.selected,
+    required this.selecting,
+    required this.onTap,
+    required this.onLongPress,
+    required this.menu,
+  });
+
+  final LocalComic comic;
+
+  final int heroID;
+
+  final bool selected;
+
+  final bool selecting;
+
+  final VoidCallback onTap;
+
+  final VoidCallback onLongPress;
+
+  final List<MenuEntry> menu;
+
+  @override
+  State<_LocalComicTile> createState() => _LocalComicTileState();
+}
+
+class _LocalComicTileState extends State<_LocalComicTile> {
+  /// 体积 / 更新角标来自 [LocalInsights]，阅读进度来自 [HistoryManager]：
+  /// 两个都会在列表打开期间变化，谁变就刷谁，不用整页重建。
+  late final Listenable _listenable = Listenable.merge([
+    LocalInsights(),
+    HistoryManager(),
+  ]);
+
+  @override
+  void initState() {
+    super.initState();
+    // 量体积要遍历目录，交给它自己的队列（并发 2、有缓存），这里只是登记。
+    LocalInsights().requestSize(widget.comic);
+  }
+
+  @override
+  void didUpdateWidget(covariant _LocalComicTile oldWidget) {
+    super.didUpdateWidget(oldWidget);
+    if (!identical(oldWidget.comic, widget.comic)) {
+      LocalInsights().requestSize(widget.comic);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    return ListenableBuilder(
+      listenable: _listenable,
+      builder: (context, _) {
+        final insights = LocalInsights();
+        final progress = insights.progressOf(widget.comic);
+        final update = insights.updateOf(widget.comic);
+        final size = insights.sizeOf(widget.comic);
+        return Material(
+          color: widget.selected
+              ? colors.primary.withValues(alpha: 0.08)
+              : Colors.transparent,
+          child: InkWell(
+            onTap: widget.onTap,
+            onLongPress: widget.onLongPress,
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(16, 8, 8, 8),
+              child: Row(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  _buildCover(context),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Row(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Expanded(
+                              child: Text(
+                                widget.comic.title,
+                                maxLines: 1,
+                                overflow: TextOverflow.ellipsis,
+                                style: ts.s14.bold,
+                              ),
+                            ),
+                            if (update?.hasUpdate == true)
+                              _UpdateBadge(count: update!.newChapters),
+                          ],
+                        ),
+                        if (widget.comic.subtitle.isNotEmpty)
+                          Text(
+                            widget.comic.subtitle,
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                            style: ts.s12.copyWith(
+                              color: colors.onSurfaceVariant,
+                            ),
+                          ),
+                        const SizedBox(height: 7),
+                        _buildProgressBar(context, progress),
+                        const SizedBox(height: 5),
+                        _buildMetaLine(context, progress, size),
+                      ],
+                    ),
+                  ),
+                  if (widget.selecting)
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4, top: 20),
+                      child: Checkbox(
+                        value: widget.selected,
+                        onChanged: (_) => widget.onTap(),
+                      ),
+                    )
+                  else
+                    Padding(
+                      padding: const EdgeInsets.only(left: 4),
+                      child: MenuButton(entries: widget.menu),
+                    ),
+                ],
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCover(BuildContext context) {
+    final colors = context.colorScheme;
+    return Hero(
+      tag: "cover${widget.heroID}",
+      child: Container(
+        width: 58,
+        height: 78,
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: colors.primaryContainer,
+          borderRadius: BorderRadius.circular(8),
+        ),
+        child: AnimatedImage(
+          image: CachedImageProvider("file://${widget.comic.coverFile.path}"),
+          cacheWidth: kCoverDecodeWidth,
+          width: double.infinity,
+          height: double.infinity,
+        ),
+      ),
+    );
+  }
+
+  Widget _buildProgressBar(BuildContext context, ReadProgressInfo progress) {
+    final colors = context.colorScheme;
+    return Row(
+      children: [
+        Expanded(
+          child: ClipRRect(
+            borderRadius: BorderRadius.circular(2),
+            child: LinearProgressIndicator(
+              value: progress.fraction,
+              minHeight: 3,
+              backgroundColor: colors.surfaceContainerHighest,
+              valueColor: AlwaysStoppedAnimation(
+                progress.started ? colors.primary : colors.outlineVariant,
+              ),
+            ),
+          ),
+        ),
+        const SizedBox(width: 8),
+        Text(
+          progress.totalChapters > 0
+              ? "${progress.readChapters}/${progress.totalChapters}"
+              : "",
+          style: ts.s10.copyWith(color: colors.onSurfaceVariant),
+        ),
+      ],
+    );
+  }
+
+  Widget _buildMetaLine(
+    BuildContext context,
+    ReadProgressInfo progress,
+    int? size,
+  ) {
+    final colors = context.colorScheme;
+    final muted = colors.onSurfaceVariant.toOpacity(0.8);
+    final parts = <String>[
+      _readingText(progress),
+      size == null ? "--" : formatLocalSize(size),
+    ];
+    return Row(
+      children: [
+        Icon(Icons.history, size: 11, color: muted),
+        const SizedBox(width: 3),
+        Expanded(
+          child: Text(
+            parts.join("  ·  "),
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: ts.s10.copyWith(color: muted),
+          ),
+        ),
+      ],
+    );
+  }
+
+  String _readingText(ReadProgressInfo progress) {
+    if (!progress.started) {
+      return "Unread".tl;
+    }
+    final chapter = progress.chapterTitle ?? "E${progress.ep}";
+    return "$chapter · P${progress.page}";
+  }
+}
+
+/// 「网源有新章节」角标。
+class _UpdateBadge extends StatelessWidget {
+  const _UpdateBadge({required this.count});
+
+  final int count;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    return Tooltip(
+      message: "New chapters".tl,
+      child: Container(
+        margin: const EdgeInsets.only(left: 6),
+        padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+        decoration: BoxDecoration(
+          color: colors.error,
+          borderRadius: BorderRadius.circular(9),
+        ),
+        child: Text(
+          "+$count",
+          style: TextStyle(
+            fontSize: 10,
+            height: 1.3,
+            fontWeight: FontWeight.w600,
+            color: colors.onError,
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _LocalEmptyHint extends StatelessWidget {
+  const _LocalEmptyHint({required this.hasKeyword});
+
+  final bool hasKeyword;
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    return Padding(
+      padding: const EdgeInsets.symmetric(vertical: 64, horizontal: 24),
+      child: Column(
+        children: [
+          Icon(
+            hasKeyword ? Icons.search_off : Icons.photo_library_outlined,
+            size: 40,
+            color: colors.onSurfaceVariant.toOpacity(0.5),
+          ),
+          const SizedBox(height: 12),
+          Text(
+            hasKeyword ? "No results".tl : "Local comic not found".tl,
+            style: ts.s14.copyWith(color: colors.onSurfaceVariant),
+            textAlign: TextAlign.center,
           ),
         ],
       ),

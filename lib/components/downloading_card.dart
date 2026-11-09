@@ -4,8 +4,10 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/image_provider/cached_image.dart';
 import 'package:venera/foundation/local.dart';
+import 'package:venera/foundation/log.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/pages/downloading_page.dart';
+import 'package:venera/pages/local_comic_page.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
@@ -22,6 +24,8 @@ class DownloadingCard extends StatefulWidget {
     this.ringSize = 44,
     this.showTitle = true,
     this.enableTap = true,
+    this.onCoverTap,
+    this.onLongPress,
   });
 
   final DownloadTask task;
@@ -37,6 +41,12 @@ class DownloadingCard extends StatefulWidget {
 
   /// 关掉后点封面不跳转：下载管理页里点一下就跳阅读器太容易误触。
   final bool enableTap;
+
+  /// 点封面时干什么。给了就完全接管点击（本地页横条用它做暂停/继续）。
+  final VoidCallback? onCoverTap;
+
+  /// 长按封面。本地页横条用它打开本地详情页。
+  final VoidCallback? onLongPress;
 
   @override
   State<DownloadingCard> createState() => _DownloadingCardState();
@@ -109,9 +119,9 @@ class _DownloadingCardState extends State<DownloadingCard> {
       width: widget.width,
       child: GestureDetector(
         behavior: HitTestBehavior.opaque,
-        onTap: widget.enableTap
-            ? () => openDownloadingTask(context, task)
-            : null,
+        onTap: widget.onCoverTap ??
+            (widget.enableTap ? () => openDownloadingTask(context, task) : null),
+        onLongPress: widget.onLongPress,
         child: Column(
           crossAxisAlignment: CrossAxisAlignment.start,
           mainAxisSize: MainAxisSize.min,
@@ -176,14 +186,25 @@ class _DownloadingCardState extends State<DownloadingCard> {
                           color: Colors.redAccent,
                         ),
                       )
-                    else if (task.isPaused)
+                    else
                       Positioned(
                         right: 3,
                         top: 3,
                         child: Icon(
-                          task.userPaused
-                              ? Icons.pause_circle_outline
-                              : Icons.schedule,
+                          // 点封面能暂停/继续时，角标直接画出「点一下会发生
+                          // 什么」：跑着画暂停，暂停画播放。队列等待中的任务
+                          // 不受点击影响，还是画时钟。
+                          widget.onCoverTap != null
+                              ? (!task.isPaused
+                                  ? Icons.pause_rounded
+                                  : task.userPaused
+                                      ? Icons.play_arrow_rounded
+                                      : Icons.schedule)
+                              : (task.isPaused
+                                  ? (task.userPaused
+                                      ? Icons.pause_circle_outline
+                                      : Icons.schedule)
+                                  : null),
                           size: 15,
                           color: Colors.white.withValues(alpha: 0.85),
                         ),
@@ -219,6 +240,41 @@ class _DownloadingCardState extends State<DownloadingCard> {
     );
   }
 
+}
+
+/// 打开一本「还在下载」的漫画的本地详情页。
+///
+/// 任务没下完时本地库里根本没有这本（`LocalManager.add` 是完成时才写的），
+/// 所以拿任务自己转出来的快照兜底。快照指向的目录是真实存在的，详情页照样
+/// 能列章节、能读已经落盘的部分。
+void openDownloadingDetail(BuildContext context, DownloadTask task) {
+  final local = LocalManager().find(task.id, task.comicType);
+  if (local != null) {
+    LocalComicPage.open(context, local);
+    return;
+  }
+  LocalComic? snapshot;
+  try {
+    if (task.path != null) {
+      snapshot = task.toLocalComic();
+    }
+  } catch (e, s) {
+    // 封面还没落地时 toLocalComic 会取不到封面名，这种时候就别跳了。
+    Log.error("Download", "Failed to build snapshot for ${task.id}: $e", s);
+  }
+  if (snapshot == null) {
+    context.showMessage(message: "No downloaded pages yet".tl);
+    return;
+  }
+  final details = task is ImagesDownloadTask ? task.comic : null;
+  context.to(
+    () => LocalComicPage(
+      id: task.id,
+      comicType: task.comicType,
+      fallback: snapshot,
+      detailsFallback: details,
+    ),
+  );
 }
 
 /// 点缩略图直接进阅读器读已经下好的部分。
