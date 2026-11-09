@@ -1,9 +1,10 @@
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 
-/// 「全部」「已阅」的哨兵名（私有常量，测试里按字面量对照）。
+/// 「全部」「已阅」「失效」的哨兵名（私有常量，测试里按字面量对照）。
 const allLabel = '^_^[%local_all%]^_^';
 const readLabel = '^_^[%local_read%]^_^';
+const invalidLabel = '^_^[%local_invalid%]^_^';
 
 void main() {
   bool exists(String folder) => folder == '连载中';
@@ -23,6 +24,15 @@ void main() {
       existsFolder: exists,
     );
     expect(r.$1, readLabel);
+  });
+
+  test('「失效」同样保留', () {
+    final r = resolveFavoriteFolder(
+      {'name': invalidLabel, 'isNetwork': false},
+      existsFolder: exists,
+    );
+    expect(r.$1, invalidLabel);
+    expect(r.$2, isFalse);
   });
 
   test('真实存在的文件夹保留', () {

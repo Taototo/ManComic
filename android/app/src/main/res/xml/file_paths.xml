@@ -1,7 +1,26 @@
 <?xml version="1.0" encoding="utf-8"?>
-<!-- 应用内更新：把 dataPath/updates 目录下的 APK 通过 content:// 授权给系统安装器 -->
+<!--
+  共享给别的应用的路径（FileProvider）。
+
+  1. updates：应用内更新把下载好的 APK 授权给系统安装器。
+  2. local / files / external：本地漫画目录。Android 7 起不允许再把
+     file:// URI 交给别的应用（FileUriExposedException），「打开文件夹」
+     改成把这些目录包成 content:// 再交给文件管理器。
+     默认库在 Android/data/<包名>/files/local（external-files-path），
+     用户也可能把库改到公共目录或存储卡（external-path）。
+     注意：先匹配到的根生效，具体的放前面。
+-->
 <paths>
     <files-path
         name="updates"
         path="updates/" />
+    <external-files-path
+        name="local"
+        path="." />
+    <files-path
+        name="files"
+        path="." />
+    <external-path
+        name="external"
+        path="." />
 </paths>

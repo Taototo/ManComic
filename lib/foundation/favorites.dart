@@ -220,6 +220,13 @@ class LocalFavoritesManager with ChangeNotifier {
   /// 不需要逐处过滤。UI 里用 `_localReadFolderLabel` 指代它。
   static const readFolderName = '__read__';
 
+  /// 「失效」专用表名。和「已阅」同构：真实存在的一张表，但不在
+  /// [folderNames] 里，所以进了失效分类的漫画自然从「全部」和各分类里
+  /// 消失。原本这里只会被 [removeInvalid] 直接删掉——用户没来得及确认
+  /// 哪些是真没了，收藏连同标签一起消失。现在先收进这张表，看得见、
+  /// 删得掉，也能重新收藏回去。
+  static const invalidFolderName = '__invalid__';
+
   late Database _db;
 
   late Map<String, int> counts;
@@ -229,6 +236,9 @@ class LocalFavoritesManager with ChangeNotifier {
   /// 「已阅」表内漫画的 hash 集合，与普通收藏夹分开维护：
   /// totalComics（「全部」数量）不能包含已阅，但收藏标识（isExist）要包含。
   var _readHashedIds = <int, int>{};
+
+  /// 「失效」表内漫画的 hash 集合，同上。
+  var _invalidHashedIds = <int, int>{};
 
   int get totalComics {
     return _hashedIds.length;
@@ -257,6 +267,21 @@ class LocalFavoritesManager with ChangeNotifier {
     // 「已阅」表必须先于任何 folderNames 枚举创建，保证升级用户也能用。
     _db.execute("""
       create table if not exists "$readFolderName"(
+        id text,
+        name TEXT,
+        author TEXT,
+        type int,
+        tags TEXT,
+        cover_path TEXT,
+        time TEXT,
+        display_order int,
+        translated_tags TEXT,
+        primary key (id, type)
+      );
+    """);
+    // 「失效」表同理：这次升级引入，老库里没有，必须先建出来。
+    _db.execute("""
+      create table if not exists "$invalidFolderName"(
         id text,
         name TEXT,
         author TEXT,
@@ -309,10 +334,10 @@ class LocalFavoritesManager with ChangeNotifier {
   }
 
   /// 数据规范化：一本漫画只允许属于一个分类。
-  /// 历史数据可能存在多分类共存，这里统一只保留最先创建的分类（已阅优先级最低，
-  /// 排在最后处理），在启动时一次性清理。
+  /// 历史数据可能存在多分类共存，这里统一只保留最先创建的分类（已阅/失效
+  /// 优先级最低，排在最后处理），在启动时一次性清理。
   void _normalizeExclusiveFolders() {
-    var folders = [..._getFolderNamesWithDB(), readFolderName];
+    var folders = [..._getFolderNamesWithDB(), readFolderName, invalidFolderName];
     var seen = <int>{};
     var changed = false;
     for (var folder in folders) {
@@ -348,6 +373,7 @@ class LocalFavoritesManager with ChangeNotifier {
       counts[folder] = count(folder);
     }
     counts[readFolderName] = count(readFolderName);
+    counts[invalidFolderName] = count(invalidFolderName);
     _refreshHashedIds();
   }
 
@@ -355,15 +381,19 @@ class LocalFavoritesManager with ChangeNotifier {
     _refreshHashedIds();
   }
 
-  /// 在一个 Isolate 里同时重建普通收藏夹与「已阅」的 hash 映射。
+  /// 在一个 Isolate 里同时重建普通收藏夹、「已阅」「失效」的 hash 映射。
   void _refreshHashedIds() {
-    _initHashedIds([...folderNames, readFolderName], _db.handle).then((value) {
+    _initHashedIds(
+      [...folderNames, readFolderName, invalidFolderName],
+      _db.handle,
+    ).then((value) {
       var merged = <int, int>{};
       for (var folder in folderNames) {
         merged.addAll(value[folder] ?? const {});
       }
       _hashedIds = merged;
       _readHashedIds = value[readFolderName] ?? {};
+      _invalidHashedIds = value[invalidFolderName] ?? {};
       notifyListeners();
     });
   }
@@ -386,6 +416,17 @@ class LocalFavoritesManager with ChangeNotifier {
         _readHashedIds[hash] = _readHashedIds[hash]! - 1;
       } else {
         _readHashedIds.remove(hash);
+      }
+    }
+  }
+
+  void _reduceInvalidHashedId(String id, int type) {
+    var hash = id.hashCode ^ type;
+    if (_invalidHashedIds.containsKey(hash)) {
+      if (_invalidHashedIds[hash]! > 1) {
+        _invalidHashedIds[hash] = _invalidHashedIds[hash]! - 1;
+      } else {
+        _invalidHashedIds.remove(hash);
       }
     }
   }
@@ -414,9 +455,11 @@ class LocalFavoritesManager with ChangeNotifier {
     });
   }
 
+  /// 该漫画所在的收藏夹（表名）。包含「已阅」「失效」两个内置表——
+  /// 本地漫画被删掉时要连带清掉它们，否则已阅里会留下一个点不开的条目。
   List<String> find(String id, ComicType type) {
     var res = <String>[];
-    for (var folder in folderNames) {
+    for (var folder in [...folderNames, readFolderName, invalidFolderName]) {
       var rows = _db.select(
         """
         select * from "$folder"
@@ -460,8 +503,9 @@ class LocalFavoritesManager with ChangeNotifier {
     final folders = _getTablesWithDB();
     folders.remove('folder_sync');
     folders.remove('folder_order');
-    // 「已阅」不是普通收藏夹，永远不出现在文件夹枚举里
+    // 「已阅」「失效」不是普通收藏夹，永远不出现在文件夹枚举里
     folders.remove(readFolderName);
+    folders.remove(invalidFolderName);
     var folderToOrder = <String, int>{};
     for (var folder in folders) {
       var res = _db.select(
@@ -610,10 +654,10 @@ class LocalFavoritesManager with ChangeNotifier {
   }
 
   bool existsFolder(String name) {
-    // 「已阅」表不在 folderNames 枚举里，但对增删改查而言它就是一张
-    // 普通收藏夹表，直接放行。
-    if (name == readFolderName) {
-      return _getTablesWithDB().contains(readFolderName);
+    // 「已阅」「失效」表不在 folderNames 枚举里，但对增删改查而言它们就是
+    // 两张普通收藏夹表，直接放行。
+    if (name == readFolderName || name == invalidFolderName) {
+      return _getTablesWithDB().contains(name);
     }
     return folderNames.contains(name);
   }
@@ -840,7 +884,7 @@ class LocalFavoritesManager with ChangeNotifier {
       if (!movedFromOther) {
         _hashedIds[hash] = (_hashedIds[hash] ?? 0) + 1;
       }
-      // 「已阅」独占：把漫画重新收藏进普通收藏夹时，自动移出已阅。
+      // 「已阅」「失效」独占：把漫画重新收藏进普通收藏夹时，自动移出它们。
       if (_readHashedIds.containsKey(hash)) {
         _db.execute(
           """
@@ -851,6 +895,17 @@ class LocalFavoritesManager with ChangeNotifier {
         );
         counts[readFolderName] = count(readFolderName);
         _readHashedIds.remove(hash);
+      }
+      if (_invalidHashedIds.containsKey(hash)) {
+        _db.execute(
+          """
+          delete from "$invalidFolderName"
+          where id == ? and type == ?;
+        """,
+          [comic.id, comic.type.value],
+        );
+        counts[invalidFolderName] = count(invalidFolderName);
+        _invalidHashedIds.remove(hash);
       }
     }
     notifyListeners();
@@ -881,6 +936,13 @@ class LocalFavoritesManager with ChangeNotifier {
       """,
         [id, type.value],
       );
+      _db.execute(
+        """
+        delete from "$invalidFolderName"
+        where id == ? and type == ?;
+      """,
+        [id, type.value],
+      );
     } catch (e) {
       Log.error("Unfavorite", e.toString());
       _db.execute("ROLLBACK");
@@ -889,6 +951,7 @@ class LocalFavoritesManager with ChangeNotifier {
     _db.execute("COMMIT");
     _hashedIds.remove(hash);
     _readHashedIds.remove(hash);
+    _invalidHashedIds.remove(hash);
     initCounts();
     notifyListeners();
   }
@@ -1042,10 +1105,16 @@ class LocalFavoritesManager with ChangeNotifier {
   /// 「已阅」数量。
   int readCount() => count(readFolderName);
 
+  /// 「失效」数量。
+  int invalidCount() => count(invalidFolderName);
+
   bool isRead(String id, ComicType type) =>
       comicExists(readFolderName, id, type);
 
-  /// 该漫画被收藏到的所有收藏夹显示名（含「已阅」），用于详情页展示。
+  bool isInvalid(String id, ComicType type) =>
+      comicExists(invalidFolderName, id, type);
+
+  /// 该漫画被收藏到的所有收藏夹显示名（含「已阅」「失效」），用于详情页展示。
   List<String> getComicFolders(String id, ComicType type) {
     var res = <String>[];
     for (var folder in folderNames) {
@@ -1055,6 +1124,9 @@ class LocalFavoritesManager with ChangeNotifier {
     }
     if (isRead(id, type)) {
       res.add("Finished Reading".tl);
+    }
+    if (isInvalid(id, type)) {
+      res.add("Invalid".tl);
     }
     return res;
   }
@@ -1128,8 +1200,8 @@ class LocalFavoritesManager with ChangeNotifier {
 
   /// delete a folder
   void deleteFolder(String name) {
-    if (name == readFolderName) {
-      throw Exception("Read folder cannot be deleted");
+    if (name == readFolderName || name == invalidFolderName) {
+      throw Exception("Built-in folder cannot be deleted");
     }
     _db.execute("""
       drop table "$name";
@@ -1162,6 +1234,8 @@ class LocalFavoritesManager with ChangeNotifier {
     }
     if (folder == readFolderName) {
       _reduceReadHashedId(id, type.value);
+    } else if (folder == invalidFolderName) {
+      _reduceInvalidHashedId(id, type.value);
     } else {
       reduceHashedId(id, type.value);
     }
@@ -1195,6 +1269,8 @@ class LocalFavoritesManager with ChangeNotifier {
     for (var comic in comics) {
       if (folder == readFolderName) {
         _reduceReadHashedId(comic.id, comic.type.value);
+      } else if (folder == invalidFolderName) {
+        _reduceInvalidHashedId(comic.id, comic.type.value);
       } else {
         reduceHashedId(comic.id, comic.type.value);
       }
@@ -1232,15 +1308,87 @@ class LocalFavoritesManager with ChangeNotifier {
     notifyListeners();
   }
 
+  /// 这条收藏还能不能打开。
+  ///
+  /// 两种情况算失效：
+  /// - 本地漫画：本地库里已经没有它了（目录被删、被「删除文件」清掉）；
+  /// - 网络漫画：它来自的那个源已经不存在了（源被删/改了 key）。
+  ///
+  /// 注意：这里**不会**去网络上探活。给几百条收藏逐个发请求既慢又容易被
+  /// 风控，而「源没了」已经覆盖了绝大多数真正打不开的情况。
+  bool _isInvalidItem(FavoriteItem item) {
+    if (item.type == ComicType.local) {
+      return LocalManager().find(item.id, item.type) == null;
+    }
+    return item.type.comicSource == null;
+  }
+
+  /// 把失效的收藏从各分类里挪进「失效」表。
+  ///
+  /// 和 [removeInvalid] 的区别就在「挪」和「删」：失效不代表用户想丢掉，
+  /// 很多是源临时下线或者本地文件被清理工具扫走了，留着还能认出来。
+  /// 返回移动的条数。
+  Future<int> cleanupInvalid() async {
+    if (!existsFolder(invalidFolderName)) {
+      return 0;
+    }
+    var moved = 0;
+    _db.execute("BEGIN TRANSACTION");
+    try {
+      var displayOrder = maxValue(invalidFolderName) + 1;
+      for (var folder in _getFolderNamesWithDB()) {
+        var rows = _db.select("""
+          select * from "$folder";
+        """);
+        for (var row in rows) {
+          var item = FavoriteItem.fromRow(row);
+          if (!_isInvalidItem(item)) {
+            continue;
+          }
+          if (!comicExists(invalidFolderName, item.id, item.type)) {
+            _db.execute(
+              """
+              insert or ignore into "$invalidFolderName"
+                (id, name, author, type, tags, cover_path, time, translated_tags, display_order)
+              select id, name, author, type, tags, cover_path, time, translated_tags, ?
+              from "$folder"
+              where id == ? and type == ?;
+            """,
+              [displayOrder, item.id, item.type.value],
+            );
+            displayOrder++;
+          }
+          _db.execute(
+            """
+            delete from "$folder"
+            where id == ? and type == ?;
+          """,
+            [item.id, item.type.value],
+          );
+          moved++;
+        }
+      }
+    } catch (e, s) {
+      Log.error("Cleanup Invalid", "failed: $e", s);
+      _db.execute("ROLLBACK");
+      return 0;
+    }
+    _db.execute("COMMIT");
+    initCounts();
+    notifyListeners();
+    return moved;
+  }
+
   Future<int> removeInvalid() async {
     int count = 0;
     await Future.microtask(() {
-      var all = allComics();
+      var all = <FavoriteItemWithFolderInfo>[
+        ...allComics(),
+        for (var comic in getFolderComics(invalidFolderName))
+          FavoriteItemWithFolderInfo(comic, invalidFolderName),
+      ];
       for (var c in all) {
-        var comicSource = c.type.comicSource;
-        if ((c.type == ComicType.local &&
-                LocalManager().find(c.id, c.type) == null) ||
-            (c.type != ComicType.local && comicSource == null)) {
+        if (_isInvalidItem(c)) {
           deleteComicWithId(c.folder, c.id, c.type);
           count++;
         }
@@ -1459,8 +1607,11 @@ class LocalFavoritesManager with ChangeNotifier {
 
   bool isExist(String id, ComicType type) {
     var hash = id.hashCode ^ type.value;
-    // 收藏标识对「已阅」同样生效：进了已阅的漫画依然算已收藏。
-    return _hashedIds.containsKey(hash) || _readHashedIds.containsKey(hash);
+    // 收藏标识对「已阅」「失效」同样生效：进了这两个内置分类的漫画依然
+    // 算已收藏，详情页的收藏按钮才不会显示成「未收藏」。
+    return _hashedIds.containsKey(hash) ||
+        _readHashedIds.containsKey(hash) ||
+        _invalidHashedIds.containsKey(hash);
   }
 
   void updateInfo(String folder, FavoriteItem comic, [bool notify = true]) {

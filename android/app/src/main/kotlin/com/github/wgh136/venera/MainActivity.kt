@@ -14,6 +14,7 @@ import android.os.Environment
 import android.os.VibrationEffect
 import android.os.Vibrator
 import android.os.VibratorManager
+import android.provider.DocumentsContract
 import android.provider.Settings
 import android.util.Log
 import android.view.Display
@@ -309,6 +310,17 @@ class MainActivity : FlutterFragmentActivity() {
                     }
                 }
                 "getBrightness" -> res.success(getBrightness())
+
+                // 打开漫画所在的文件夹。
+                //
+                // Android 7 起不允许把 file:// URI 交给别的应用（会抛
+                // FileUriExposedException，也就是用户看到的那条报错），
+                // 所以这里改用 FileProvider 生成 content:// URI。
+                "openFolder" -> {
+                    val path = call.argument<String>("path")
+                    res.success(path != null && openFolder(path))
+                }
+
                 "setBrightness" -> {
                     val value = call.argument<Double>("value")?.toFloat() ?: 1f
                     setWindowBrightness(value)
@@ -520,6 +532,48 @@ class MainActivity : FlutterFragmentActivity() {
                     textShareHandler = null
                 }
             })
+    }
+
+    /// 用系统文件管理器打开目录。
+    ///
+    /// 走 FileProvider 的 content:// URI：目录的 MIME 是
+    /// vnd.android.document/directory，系统「文件」和主流文件管理器都认；
+    /// 依次再试 resource/folder 与 */*。都找不到接收方就返回 false，
+    /// 由 Dart 侧退化成「显示路径 + 复制」。
+    private fun openFolder(path: String): Boolean {
+        val dir = File(path)
+        if (!dir.exists()) {
+            Log.w("Venera", "openFolder: not exists: $path")
+            return false
+        }
+        val uri = try {
+            FileProvider.getUriForFile(this, "$packageName.fileprovider", dir)
+        } catch (e: Exception) {
+            Log.w("Venera", "openFolder: cannot build content uri for $path", e)
+            return false
+        }
+        val mimes = listOf(
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            "resource/folder",
+            "*/*"
+        )
+        for (mime in mimes) {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                if (intent.resolveActivity(packageManager) != null) {
+                    startActivity(intent)
+                    return true
+                }
+            } catch (e: Exception) {
+                Log.w("Venera", "openFolder failed for mime $mime", e)
+            }
+        }
+        return false
     }
 
     private fun getProxy(): String {

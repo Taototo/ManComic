@@ -6,6 +6,10 @@ const _localAllFolderLabel = '^_^[%local_all%]^_^';
 /// [LocalFavoritesManager.readFolderName] 表。
 const _localReadFolderLabel = '^_^[%local_read%]^_^';
 
+/// 「失效」虚拟文件夹的指代名，实际存储用
+/// [LocalFavoritesManager.invalidFolderName] 表。
+const _localInvalidFolderLabel = '^_^[%local_invalid%]^_^';
+
 /// If the number of comics in a folder exceeds this limit, it will be
 /// fetched asynchronously.
 const _asyncDataFetchLimit = 500;
@@ -45,6 +49,19 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   bool get isAllFolder => widget.folder == _localAllFolderLabel;
 
   bool get isReadFolder => widget.folder == _localReadFolderLabel;
+
+  bool get isInvalidFolder => widget.folder == _localInvalidFolderLabel;
+
+  /// 自建分类才有的操作（重命名 / 排序 / 导出 / 删除分类）。
+  bool get isNormalFolder => !isAllFolder && !isReadFolder && !isInvalidFolder;
+
+  /// 当前页面对应的真实表名。「已阅」「失效」用的是内置表，不能拿
+  /// widget.folder（那是 UI 哨兵名）去当表名查。
+  String get localTable {
+    if (isReadFolder) return LocalFavoritesManager.readFolderName;
+    if (isInvalidFolder) return LocalFavoritesManager.invalidFolderName;
+    return widget.folder;
+  }
 
   LocalFavoritesManager get manager => LocalFavoritesManager();
 
@@ -87,6 +104,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     if (isLoading) return;
     if (isReadFolder) {
       comics = manager.getFolderComics(LocalFavoritesManager.readFolderName);
+    } else if (isInvalidFolder) {
+      comics = manager.getFolderComics(LocalFavoritesManager.invalidFolderName);
     } else if (isAllFolder) {
       var totalComics = manager.totalComics;
       if (totalComics < _asyncDataFetchLimit) {
@@ -387,11 +406,42 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     );
   }
 
+  /// 一键清理失效：把所有打不开的收藏挪进「失效」分类。
+  ///
+  /// 只挪不删——「失效」的判定是「本地文件没了」或者「原来源没了」，
+  /// 这两种都可能只是暂时的（清理工具扫走了目录、源作者下线维护）。用户
+  /// 还能在失效页里一条条确认后删掉。
+  void cleanupInvalid() {
+    showConfirmDialog(
+      context: App.rootContext,
+      title: "Clean up invalid".tl,
+      content: "Move comics that can't be opened to \"Invalid\"?".tl,
+      onConfirm: () async {
+        var controller = showLoadingDialog(App.rootContext);
+        var count = await LocalFavoritesManager().cleanupInvalid();
+        controller.close();
+        App.rootContext.showMessage(
+          message: count == 0
+              ? "No invalid comics".tl
+              : "Moved @a comics to Invalid".tlParams({"a": count}),
+        );
+        updateComics();
+      },
+    );
+  }
+
   /// 三点菜单。文件夹管理的低频动作都收在这里，顶栏只留高频图标。
   ///
-  /// 「已阅」是内置分类，不提供重命名/排序/导出/删除等文件夹管理。
+  /// 「已阅」「失效」是内置分类，不提供重命名/排序/导出/删除等文件夹管理。
   List<MenuEntry> buildMoreMenu() {
     return [
+      // 「全部」里才有意义：把打不开的收藏统一收进「失效」。
+      if (isAllFolder)
+        MenuEntry(
+          icon: Icons.cleaning_services_outlined,
+          text: "Clean up invalid".tl,
+          onClick: cleanupInvalid,
+        ),
       // 与网络源同步。只有「链接到网络源」的文件夹才有，而且是个低频动作，
       // 放在菜单里比在顶栏占一颗图标划算（顶栏已经被 6 颗图标挤满了）。
       if (networkSource != null && !isAllFolder)
@@ -408,7 +458,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
           context.to(() => const SmartShelfPage());
         },
       ),
-      if (!isAllFolder && !isReadFolder) ...[
+      if (isNormalFolder) ...[
         MenuEntry(
           icon: Icons.edit_outlined,
           text: "Rename".tl,
@@ -542,6 +592,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       title = "All".tl;
     } else if (title == _localReadFolderLabel) {
       title = "Finished Reading".tl;
+    } else if (title == _localInvalidFolderLabel) {
+      title = "Invalid".tl;
     }
 
     Widget body = SmoothCustomScrollView(
@@ -622,7 +674,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
             actions: [
               MenuButton(
                 entries: [
-                  if (!isAllFolder && !isReadFolder)
+                  if (isNormalFolder)
                     MenuEntry(
                       icon: Icons.done_all,
                       text: "Mark as Read".tl,
@@ -651,7 +703,14 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       text: "Move to folder".tl,
                       onClick: () => favoriteOption('moveFromRead'),
                     ),
-                  if (!isAllFolder && !isReadFolder)
+                  // 失效里的一本还能救回来：源恢复了就移回原来的分类。
+                  if (isInvalidFolder)
+                    MenuEntry(
+                      icon: Icons.drive_file_move,
+                      text: "Move to folder".tl,
+                      onClick: () => favoriteOption('moveFromInvalid'),
+                    ),
+                  if (isNormalFolder)
                     MenuEntry(
                       icon: Icons.drive_file_move,
                       text: "Move to folder".tl,
@@ -678,7 +737,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     onClick: downloadSelected,
                   ),
                   // 删除是危险操作，固定放在菜单最后。
-                  if (!isAllFolder && !isReadFolder)
+                  // 内置分类里也要能删：失效里全是打不开的书，删掉才是主要
+                  // 出路；已阅同理。
+                  if (!isAllFolder)
                     MenuEntry(
                       icon: Icons.delete_outline,
                       text: "Delete Comic".tl,
@@ -739,6 +800,28 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
           SliverPadding(
             padding: EdgeInsets.only(top: context.padding.top),
           ),
+        if (!isLoading && !searchMode && isInvalidFolder && comics.isEmpty)
+          SliverToBoxAdapter(
+            child: Padding(
+              padding: const EdgeInsets.fromLTRB(24, 72, 24, 0),
+              child: Column(
+                children: [
+                  Icon(
+                    Icons.link_off,
+                    size: 44,
+                    color: context.colorScheme.onSurfaceVariant.toOpacity(0.4),
+                  ),
+                  const SizedBox(height: 12),
+                  Text(
+                    "No invalid comics".tl,
+                    style: ts.s14.withColor(
+                      context.colorScheme.onSurfaceVariant,
+                    ),
+                  ),
+                ],
+              ),
+            ),
+          ),
         if (isLoading)
           SliverToBoxAdapter(
             child: SizedBox(
@@ -795,7 +878,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     });
                   },
                 ),
-                if (!isAllFolder && !isReadFolder)
+                if (isNormalFolder)
                   MenuEntry(
                     icon: Icons.done_all,
                     text: "Mark as Read".tl,
@@ -820,6 +903,19 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       favoriteOption('moveFromRead');
                     },
                   ),
+                if (isInvalidFolder)
+                  MenuEntry(
+                    icon: Icons.drive_file_move,
+                    text: "Move to folder".tl,
+                    onClick: () {
+                      setState(() {
+                        selectedComics.clear();
+                        selectedComics[c as FavoriteItem] = true;
+                        multiSelectMode = true;
+                      });
+                      favoriteOption('moveFromInvalid');
+                    },
+                  ),
                 if (!isAllFolder)
                   MenuEntry(
                     icon: Icons.delete_outline,
@@ -828,9 +924,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     isDanger: true,
                     onClick: () {
                       LocalFavoritesManager().deleteComicWithId(
-                        isReadFolder
-                            ? LocalFavoritesManager.readFolderName
-                            : widget.folder,
+                        localTable,
                         c.id,
                         (c as FavoriteItem).type,
                       );
@@ -930,7 +1024,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
           return PopUpWidgetScaffold(
             title: isReadFolder
                 ? "Finished Reading".tl
-                : favPage.folder ?? "Unselected".tl,
+                : isInvalidFolder
+                    ? "Invalid".tl
+                    : favPage.folder ?? "Unselected".tl,
             body: Padding(
               padding: EdgeInsets.only(bottom: context.padding.bottom + 16),
               child: Container(
@@ -1035,6 +1131,20 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                                 LocalFavoritesManager().moveFromRead(f, comic);
                               }
                             }
+                          } else if (option == 'moveFromInvalid') {
+                            var comics = selectedComics.keys
+                                .map((e) => e as FavoriteItem)
+                                .toList();
+                            for (var f in selectedLocalFolders) {
+                              for (var comic in comics) {
+                                LocalFavoritesManager().moveFavorite(
+                                  LocalFavoritesManager.invalidFolderName,
+                                  f,
+                                  comic.id,
+                                  comic.type,
+                                );
+                              }
+                            }
                           }
                           App.rootContext.pop();
                           updateComics();
@@ -1072,7 +1182,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     var toBeDeleted = selectedComics.keys
         .map((e) => e as FavoriteItem)
         .toList();
-    LocalFavoritesManager().batchDeleteComics(widget.folder, toBeDeleted);
+    LocalFavoritesManager().batchDeleteComics(localTable, toBeDeleted);
     _cancel();
   }
 }

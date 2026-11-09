@@ -190,46 +190,34 @@ abstract class CBZ {
     if (cache.existsSync()) cache.deleteSync(recursive: true);
     cache.createSync();
     List<ComicChapter>? chapters;
+    // 图片一律走 LocalManager().getImageFiles：它返回的是真正的文件路径，
+    // 并且和阅读器共用同一套过滤（跳过 cover.* / 隐藏文件 / details.json）。
+    // 早先这里拿 getImages 的 `file://` 字符串直接 File(...)，路径根本打不开。
+    var images = <File>[];
     if (comic.chapters == null) {
-      var images = await LocalManager().getImages(comic.id, comic.comicType, 1);
-      int i = 1;
-      for (var image in images) {
-        var src = File(image.replaceFirst('file://', ''));
-        var width = images.length.toString().length;
-        var dstName =
-            '${i.toString().padLeft(width, '0')}.${image.split('.').last}';
-        var dst = File(FilePath.join(cache.path, dstName));
-        await src.copyMem(dst.path);
-        i++;
-      }
+      images = await LocalManager().getImageFiles(comic.id, comic.comicType, 1);
     } else {
       chapters = [];
-      var allImages = <String>[];
       for (var c in comic.downloadedChapters) {
         var chapterName = comic.chapters![c];
-        var images = await LocalManager().getImages(
-          comic.id,
-          comic.comicType,
-          c,
+        var start = images.length + 1;
+        images.addAll(
+          await LocalManager().getImageFiles(comic.id, comic.comicType, c),
         );
-        allImages.addAll(images);
-        var chapter = ComicChapter(
-          title: chapterName!,
-          start: chapters.length + 1,
-          end: chapters.length + images.length,
+        chapters.add(
+          ComicChapter(
+            title: chapterName!,
+            start: start,
+            end: images.length,
+          ),
         );
-        chapters.add(chapter);
       }
-      int i = 1;
-      for (var image in allImages) {
-        var src = File(image);
-        var width = allImages.length.toString().length;
-        var dstName =
-            '${i.toString().padLeft(width, '0')}.${image.split('.').last}';
-        var dst = File(FilePath.join(cache.path, dstName));
-        await src.copyMem(dst.path);
-        i++;
-      }
+    }
+    var width = images.length.toString().length;
+    for (var i = 0; i < images.length; i++) {
+      var src = images[i];
+      var dstName = '${(i + 1).toString().padLeft(width, '0')}.${src.extension}';
+      await src.copyMem(FilePath.join(cache.path, dstName));
     }
     var cover = comic.coverFile;
     await cover.copyMem(

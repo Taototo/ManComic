@@ -77,6 +77,27 @@ class DataSync with ChangeNotifier {
 
   String? get lastError => _lastError;
 
+  /// 最近一次同步成功（上传或下载）的时间，存在 implicitData 里。
+  ///
+  /// 用 implicitData 而不是 settings：settings 会跟着 WebDAV 同步到别的
+  /// 设备上，那台机器的「上次同步」就会被另一台的时间覆盖。这是本机的
+  /// 状态，不是配置。
+  static const _lastSyncKey = 'webdavLastSyncTime';
+
+  DateTime? get lastSyncTime {
+    var value = appdata.implicitData[_lastSyncKey];
+    if (value is int && value > 0) {
+      return DateTime.fromMillisecondsSinceEpoch(value);
+    }
+    return null;
+  }
+
+  void _markSynced() {
+    appdata.implicitData[_lastSyncKey] = DateTime.now().millisecondsSinceEpoch;
+    appdata.writeImplicitData();
+    notifyListeners();
+  }
+
   bool get isEnabled {
     var config = appdata.settings['webdav'];
     var autoSync = appdata.implicitData['webdavAutoSync'] ?? false;
@@ -153,6 +174,7 @@ class DataSync with ChangeNotifier {
         await client.write(filename, await data.readAsBytes());
         data.deleteIgnoreError();
         Log.info("Upload Data", "Data uploaded successfully");
+        _markSynced();
         return const Res(true);
       } catch (e, s) {
         Log.error("Upload Data", e, s);
@@ -208,6 +230,9 @@ class DataSync with ChangeNotifier {
           var currentVersion = appdata.settings['dataVersion'];
           if (currentVersion != null && int.parse(version) <= currentVersion) {
             Log.info("Data Sync", 'No new data to download');
+            // 「检查过了，没有新数据」也算一次成功的同步——主页那行时间
+            // 表示的是「最近一次连上服务器是什么时候」。
+            _markSynced();
             return const Res(true);
           }
         }
@@ -217,6 +242,7 @@ class DataSync with ChangeNotifier {
         await importAppData(localFile, true);
         await localFile.delete();
         Log.info("Data Sync", "Data downloaded successfully");
+        _markSynced();
         return const Res(true);
       } catch (e, s) {
         Log.error("Data Sync", e, s);

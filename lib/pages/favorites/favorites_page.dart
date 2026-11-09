@@ -205,7 +205,7 @@ class FavoritesPage extends StatefulWidget {
 
 /// 从 implicitData 里恢复上次选中的收藏夹，返回 (folder, isNetwork)。
 ///
-/// 「全部」「已阅」不是磁盘上的真实目录，而是两个哨兵名（定义见
+/// 「全部」「已阅」「失效」不是磁盘上的真实目录，而是三个哨兵名（定义见
 /// `local_favorites_page.dart`）。它们必须原样保留：早先的写法只放行了
 /// 「已阅」，「全部」每次都会被当成「文件夹已被删除」重置成 null（未选择），
 /// 于是切到别的 tab 再回来、页面重建一次，筛选就丢了。
@@ -227,7 +227,9 @@ class FavoritesPage extends StatefulWidget {
   if (isNetwork) {
     return (name, true);
   }
-  if (name == _localAllFolderLabel || name == _localReadFolderLabel) {
+  if (name == _localAllFolderLabel ||
+      name == _localReadFolderLabel ||
+      name == _localInvalidFolderLabel) {
     return (name, false);
   }
   return (existsFolder(name) ? name : null, false);

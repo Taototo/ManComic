@@ -473,19 +473,38 @@ class LocalManager with ChangeNotifier {
     return files;
   }
 
-  Future<List<String>> getImages(String id, ComicType type, Object ep) async {
+  /// 本地图片的 [File] 列表，按页码排好序。
+  ///
+  /// 这是「真正要读写文件」的入口（导出 cbz/epub/pdf、打包、复制）。阅读器
+  /// 和图片控件要的是 URL，用 [getImages]——它只是给这里的路径加上
+  /// `file://` 前缀。
+  ///
+  /// 两条路径必须共用同一份过滤规则（[_pageFiles]）：少了 `cover.*` 会把封面
+  /// 当成第一页，少了 `details.json` 会把 JSON 当图片喂给解码器。之前导出
+  /// 直接自己 listSync 目录、又各自贴 `file://`，cbz/epub/pdf 三个全挂。
+  ///
+  /// 注意：本方法会查本地数据库，只能在主 isolate 调用；后台 isolate 里
+  /// 请先把路径列表算好再传进去。
+  Future<List<File>> getImageFiles(String id, ComicType type, Object ep) async {
     if (ep is! String && ep is! int) {
       throw "Invalid ep";
     }
     var files = await _pageFiles(id, type, ep);
-    files.sort((a, b) {
-      var ai = int.tryParse(a.name.split('.').first);
-      var bi = int.tryParse(b.name.split('.').first);
-      if (ai != null && bi != null) {
-        return ai.compareTo(bi);
-      }
-      return a.name.compareTo(b.name);
-    });
+    files.sort(_comparePageFile);
+    return files;
+  }
+
+  static int _comparePageFile(File a, File b) {
+    var ai = int.tryParse(a.name.split('.').first);
+    var bi = int.tryParse(b.name.split('.').first);
+    if (ai != null && bi != null) {
+      return ai.compareTo(bi);
+    }
+    return a.name.compareTo(b.name);
+  }
+
+  Future<List<String>> getImages(String id, ComicType type, Object ep) async {
+    var files = await getImageFiles(id, type, ep);
     return files.map((e) => "file://${e.path}").toList();
   }
 

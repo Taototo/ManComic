@@ -98,9 +98,9 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
               padding: widget.withAppbar
                   ? EdgeInsets.zero
                   : EdgeInsets.only(top: context.padding.top),
-              // Local 标题 + 全部 + 自建分类 + 已阅（固定在本地分组底部）
-              // + Network 标题 + 网络收藏
-              itemCount: folders.length + networkFolders.length + 4,
+              // Local 标题 + 全部 + 自建分类 + 已阅 + 失效（三个内置项固定在
+              // 本地分组底部）+ Network 标题 + 网络收藏
+              itemCount: folders.length + networkFolders.length + 5,
               itemBuilder: (context, index) {
                 if (index == 0) {
                   return buildLocalTitle();
@@ -119,6 +119,10 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
                     _localReadFolderLabel,
                     withTopGap: true,
                   );
+                }
+                index--;
+                if (index == 0) {
+                  return buildLocalFolder(_localInvalidFolderLabel);
                 }
                 index--;
                 if (index == 0) {
@@ -220,21 +224,26 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       count = LocalFavoritesManager().totalComics;
     } else if (name == _localReadFolderLabel) {
       count = LocalFavoritesManager().readCount();
+    } else if (name == _localInvalidFolderLabel) {
+      count = LocalFavoritesManager().invalidCount();
     } else {
       count = LocalFavoritesManager().folderComics(name);
     }
     var folderName = switch (name) {
       _localAllFolderLabel => "All".tl,
       _localReadFolderLabel => "Finished Reading".tl,
+      _localInvalidFolderLabel => "Invalid".tl,
       _ => getFavoriteDataOrNull(name)?.title ?? name,
     };
     bool isAll = name == _localAllFolderLabel;
     bool isRead = name == _localReadFolderLabel;
-    // 自建分类整体缩进一层，与「全部」「已阅」这两个内置项区分开
-    bool isBuiltin = isAll || isRead;
+    bool isInvalid = name == _localInvalidFolderLabel;
+    // 自建分类整体缩进一层，与「全部」「已阅」「失效」这三个内置项区分开
+    bool isBuiltin = isAll || isRead || isInvalid;
     var leadingIcon = switch (name) {
       _localAllFolderLabel => Icons.apps,
       _localReadFolderLabel => Icons.done_all,
+      _localInvalidFolderLabel => Icons.link_off,
       _ => Icons.folder_outlined,
     };
     // 选中时图标与文字都用主题色；未选中时图标用次要色。
@@ -242,14 +251,14 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
     Color? fgColor;
     if (isSelected) {
       fgColor = context.colorScheme.primary;
-    } else if (isRead) {
+    } else if (isRead || isInvalid) {
       fgColor = context.colorScheme.onSurfaceVariant;
     } else if (widget.onGlassBackground) {
       fgColor = context.colorScheme.onSurface;
     }
     var iconColor = isSelected
         ? context.colorScheme.primary
-        : (isRead
+        : ((isRead || isInvalid)
               ? context.colorScheme.onSurfaceVariant.toOpacity(0.8)
               : context.colorScheme.onSurfaceVariant);
     // 玻璃上的选中底板要比贴页面时重一档，否则「选中了哪一项」看不出来

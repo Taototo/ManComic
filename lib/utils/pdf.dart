@@ -11,57 +11,17 @@ import 'package:zip_flutter/zip_flutter.dart';
 typedef DecodeImage = Future<Image> Function(Uint8List data);
 
 Future<void> _createPdfFromComic({
-  required LocalComic comic,
+  required String title,
+  required String author,
+  required List<String> imagePaths,
   required String savePath,
-  required String localPath,
   required DecodeImage decodeImage,
 }) async {
-  var images = <String>[];
-
-  var baseDir = comic.directory.contains('/') || comic.directory.contains('\\')
-      ? comic.directory
-      : FilePath.join(localPath, comic.directory);
-
-  // add cover
-  images.add(FilePath.join(baseDir, comic.cover));
-
-  bool multiChapters = comic.chapters != null;
-
-  void reorderFiles(List<FileSystemEntity> files) {
-    files.removeWhere(
-        (element) => element is! File || element.path.startsWith('cover'));
-    files.sort((a, b) {
-      var aName = (a as File).basenameWithoutExt;
-      var bName = (b as File).basenameWithoutExt;
-      var aNumber = int.tryParse(aName);
-      var bNumber = int.tryParse(bName);
-      if (aNumber != null && bNumber != null) {
-        return aNumber.compareTo(bNumber);
-      }
-      return a.name.compareTo(b.name);
-    });
-  }
-
-  if (!multiChapters) {
-    var files = Directory(baseDir).listSync();
-    reorderFiles(files);
-
-    for (var file in files) {
-      images.add(file.path);
-    }
-  } else {
-    for (var chapter in comic.downloadedChapters) {
-      var files = Directory(FilePath.join(baseDir, chapter)).listSync();
-      reorderFiles(files);
-      for (var file in files) {
-        images.add(file.path);
-      }
-    }
-  }
+  var images = imagePaths;
 
   var generator = PdfGenerator(
-    title: comic.title,
-    author: comic.subtitle,
+    title: title,
+    author: author,
     imagePaths: images,
     outputPath: savePath,
     decodeImage: decodeImage,
@@ -69,14 +29,51 @@ Future<void> _createPdfFromComic({
   await generator.generate();
 }
 
+/// 本次要写进 PDF 的图片路径（封面在最前）。
+///
+/// 必须在主 isolate 里算：它要查本地数据库，后台 isolate 里 `LocalManager()`
+/// 是个没初始化过的新实例。顺便这也把「自己 listSync 目录」换成了
+/// [LocalManager.getImageFiles]——原来那版会把目录里的 `details.json` 当成
+/// 一页图片丢给解码器，整个导出直接抛异常；章节目录名也没做
+/// `getChapterDirectoryName` 转义。
+Future<List<String>> _pdfImagePaths(LocalComic comic) async {
+  var images = <String>[];
+  var cover = comic.coverFile;
+  if (cover.existsSync()) {
+    images.add(cover.path);
+  }
+  if (comic.chapters == null) {
+    images.addAll(
+      (await LocalManager().getImageFiles(comic.id, comic.comicType, 1))
+          .map((e) => e.path),
+    );
+  } else {
+    for (var chapter in comic.downloadedChapters) {
+      images.addAll(
+        (await LocalManager().getImageFiles(comic.id, comic.comicType, chapter))
+            .map((e) => e.path),
+      );
+    }
+  }
+  return images;
+}
+
 Future<Isolate> _runIsolate(
-    LocalComic comic, String savePath, SendPort sendPort) {
-  var localPath = LocalManager().path;
+  List<String> imagePaths,
+  String title,
+  String author,
+  String savePath,
+  SendPort sendPort,
+) {
   return Isolate.spawn<SendPort>(
     (sendPort) => overrideIO(
       () async {
         if (App.isAndroid) {
-          await SAFTaskWorker().init();
+          // SAF 只对外部目录（用户通过系统选择器授权的路径）有用；初始化
+          // 失败也不该把导出带下去，拿不到就走普通 dart:io 路径。
+          try {
+            await SAFTaskWorker().init();
+          } catch (_) {}
         }
         var receivePort = ReceivePort();
         sendPort.send(receivePort.sendPort);
@@ -103,9 +100,10 @@ Future<Isolate> _runIsolate(
         });
 
         await _createPdfFromComic(
-          comic: comic,
+          title: title,
+          author: author,
+          imagePaths: imagePaths,
           savePath: savePath,
-          localPath: localPath,
           decodeImage: decodeImage,
         );
 
@@ -117,6 +115,10 @@ Future<Isolate> _runIsolate(
 }
 
 Future<File> createPdfFromComicIsolate(LocalComic comic, String savePath) async {
+  final imagePaths = await _pdfImagePaths(comic);
+  if (imagePaths.isEmpty) {
+    throw Exception('No images found in this comic');
+  }
   var receivePort = ReceivePort();
   SendPort? sendPort;
   Isolate? isolate;
@@ -134,7 +136,13 @@ Future<File> createPdfFromComicIsolate(LocalComic comic, String savePath) async 
       isolate!.kill();
     }
   });
-  isolate = await _runIsolate(comic, savePath, receivePort.sendPort);
+  isolate = await _runIsolate(
+    imagePaths,
+    comic.title,
+    comic.subtitle,
+    savePath,
+    receivePort.sendPort,
+  );
   await completer.future;
   return File(savePath);
 }

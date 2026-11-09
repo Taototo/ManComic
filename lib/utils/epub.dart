@@ -74,7 +74,7 @@ Future<File> createEpubComic(
       images.add('images/img$imgIndex.$ext');
       var mime = FileType.fromExtension(ext).mime;
       manifestStrBuilder.writeln(
-          '        <item id="img$imgIndex" href="OEBPS/images/img$imgIndex$ext" media-type="$mime"/>');
+          '        <item id="img$imgIndex" href="OEBPS/images/img$imgIndex.$ext" media-type="$mime"/>');
       imgIndex++;
     }
     var html =
@@ -181,17 +181,16 @@ ${navMapStrBuilder.toString()}
 Future<File> createEpubWithLocalComic(
     LocalComic comic, String outFilePath) async {
   var chapters = <String, List<File>>{};
+  // 必须用 getImageFiles：getImages 返回的是 `file://` 开头的 URL，直接
+  // File(...) 出来读不到内容（报 Cannot open file）。章节目录里还混着
+  // details.json，getImageFiles 会一并过滤掉。
   if (comic.chapters == null) {
     chapters[comic.title] =
-        (await LocalManager().getImages(comic.id, comic.comicType, 0))
-            .map((e) => File(e))
-            .toList();
+        await LocalManager().getImageFiles(comic.id, comic.comicType, 1);
   } else {
     for (var chapter in comic.downloadedChapters) {
-      chapters[comic.chapters![chapter]!] =
-          (await LocalManager().getImages(comic.id, comic.comicType, chapter))
-              .map((e) => File(e))
-              .toList();
+      chapters[comic.chapters![chapter]!] = await LocalManager()
+          .getImageFiles(comic.id, comic.comicType, chapter);
     }
   }
   var data = EpubData(

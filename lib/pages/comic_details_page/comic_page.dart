@@ -23,6 +23,7 @@ import 'package:venera/foundation/source_binding.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
+import 'package:venera/pages/local_comic_page.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/pages/source_match_sheet.dart';
 import 'package:venera/utils/comic_update_time.dart';
@@ -221,7 +222,20 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
     }
   }
 
-  var isFirst = true;
+  @override
+  Widget build(BuildContext context) {
+    // 本地漫画统一走本地详情页：那边会明确写「来源：本地」，并且只给本地
+    // 库能用的操作（章节直接读、打开文件夹、导出）。在线源那一套（下载 /
+    // 点赞 / 评论 / 换源）对手机里的书根本不成立。
+    if (widget.sourceKey == 'local') {
+      return LocalComicPage(
+        id: widget.id,
+        comicType: ComicType.local,
+        heroID: widget.heroID,
+      );
+    }
+    return super.build(context);
+  }
 
   @override
   Widget buildContent(BuildContext context, ComicDetails data) {
@@ -262,34 +276,9 @@ class _ComicPageState extends LoadingState<ComicPage, ComicDetails>
   @override
   Future<Res<ComicDetails>> loadData() async {
     if (widget.sourceKey == 'local') {
-      var localComic = LocalManager().find(widget.id, ComicType.local);
-      if (localComic == null) {
-        return const Res.error('Local comic not found');
-      }
-      var history = HistoryManager().find(widget.id, ComicType.local);
-      if (isFirst) {
-        Future.microtask(() {
-          App.rootContext.to(() {
-            return Reader(
-              type: ComicType.local,
-              cid: widget.id,
-              name: localComic.title,
-              chapters: localComic.chapters,
-              initialPage: history?.page,
-              initialChapter: history?.ep,
-              initialChapterGroup: history?.group,
-              history:
-                  history ??
-                  History.fromModel(model: localComic, ep: 0, page: 0),
-              author: localComic.subTitle ?? '',
-              tags: localComic.tags,
-            );
-          });
-          App.mainNavigatorKey!.currentContext!.pop();
-        });
-        isFirst = false;
-      }
-      await Future.delayed(const Duration(milliseconds: 200));
+      // 本地漫画由 build() 直接换成 [LocalComicPage]，这里不会被真的走到。
+      // 千万不要再像以前那样在这里 push 一个 Reader 再把自己 pop 掉：
+      // 用户点封面想要的是详情页，不是「直接开读」。
       return const Res.error('Local comic');
     }
     var comicSource = ComicSource.find(widget.sourceKey);

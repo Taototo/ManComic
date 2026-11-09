@@ -1,14 +1,14 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/components/downloading_card.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
-import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
-import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
+import 'package:venera/pages/local_comic_page.dart';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/epub.dart';
 import 'package:venera/utils/io.dart';
@@ -148,10 +148,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
           icon: Icons.chrome_reader_mode_outlined,
           text: "View Detail".tl,
           onClick: () {
-            context.to(() => ComicPage(
-                  id: selectedComics.keys.first.id,
-                  sourceKey: selectedComics.keys.first.sourceKey,
-                ));
+            LocalComicPage.open(context, selectedComics.keys.first);
           },
         ),
       if (selectedComics.isNotEmpty)
@@ -322,10 +319,13 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   }
                 });
               } else {
-                // prevent dirty data
-                var comic =
-                    LocalManager().find(c.id, ComicType.fromKey(c.sourceKey))!;
-                comic.read();
+                // 点封面进详情页，不再一步跳进阅读器：简介、章节、来源都在
+                // 详情页上，想直接读点「开始阅读」也只多一下。
+                LocalComicPage.open(
+                  context,
+                  c as LocalComic,
+                  heroID: heroID,
+                );
               }
             },
             menuBuilder: (c) {
@@ -447,98 +447,106 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
         icon: Icons.outbox_outlined,
         text: "Export as cbz".tl,
         onClick: () {
-          exportComics(comics, CBZ.export, ".cbz");
+          exportLocalComics(context, comics, CBZ.export, ".cbz");
         },
       ),
       MenuEntry(
         icon: Icons.picture_as_pdf_outlined,
         text: "Export as pdf".tl,
         onClick: () async {
-          exportComics(comics, createPdfFromComicIsolate, ".pdf");
+          exportLocalComics(context, comics, createPdfFromComicIsolate, ".pdf");
         },
       ),
       MenuEntry(
         icon: Icons.import_contacts_outlined,
         text: "Export as epub".tl,
         onClick: () async {
-          exportComics(comics, createEpubWithLocalComic, ".epub");
+          exportLocalComics(context, comics, createEpubWithLocalComic, ".epub");
         },
       )
     ];
   }
+}
 
-  /// Export given comics to a file
-  void exportComics(
-      List<LocalComic> comics, ExportComicFunc export, String ext) async {
-    var current = 0;
-    var cacheDir = FilePath.join(App.cachePath, 'comics_export');
-    var outFile = FilePath.join(App.cachePath, 'comics_export.zip');
-    bool canceled = false;
-    if (Directory(cacheDir).existsSync()) {
-      Directory(cacheDir).deleteSync(recursive: true);
-    }
-    Directory(cacheDir).createSync();
-    var loadingController = showLoadingDialog(
-      context,
-      allowCancel: true,
-      message: "${"Exporting".tl} $current/${comics.length}",
-      withProgress: comics.length > 1,
-      onCancel: () {
-        canceled = true;
-      },
-    );
-    try {
-      var fileName = "";
-      // For each comic, export it to a file
-      for (var comic in comics) {
-        fileName = FilePath.join(
-          cacheDir,
-          sanitizeFileName(comic.title, maxLength: 100) + ext,
-        );
-        await export(comic, fileName);
-        current++;
-        if (comics.length > 1) {
-          loadingController
-              .setMessage("${"Exporting".tl} $current/${comics.length}");
-          loadingController.setProgress(current / comics.length);
-        }
-        if (canceled) {
-          return;
-        }
+/// Export given comics to a file.
+///
+/// 抽成顶层函数是为了让本地详情页也能调（那边不在这个 State 里）。
+/// 失败时把异常原文摊给用户看——这类错误大多来自文件系统（目录只读、
+/// 文件名非法），吞掉只会变成「点了没反应」。
+Future<void> exportLocalComics(
+  BuildContext context,
+  List<LocalComic> comics,
+  ExportComicFunc export,
+  String ext,
+) async {
+  var current = 0;
+  var cacheDir = FilePath.join(App.cachePath, 'comics_export');
+  var outFile = FilePath.join(App.cachePath, 'comics_export.zip');
+  bool canceled = false;
+  if (Directory(cacheDir).existsSync()) {
+    Directory(cacheDir).deleteSync(recursive: true);
+  }
+  Directory(cacheDir).createSync();
+  var loadingController = showLoadingDialog(
+    context,
+    allowCancel: true,
+    message: "${"Exporting".tl} $current/${comics.length}",
+    withProgress: comics.length > 1,
+    onCancel: () {
+      canceled = true;
+    },
+  );
+  try {
+    var fileName = "";
+    // For each comic, export it to a file
+    for (var comic in comics) {
+      fileName = FilePath.join(
+        cacheDir,
+        sanitizeFileName(comic.title, maxLength: 100) + ext,
+      );
+      await export(comic, fileName);
+      current++;
+      if (comics.length > 1) {
+        loadingController
+            .setMessage("${"Exporting".tl} $current/${comics.length}");
+        loadingController.setProgress(current / comics.length);
       }
-      // For single comic, just save the file
-      if (comics.length == 1) {
-        await saveFile(
-          file: File(fileName),
-          filename: File(fileName).name,
-        );
-        Directory(cacheDir).deleteSync(recursive: true);
-        loadingController.close();
-        return;
-      }
-      // For multiple comics, compress the folder
-      loadingController.setProgress(null);
-      loadingController.setMessage("Compressing".tl);
-      await ZipFile.compressFolderAsync(cacheDir, outFile);
       if (canceled) {
-        File(outFile).deleteIgnoreError();
         return;
       }
-    } catch (e, s) {
-      Log.error("Export Comics", e, s);
-      context.showMessage(message: e.toString());
+    }
+    // For single comic, just save the file
+    if (comics.length == 1) {
+      await saveFile(
+        file: File(fileName),
+        filename: File(fileName).name,
+      );
+      Directory(cacheDir).deleteSync(recursive: true);
       loadingController.close();
       return;
-    } finally {
-      Directory(cacheDir).deleteIgnoreError(recursive: true);
     }
-    await saveFile(
-      file: File(outFile),
-      filename: "comics_export.zip",
-    );
+    // For multiple comics, compress the folder
+    loadingController.setProgress(null);
+    loadingController.setMessage("Compressing".tl);
+    await ZipFile.compressFolderAsync(cacheDir, outFile);
+    if (canceled) {
+      File(outFile).deleteIgnoreError();
+      return;
+    }
+  } catch (e, s) {
+    Log.error("Export Comics", e, s);
+    context.showMessage(message: e.toString());
     loadingController.close();
-    File(outFile).deleteIgnoreError();
+    return;
+  } finally {
+    Directory(cacheDir).deleteIgnoreError(recursive: true);
   }
+  await saveFile(
+    file: File(outFile),
+    filename: "comics_export.zip",
+  );
+  loadingController.close();
+  File(outFile).deleteIgnoreError();
 }
 
 typedef ExportComicFunc = Future<File> Function(
@@ -546,9 +554,31 @@ typedef ExportComicFunc = Future<File> Function(
 
 /// Opens the folder containing the comic in the system file explorer
 Future<void> openComicFolder(LocalComic comic) async {
+  final folderPath = comic.baseDir;
+  if (App.isAndroid) {
+    // 交给原生侧用 FileProvider 包成 content:// URI 再打开。直接用
+    // `launchUrlString('file://...')` 在 Android 7 以上必然抛
+    // FileUriExposedException（用户看到的那条 Failed to open folder）。
+    bool opened = false;
+    try {
+      opened = await _folderChannel.invokeMethod<bool>(
+            'openFolder',
+            {'path': folderPath},
+          ) ??
+          false;
+    } catch (e, s) {
+      Log.error("Open Folder", "native openFolder failed: $e", s);
+    }
+    if (!opened) {
+      // 设备上没有能接管目录的应用（或者这个路径不在 FileProvider 的
+      // 可共享范围内）。那就把路径摆出来，用户至少能复制出去自己找。
+      if (App.rootContext.mounted) {
+        _showFolderPathDialog(folderPath);
+      }
+    }
+    return;
+  }
   try {
-    final folderPath = comic.baseDir;
-
     if (App.isWindows) {
       await Process.run('explorer', [folderPath]);
     } else if (App.isMacOS) {
@@ -575,7 +605,6 @@ Future<void> openComicFolder(LocalComic comic) async {
         }
       }
     } else {
-      // For mobile platforms, use the URL launcher with file:// protocol
       await launchUrlString('file://$folderPath');
     }
   } catch (e, s) {
@@ -585,6 +614,41 @@ Future<void> openComicFolder(LocalComic comic) async {
       App.rootContext.showMessage(message: "Failed to open folder: $e");
     }
   }
+}
+
+const _folderChannel = MethodChannel("venera/method_channel");
+
+void _showFolderPathDialog(String path) {
+  showDialog(
+    context: App.rootContext,
+    builder: (context) {
+      return ContentDialog(
+        title: "Open Folder".tl,
+        content: Column(
+          mainAxisSize: MainAxisSize.min,
+          crossAxisAlignment: CrossAxisAlignment.start,
+          children: [
+            Text("Folder path".tl),
+            const SizedBox(height: 8),
+            SelectableText(
+              path,
+              style: const TextStyle(fontFamily: 'monospace', fontSize: 12),
+            ),
+          ],
+        ),
+        actions: [
+          FilledButton.tonal(
+            onPressed: () {
+              Clipboard.setData(ClipboardData(text: path));
+              context.pop();
+              App.rootContext.showMessage(message: "Copied".tl);
+            },
+            child: Text("Copy path".tl),
+          ),
+        ],
+      );
+    },
+  );
 }
 
 void showDeleteChaptersPopWindow(BuildContext context, LocalComic comic) {

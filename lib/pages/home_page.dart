@@ -338,6 +338,14 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
           child: ListTile(
             leading: const Icon(Icons.sync),
             title: Text('Sync Data'.tl),
+            // 最近一次同步时间。以前这一栏只有「同步数据」四个字，看不出
+            // 数据到底是不是最新的——尤其自动同步失败时，界面上完全没差别。
+            subtitle: Text(
+              _syncTimeText(DataSync().lastSyncTime),
+              style: ts.s12.withColor(
+                context.colorScheme.onSurfaceVariant,
+              ),
+            ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
@@ -395,6 +403,21 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
       duration: const Duration(milliseconds: 200),
       child: child,
     );
+  }
+
+  /// 「上次同步 11-09 17:02」；当天只显示时分，避免一行被挤成两行。
+  static String _syncTimeText(DateTime? time) {
+    if (time == null) {
+      return "Never synced".tl;
+    }
+    final now = DateTime.now();
+    String two(int v) => v.toString().padLeft(2, '0');
+    final hm = "${two(time.hour)}:${two(time.minute)}";
+    final sameDay = time.year == now.year &&
+        time.month == now.month &&
+        time.day == now.day;
+    final value = sameDay ? hm : "${two(time.month)}-${two(time.day)} $hm";
+    return "${"Last synced".tl} $value";
   }
 }
 
@@ -483,19 +506,19 @@ class _Local extends StatefulWidget {
 }
 
 class _LocalState extends State<_Local> {
-  late List<LocalComic> local;
+  // 这里只留数量。以前还会横滑显示最近 20 本的缩略图，但首页已经有三四块
+  // 内容，本地那排小封面既点不到又占掉小半屏；想看具体是哪几本，进本地页
+  // 一眼就是全部。
   late int count;
 
   void onLocalComicsChange() {
     setState(() {
-      local = LocalManager().getRecent();
       count = LocalManager().count;
     });
   }
 
   @override
   void initState() {
-    local = LocalManager().getRecent();
     count = LocalManager().count;
     LocalManager().addListener(onLocalComicsChange);
     super.initState();
@@ -549,32 +572,6 @@ class _LocalState extends State<_Local> {
                   ],
                 ),
               ).paddingHorizontal(16),
-              if (local.isNotEmpty)
-                SizedBox(
-                  height: 136,
-                  child: ListView.builder(
-                    scrollDirection: Axis.horizontal,
-                    itemCount: local.length,
-                    itemBuilder: (context, index) {
-                      final heroID = local[index].id.hashCode;
-                      return SimpleComicTile(
-                        comic: local[index],
-                        heroID: heroID,
-                        onTap: () {
-                          context.to(
-                            () => ComicPage(
-                              id: local[index].id,
-                              sourceKey: local[index].sourceKey,
-                              cover: local[index].cover,
-                              title: local[index].title,
-                              heroID: heroID,
-                            ),
-                          );
-                        },
-                      ).paddingHorizontal(8).paddingVertical(2);
-                    },
-                  ),
-                ).paddingHorizontal(8),
               Row(
                 children: [
                   if (LocalManager().downloadingTasks.isNotEmpty)
