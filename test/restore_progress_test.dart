@@ -202,9 +202,31 @@ void main() {
   test("目录记录丢了会找回旧目录，而不是新建一个", () async {
     // 旧目录叫「T(1)」，说明是第二轮下载时建出来的
     writePages("T(1)/ch1", 2);
-    var found = LocalManager().findReusableDirectory("T");
+    File("${root.path}/T(1)/details.json").writeAsStringSync(
+      jsonEncode({"title": "T", "comicId": "1", "sourceKey": "test-src"}),
+    );
+    var found = LocalManager().findReusableDirectory(
+      "T",
+      comicId: "1",
+      sourceKey: "test-src",
+    );
     expect(found, isNotNull);
     expect(found!.path.endsWith("T(1)"), isTrue);
+  });
+
+  test("同名但不是同一本的目录不会被认领", () async {
+    writePages("T(1)/ch1", 2);
+    File("${root.path}/T(1)/details.json").writeAsStringSync(
+      jsonEncode({"title": "T", "comicId": "999", "sourceKey": "other-src"}),
+    );
+    expect(
+      LocalManager().findReusableDirectory(
+        "T",
+        comicId: "1",
+        sourceKey: "test-src",
+      ),
+      isNull,
+    );
   });
 
   test("进度快照会带上每章页数，够下次算分母", () {

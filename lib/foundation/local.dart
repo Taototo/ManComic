@@ -722,7 +722,11 @@ class LocalManager with ChangeNotifier {
   /// 只有任务自述「已经下过东西」时才会调到这里，所以命中的目录必然是
   /// 这个任务自己建的（同名不同源属于极端情况，那时拿到的也只是多下的
   /// 章节，会在下面按页重算时被纠正）。
-  Directory? findReusableDirectory(String name) {
+  Directory? findReusableDirectory(
+    String name, {
+    String? comicId,
+    String? sourceKey,
+  }) {
     const comicDirectoryMaxLength = 80;
     if (name.length > comicDirectoryMaxLength) {
       name = name.substring(0, comicDirectoryMaxLength);
@@ -731,12 +735,48 @@ class LocalManager with ChangeNotifier {
       var candidate = i == 0 ? name : "$name($i)";
       var dir = Directory(FilePath.join(path, sanitizeFileName(candidate)));
       try {
-        if (dir.existsSync() && dir.listSync().isNotEmpty) {
-          return dir;
+        if (!dir.existsSync() || dir.listSync().isEmpty) {
+          continue;
         }
-      } catch (_) {}
+      } catch (_) {
+        continue;
+      }
+      if (_directoryBelongsTo(dir, comicId, sourceKey)) {
+        return dir;
+      }
     }
     return null;
+  }
+
+  /// 目录里那份 `details.json` 是不是这本漫画的。
+  ///
+  /// 没有快照（刚建目录就被杀）时只能按名字认——它是这个任务自己建的。
+  /// 有快照但 id/源对不上，说明是另一本同名漫画，不能拿来续传。
+  bool _directoryBelongsTo(Directory dir, String? comicId, String? sourceKey) {
+    if (comicId == null && sourceKey == null) {
+      return true;
+    }
+    var file = File(FilePath.join(dir.path, 'details.json'));
+    if (!file.existsSync()) {
+      return true;
+    }
+    try {
+      var json = jsonDecode(file.readAsStringSync());
+      if (json is! Map) {
+        return true;
+      }
+      if (comicId != null && json['comicId'] != null && json['comicId'] != comicId) {
+        return false;
+      }
+      if (sourceKey != null &&
+          json['sourceKey'] != null &&
+          json['sourceKey'] != sourceKey) {
+        return false;
+      }
+      return true;
+    } catch (_) {
+      return true;
+    }
   }
 
   void completeTask(DownloadTask task) {

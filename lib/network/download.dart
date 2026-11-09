@@ -569,7 +569,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         var hadProgress = _downloadedCount > 0 ||
             (_chapterPageHint?.isNotEmpty ?? false);
         if (hadProgress) {
-          reused = LocalManager().findReusableDirectory(comic!.title);
+          reused = LocalManager().findReusableDirectory(
+            comic!.title,
+            comicId: comicId,
+            sourceKey: source.key,
+          );
           if (reused != null) {
             Log.warning(
               "Download",
