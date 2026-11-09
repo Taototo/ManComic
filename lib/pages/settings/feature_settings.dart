@@ -230,6 +230,19 @@ class _DataSettingsState extends State<DataSettings> {
             LocalManager().pumpQueue();
           },
         ).toSliver(),
+        // 关掉它会退回「只在应用可见时下载」：切出去就可能被系统冻住。
+        // 桌面端没有前台服务这回事，这个开关只对 Android 有意义。
+        if (App.isAndroid)
+          _SwitchSetting(
+            title: "Background downloads".tl,
+            subtitle:
+                "Keep downloading when the app goes to the background".tl,
+            settingKey: "backgroundDownload",
+            onChanged: () {
+              // 立刻生效：开着就重新探一次前台服务，关掉就摘通知
+              LocalManager().pumpQueue();
+            },
+          ).toSliver(),
         _SettingPartTitle(
           title: "Notifications".tl,
           icon: Icons.notifications_none_rounded,

@@ -232,6 +232,8 @@ class Settings with ChangeNotifier {
     'downloadThreads': 5,
     // 同时下载几本（每本内部再按 downloadThreads 并发）
     'maxConcurrentDownloads': 3,
+    // 下载期间挂前台服务：回到桌面/锁屏继续下，通知栏显示总进度
+    'backgroundDownload': true,
     'enableLongPressToZoom': true,
     'longPressAction': 'hud', // hud, zoom —— HUD 为长按呼出快捷面板
     'longPressZoomPosition': "press", // press, center

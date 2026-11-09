@@ -77,6 +77,32 @@ class _DownloadingCardState extends State<DownloadingCard> {
 
   double get _progress => task.progress.clamp(0.0, 1.0).toDouble();
 
+  /// 封面控件只在封面地址变了的时候重建。
+  ///
+  /// 任务每秒都会 notify 一次（刷速度），如果每次 build 都 new 一个
+  /// `Image` + `CachedImageProvider`，就会每秒重新解析一遍图片流。多任务
+  /// 并发时这点开销足够让下载页掉帧。
+  Widget? _cover;
+  String? _coverKey;
+
+  Widget _buildCover() {
+    var url = task.cover;
+    if (url == null) {
+      return const SizedBox();
+    }
+    if (_coverKey == url && _cover != null) {
+      return _cover!;
+    }
+    _coverKey = url;
+    _cover = Image(
+      image: CachedImageProvider(url),
+      fit: BoxFit.cover,
+      filterQuality: FilterQuality.medium,
+      errorBuilder: (_, e, s) => const SizedBox(),
+    );
+    return _cover!;
+  }
+
   @override
   Widget build(BuildContext context) {
     return SizedBox(
@@ -100,14 +126,7 @@ class _DownloadingCardState extends State<DownloadingCard> {
                   children: [
                     ColoredBox(
                       color: context.colorScheme.secondaryContainer,
-                      child: task.cover == null
-                          ? const SizedBox()
-                          : Image(
-                              image: CachedImageProvider(task.cover!),
-                              fit: BoxFit.cover,
-                              filterQuality: FilterQuality.medium,
-                              errorBuilder: (_, e, s) => const SizedBox(),
-                            ),
+                      child: _buildCover(),
                     ),
                     // 遮罩强度分档：跑着的时候压暗一点让圆环更清楚，暂停时
                     // 只轻轻压一层。圆环一直显示——百分比是这个卡片上最有用

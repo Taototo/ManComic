@@ -387,6 +387,33 @@ class MainActivity : FlutterFragmentActivity() {
                     res.success(true)
                 }
 
+                // 漫画下载：同更新包那套，只是多了把 wakelock（见
+                // ComicDownloadService），锁屏后下载才不会被挂起。
+                "startDownloadService" -> {
+                    ComicDownloadService.start(
+                        this,
+                        call.argument<String>("title") ?: "Downloading",
+                        call.argument<String>("text") ?: "",
+                        call.argument<Int>("progress") ?: -1
+                    )
+                    res.success(true)
+                }
+
+                "updateDownloadService" -> {
+                    ComicDownloadService.update(
+                        this,
+                        call.argument<String>("title") ?: "Downloading",
+                        call.argument<String>("text") ?: "",
+                        call.argument<Int>("progress") ?: -1
+                    )
+                    res.success(true)
+                }
+
+                "stopDownloadService" -> {
+                    ComicDownloadService.stop(this)
+                    res.success(true)
+                }
+
                 "getDirectoryPath" -> {
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)

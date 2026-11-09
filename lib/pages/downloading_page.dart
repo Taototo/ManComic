@@ -1,3 +1,5 @@
+import 'dart:async';
+
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/components/downloading_card.dart';
@@ -15,47 +17,50 @@ class DownloadingPage extends StatefulWidget {
 }
 
 class _DownloadingPageState extends State<DownloadingPage> {
-  /// 已挂上监听的任务。多任务并发下，顶部速度要覆盖全部在跑的任务，
-  /// 不能只盯第一个。
-  final List<DownloadTask> _listened = [];
+  /// 顶部汇总只按秒刷新。
+  ///
+  /// 以前是把每个任务都挂成监听：N 个任务每秒各 notify 一次 → 页面 setState
+  /// 一次 → `ListView` 里 N 个卡片全部重建，等于每秒 N² 次 build。任务一多
+  /// 这一页就卡得不能看。现在页面只跟「任务增删」走，速度汇总交给一个 ticker，
+  /// 单张卡的进度由卡片自己刷。
+  Timer? _ticker;
 
   @override
   void initState() {
-    LocalManager().addListener(update);
-    _syncListeners();
     super.initState();
+    LocalManager().addListener(_onTasksChanged);
+    _onTasksChanged();
   }
 
   @override
   void dispose() {
-    LocalManager().removeListener(update);
-    for (var task in _listened) {
-      task.removeListener(update);
-    }
+    LocalManager().removeListener(_onTasksChanged);
+    _ticker?.cancel();
     super.dispose();
   }
 
-  void _syncListeners() {
-    final tasks = LocalManager().downloadingTasks;
-    for (var task in List.of(_listened)) {
-      if (!tasks.contains(task)) {
-        task.removeListener(update);
-        _listened.remove(task);
-      }
-    }
-    for (var task in tasks) {
-      if (!_listened.contains(task)) {
-        task.addListener(update);
-        _listened.add(task);
-      }
-    }
-  }
-
-  void update() {
+  void _onTasksChanged() {
     if (!mounted) {
       return;
     }
-    _syncListeners();
+    var hasRunning = LocalManager().downloadingTasks.any((e) => !e.isPaused);
+    if (hasRunning && _ticker == null) {
+      _ticker = Timer.periodic(const Duration(seconds: 1), (_) {
+        if (!mounted) {
+          return;
+        }
+        // 全部停下（下完 / 出错 / 被暂停）就把 ticker 收掉，别留个空转的
+        // 定时器一直重建这一页。
+        if (!LocalManager().downloadingTasks.any((e) => !e.isPaused)) {
+          _ticker?.cancel();
+          _ticker = null;
+        }
+        setState(() {});
+      });
+    } else if (!hasRunning) {
+      _ticker?.cancel();
+      _ticker = null;
+    }
     setState(() {});
   }
 

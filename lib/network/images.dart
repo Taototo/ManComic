@@ -123,15 +123,25 @@ abstract class ImageDownloader {
     return stream.stream;
   }
 
+  /// [useCache] 为 false 时既不读也不写图片缓存。
+  ///
+  /// 下载任务要把图存进漫画目录，缓存那份纯属重复：一次下载写两遍盘、
+  /// 多一条缓存库记录。多任务并发时这些 IO 会把主线程挤爆。
   static Stream<ImageDownloadProgress> loadComicImageUnwrapped(
-      String imageKey, String? sourceKey, String cid, String eid) {
-    return _loadComicImage(imageKey, sourceKey, cid, eid);
+    String imageKey,
+    String? sourceKey,
+    String cid,
+    String eid, {
+    bool useCache = true,
+  }) {
+    return _loadComicImage(imageKey, sourceKey, cid, eid, useCache: useCache);
   }
 
   static Stream<ImageDownloadProgress> _loadComicImage(
-      String imageKey, String? sourceKey, String cid, String eid) async* {
+      String imageKey, String? sourceKey, String cid, String eid,
+      {bool useCache = true}) async* {
     final cacheKey = "$imageKey@$sourceKey@$cid@$eid";
-    final cache = await CacheManager().findCache(cacheKey);
+    final cache = useCache ? await CacheManager().findCache(cacheKey) : null;
 
     if (cache != null) {
       var data = await cache.readAsBytes();
@@ -142,6 +152,9 @@ abstract class ImageDownloader {
           totalBytes: data.length,
           imageBytes: data,
         );
+        // 缓存里就是完整的一张，不用再去网络拿一遍。以前这里会继续往
+        // 下走，同一张图下两次、写两遍。
+        return;
       }
     }
 
@@ -185,40 +198,38 @@ abstract class ImageDownloader {
         if (expectedBytes == -1) {
           expectedBytes = null;
         }
-        var buffer = <int>[];
+        // BytesBuilder 而不是 List<int> + addAll：一张 2MB 的图要收几百个
+        // chunk，逐个 add 到可增长 List 里是「每个字节搬进一个 int 槽」，
+        // 十几张并发时这部分能吃掉主线程相当一块时间。
+        var builder = BytesBuilder(copy: false);
+        var received = 0;
         await for (var data in stream) {
-          buffer.addAll(data);
+          builder.add(data);
+          received += data.length;
           yield ImageDownloadProgress(
-            currentBytes: buffer.length,
+            currentBytes: received,
             totalBytes: expectedBytes,
           );
         }
 
         _ensureCompleteBody(
-          buffer.length,
+          received,
           expectedBytes,
           '${configs['url'] ?? imageKey}',
         );
 
+        var data = builder.takeBytes();
         if (configs['onResponse'] is JSInvokable) {
-          dynamic result = (configs['onResponse'] as JSInvokable)([Uint8List.fromList(buffer)]);
+          dynamic result = (configs['onResponse'] as JSInvokable)([data]);
           if (result is Future) {
             result = await result;
           }
           if (result is List<int>) {
-            buffer = result;
+            data = result is Uint8List ? result : Uint8List.fromList(result);
           } else {
             throw "Error: Invalid onResponse result.";
           }
           (configs['onResponse'] as JSInvokable).free();
-        }
-
-        Uint8List data;
-        if (buffer is Uint8List) {
-          data = buffer;
-        } else {
-          data = Uint8List.fromList(buffer);
-          buffer.clear();
         }
 
         if (configs['modifyImage'] != null) {
@@ -229,7 +240,9 @@ abstract class ImageDownloader {
           data = newData;
         }
 
-        await CacheManager().writeCache(cacheKey, data);
+        if (useCache) {
+          await CacheManager().writeCache(cacheKey, data);
+        }
         yield ImageDownloadProgress(
           currentBytes: data.length,
           totalBytes: data.length,

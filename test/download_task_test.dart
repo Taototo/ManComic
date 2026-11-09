@@ -70,6 +70,100 @@ void main() {
       expect(_FakeTask().userPaused, isFalse);
     });
   });
+
+  group('进度快照', () {
+    test('只带小字段，能原样盖回去', () {
+      var task = _FakeTask()..userPaused = true;
+      var json = task.toProgressJson();
+      expect(json, {"userPaused": true});
+      var restored = _FakeTask();
+      restored.applyProgressJson(json);
+      expect(restored.userPaused, isTrue);
+    });
+
+    test('键按「类型 + id」区分，和列表顺序无关', () {
+      var task = _FakeTask();
+      expect(task.progressKey, "${ComicType.local.value}:");
+    });
+  });
+
+  group('恢复落点（以磁盘为准）', () {
+    test('什么都没下过：从第一章第一页开始', () {
+      var p = computeResumePoint(
+        pageCounts: [20, 20],
+        existingPages: [<int>[], <int>[]],
+      );
+      expect(p.chapter, 0);
+      expect(p.index, 0);
+      expect(p.downloaded, 0);
+      expect(p.total, 40);
+    });
+
+    test('前几页在磁盘上：跳过它们，别重下', () {
+      var p = computeResumePoint(
+        pageCounts: [20],
+        existingPages: [
+          [0, 1, 2, 3],
+        ],
+      );
+      expect(p.index, 4);
+      expect(p.downloaded, 4);
+    });
+
+    test('中间缺一页：落在那个洞上', () {
+      var p = computeResumePoint(
+        pageCounts: [20],
+        existingPages: [
+          [0, 1, 2, 4, 5],
+        ],
+      );
+      expect(p.index, 3);
+      expect(p.downloaded, 5);
+    });
+
+    test('第一章全下完：跳到第二章的缺页', () {
+      var p = computeResumePoint(
+        pageCounts: [10, 10],
+        existingPages: [
+          List.generate(10, (i) => i),
+          [0, 1],
+        ],
+      );
+      expect(p.chapter, 1);
+      expect(p.index, 2);
+      expect(p.downloaded, 12);
+    });
+
+    test('全部都在磁盘上：游标推到末尾，交给上层直接入库', () {
+      var p = computeResumePoint(
+        pageCounts: [3, 2],
+        existingPages: [
+          [0, 1, 2],
+          [0, 1],
+        ],
+      );
+      expect(p.chapter, 2);
+      expect(p.downloaded, 5);
+      expect(p.total, 5);
+    });
+
+    test('页码比列表长（文件残留）不会算进进度', () {
+      var p = computeResumePoint(
+        pageCounts: [3],
+        existingPages: [
+          [0, 1, 2, 9, 10],
+        ],
+      );
+      expect(p.downloaded, 3);
+      expect(p.chapter, 1);
+    });
+
+    test('空章节列表不会崩', () {
+      var p = computeResumePoint(pageCounts: [], existingPages: []);
+      expect(p.total, 0);
+      expect(p.downloaded, 0);
+    });
+  });
 }
 
 class _FakeTask extends DownloadTask {

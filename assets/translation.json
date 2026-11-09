@@ -872,7 +872,9 @@
     "Frosted": "磨砂",
     "Standard": "标准",
     "Premium": "高级",
-    "Premium adds real refraction with a heavier shader. Switch down if scrolling feels sluggish.": "高级档使用更重的着色器做真实折射，滚动卡顿时可以调低。"
+    "Premium adds real refraction with a heavier shader. Switch down if scrolling feels sluggish.": "高级档使用更重的着色器做真实折射，滚动卡顿时可以调低。",
+    "Background downloads": "后台继续下载",
+    "Keep downloading when the app goes to the background": "切到后台、锁屏后继续下载，通知栏显示进度"
   },
   "zh_TW": {
     "Concurrent downloads": "同時下載數量",
@@ -1747,6 +1749,8 @@
     "Frosted": "磨砂",
     "Standard": "標準",
     "Premium": "高級",
-    "Premium adds real refraction with a heavier shader. Switch down if scrolling feels sluggish.": "高級檔使用更重的著色器做真實折射，滾動卡頓時可以調低。"
+    "Premium adds real refraction with a heavier shader. Switch down if scrolling feels sluggish.": "高級檔使用更重的著色器做真實折射，滾動卡頓時可以調低。",
+    "Background downloads": "後台繼續下載",
+    "Keep downloading when the app goes to the background": "切到後台、鎖屏後繼續下載，通知欄顯示進度"
   }
 }

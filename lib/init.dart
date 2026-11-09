@@ -13,6 +13,7 @@ import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/notification_service.dart';
+import 'package:venera/utils/download_background.dart';
 import 'package:venera/foundation/startup_gate.dart';
 import 'package:venera/foundation/update_check_policy.dart';
 import 'package:venera/network/cookie_jar.dart';
@@ -46,6 +47,9 @@ class _LifecycleObserver with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     NotificationService.isForeground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
+      // 冷启动时前台服务可能因为「进程还没被当成前台」没挂上，回到前台
+      // 再试一次；已经在跑的（ticker 在转）这里什么也不会做。
+      DownloadBackground.instance.refresh();
       // 冷启动只查一次，可很多人根本不杀进程：App 一直躺在后台，切回来
       // 时 init() 不会重跑。少这一步，「启动时检查更新」就等于「开机时
       // 检查更新」，新版本发布后不手动点就永远发现不了。

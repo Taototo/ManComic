@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:isolate';
 
@@ -11,6 +12,7 @@ import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
+import 'package:venera/utils/download_background.dart';
 import 'package:venera/utils/io.dart';
 
 import 'app.dart';
@@ -286,6 +288,7 @@ class LocalManager with ChangeNotifier {
     _checkPathValidation();
     _checkNoMedia();
     await ComicSourceManager().ensureInit();
+    DownloadBackground.instance.summaryProvider = downloadSummary;
     restoreDownloadingTasks();
   }
 
@@ -365,6 +368,8 @@ class LocalManager with ChangeNotifier {
 
   @override
   void dispose() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
     super.dispose();
     _db.dispose();
   }
@@ -609,6 +614,10 @@ class LocalManager with ChangeNotifier {
       task.resume();
       running++;
     }
+    // 排队里的任务被拉起来也算状态变化：下载页的秒级刷新、前台服务的
+    // 通知都靠这个信号（单任务的 resume 只通知它自己的监听者）。
+    notifyListeners();
+    DownloadBackground.instance.refresh();
   }
 
   /// 暂停所有任务（含排队中的），并记住这是用户的意思。
@@ -620,8 +629,8 @@ class LocalManager with ChangeNotifier {
         task.userPaused = true;
       }
     }
-    notifyListeners();
-    saveCurrentDownloadingTasks();
+    _notifyTasksChanged();
+    saveCurrentDownloadingTasks(full: true);
   }
 
   /// 继续所有被暂停的任务，仍然受并发上限约束。
@@ -629,8 +638,8 @@ class LocalManager with ChangeNotifier {
     for (var task in downloadingTasks) {
       task.userPaused = false;
     }
-    notifyListeners();
-    saveCurrentDownloadingTasks();
+    _notifyTasksChanged();
+    saveCurrentDownloadingTasks(full: true);
     pumpQueue();
   }
 
@@ -656,15 +665,15 @@ class LocalManager with ChangeNotifier {
   void completeTask(DownloadTask task) {
     add(task.toLocalComic());
     downloadingTasks.remove(task);
-    notifyListeners();
-    saveCurrentDownloadingTasks();
+    _notifyTasksChanged();
+    saveCurrentDownloadingTasks(full: true);
     pumpQueue();
   }
 
   void removeTask(DownloadTask task) {
     downloadingTasks.remove(task);
-    notifyListeners();
-    saveCurrentDownloadingTasks();
+    _notifyTasksChanged();
+    saveCurrentDownloadingTasks(full: true);
     pumpQueue();
   }
 
@@ -677,20 +686,92 @@ class LocalManager with ChangeNotifier {
     }
     downloadingTasks.remove(task);
     downloadingTasks.insert(0, task);
-    notifyListeners();
-    saveCurrentDownloadingTasks();
+    _notifyTasksChanged();
+    saveCurrentDownloadingTasks(full: true);
     pumpQueue();
   }
 
-  Future<void> saveCurrentDownloadingTasks() async {
-    var tasks = downloadingTasks.map((e) => e.toJson()).toList();
-    await File(
-      FilePath.join(App.dataPath, 'downloading_tasks.json'),
-    ).writeAsString(jsonEncode(tasks));
+  Future<void> saveCurrentDownloadingTasks({bool full = false}) {
+    if (!full) {
+      _scheduleProgressFlush();
+      return _writeChain;
+    }
+    _progressTimer?.cancel();
+    _progressTimer = null;
+    return _enqueueWrite(() async {
+      await _writeJson(
+        File(FilePath.join(App.dataPath, _tasksFile)),
+        downloadingTasks.map((e) => e.toJson()).toList(),
+      );
+      await _writeProgressFile();
+    });
+  }
+
+  /// 立刻把进度写下去（跳过合并窗口）。
+  ///
+  /// 暂停这类「用户按了一下」的动作值得立刻落盘，但仍然只写小体积的进度
+  /// 文件：`pauseAll` 会逐个任务暂停，每个都写一遍整本地址表就太贵了。
+  Future<void> saveDownloadProgressNow() {
+    _progressTimer?.cancel();
+    _progressTimer = null;
+    return _enqueueWrite(_writeProgressFile);
+  }
+
+  /// 进度文件的合并窗口。
+  ///
+  /// 下载时每落一页都会来一次，一部中长篇一秒能落十几页；同步写盘等于把
+  /// 主线程按在地上摩擦。合并成一次，断电最多丢一秒多的进度——而进度本来
+  /// 也会在恢复时按磁盘重算，丢那点不影响什么。
+  static const _progressFlushDelay = Duration(milliseconds: 1200);
+
+  static const _tasksFile = 'downloading_tasks.json';
+
+  static const _progressFile = 'downloading_progress.json';
+
+  Timer? _progressTimer;
+
+  Future<void> _writeChain = Future.value();
+
+  void _scheduleProgressFlush() {
+    if (_progressTimer != null) {
+      return;
+    }
+    _progressTimer = Timer(_progressFlushDelay, () {
+      _progressTimer = null;
+      _enqueueWrite(_writeProgressFile);
+    });
+  }
+
+  Future<void> _writeProgressFile() async {
+    var map = <String, dynamic>{};
+    for (var task in downloadingTasks) {
+      map[task.progressKey] = task.toProgressJson();
+    }
+    await _writeJson(File(FilePath.join(App.dataPath, _progressFile)), map);
+  }
+
+  /// 排队串行写，避免两次写同时操作同一个临时文件。
+  Future<void> _enqueueWrite(Future<void> Function() task) {
+    var next = _writeChain.then((_) => task());
+    _writeChain = next.catchError((_) {});
+    return next;
+  }
+
+  /// 先写临时文件再 rename。rename 是原子的，进程在写的过程中被杀最多
+  /// 留下一个 .tmp，不会出现「主文件只剩半截 JSON」——那样下次启动会把
+  /// 整个任务列表当成损坏直接删掉，未下完的漫画全没了。
+  Future<void> _writeJson(File file, Object data) async {
+    try {
+      var tmp = File('${file.path}.tmp');
+      await tmp.writeAsString(jsonEncode(data), flush: true);
+      await tmp.rename(file.path);
+    } catch (e, s) {
+      Log.error("LocalManager", "Failed to write ${file.name}: $e", s);
+    }
   }
 
   void restoreDownloadingTasks() {
-    var file = File(FilePath.join(App.dataPath, 'downloading_tasks.json'));
+    var file = File(FilePath.join(App.dataPath, _tasksFile));
     if (file.existsSync()) {
       try {
         var tasks = jsonDecode(file.readAsStringSync());
@@ -705,18 +786,88 @@ class LocalManager with ChangeNotifier {
         Log.error("LocalManager", "Failed to restore downloading tasks: $e");
       }
     }
+    _applySavedProgress();
     // 上次没下完的接着下。用户之前手动暂停过的（userPaused）保持暂停，
     // 剩下的是「排到一半进程被杀」，属于断点续传该管的部分。
     pumpQueue();
+  }
+
+  /// 把进度文件盖回任务定义上。
+  ///
+  /// 定义文件只在结构变化时写（新任务、图片列表拉回来、暂停、取消），
+  /// 所以「下到第几页」这类高频变化都在这里。读不到不影响：磁盘扫描会
+  /// 在真正开始下之前把进度重算一遍。
+  void _applySavedProgress() {
+    var file = File(FilePath.join(App.dataPath, _progressFile));
+    if (!file.existsSync()) {
+      return;
+    }
+    try {
+      var map = jsonDecode(file.readAsStringSync());
+      if (map is! Map) {
+        return;
+      }
+      for (var task in downloadingTasks) {
+        var entry = map[task.progressKey];
+        if (entry is Map) {
+          task.applyProgressJson(Map<String, dynamic>.from(entry));
+        }
+      }
+    } catch (e) {
+      Log.error("LocalManager", "Failed to restore download progress: $e");
+    }
   }
 
   void addTask(DownloadTask task) {
     if (!downloadingTasks.contains(task)) {
       downloadingTasks.add(task);
     }
-    notifyListeners();
-    saveCurrentDownloadingTasks();
+    _notifyTasksChanged();
+    saveCurrentDownloadingTasks(full: true);
     pumpQueue();
+  }
+
+  /// 任务增删/启停之后统一走这里。
+  ///
+  /// 除了通知界面，还要让前台服务跟上：有任务在跑就把进程提到前台优先级，
+  /// 全停了就摘掉通知。逐页的进度变化不走这条（那频率下探前台服务会被
+  /// 系统限流），由前台服务自己的秒级 ticker 刷。
+  void _notifyTasksChanged() {
+    notifyListeners();
+    DownloadBackground.instance.refresh();
+  }
+
+  /// 前台服务要展示的汇总。
+  DownloadSummary downloadSummary() {
+    var running = 0;
+    var queued = 0;
+    var speed = 0;
+    var downloaded = 0;
+    var total = 0;
+    String? title;
+    for (var task in downloadingTasks) {
+      if (task.isError) {
+        continue;
+      }
+      if (task.isPaused) {
+        if (!task.userPaused) {
+          queued++;
+        }
+        continue;
+      }
+      running++;
+      speed += task.speed;
+      title ??= task.title;
+      downloaded += task.downloadedBytes;
+      total += task.totalBytes;
+    }
+    return DownloadSummary(
+      running: running,
+      queued: queued,
+      speed: speed,
+      progress: total > 0 ? (downloaded / total).clamp(0.0, 1.0) : 0,
+      title: title,
+    );
   }
 
   void deleteComic(LocalComic c, [bool removeFileOnDisk = true]) {
