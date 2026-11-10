@@ -10,6 +10,7 @@ import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/network/cache.dart';
 import 'package:venera/network/proxy.dart';
+import 'package:venera/network/reusable_client.dart';
 
 import '../foundation/app.dart';
 import 'cloudflare.dart';
@@ -306,10 +307,31 @@ class AppDio with DioMixin {
 }
 
 class RHttpAdapter implements HttpClientAdapter {
-  Future<rhttp.ClientSettings> get settings async {
-    var proxy = await getProxy();
+  /// 复用的 rhttp client。
+  ///
+  /// rhttp 的 `Rhttp.request(settings: ...)` 每调一次都会在 Rust 侧走
+  /// `RequestClient::new(settings)`，也就是新建一个 `reqwest::Client`。连接池
+  /// 和 TLS 会话缓存都挂在 client 上，所以那样写等于**每张图都重新做一次
+  /// TCP + TLS 握手**：一本 200 页的漫画就是 200 次握手，全部来自同一个出口
+  /// IP、同一个 TLS 指纹，CDN 的 WAF 会把它当异常流量，在握手阶段直接断连
+  /// （`tls handshake eof` / `RhttpConnectionException`）。复用同一个 client
+  /// 之后，同一个域名的几十页走同一条长连接，握手次数从「每页一次」降到
+  /// 「每个域名几次」。rhttp 自己的文档也写了：创建 client 很贵，应当复用。
+  static final _clients = ReusableClient<rhttp.RhttpClient>();
 
-    return rhttp.ClientSettings(
+  /// 当前配置 + 用来判断「配置有没有变」的指纹。
+  static Future<(rhttp.ClientSettings, String)> _buildSettings() async {
+    var proxy = await getProxy();
+    var overrides = _getOverrides();
+    var sni = appdata.settings['sni'] != false;
+    var verify = appdata.settings['ignoreBadCertificate'] != true;
+    var key = rhttpSettingsKey(
+      proxy: proxy,
+      sni: sni,
+      verifyCertificates: verify,
+      dnsOverrides: overrides,
+    );
+    var settings = rhttp.ClientSettings(
       proxySettings: proxy == null
           ? const rhttp.ProxySettings.noProxy()
           : rhttp.ProxySettings.proxy(proxy),
@@ -320,12 +342,13 @@ class RHttpAdapter implements HttpClientAdapter {
         keepAlivePing: Duration(seconds: 30),
       ),
       throwOnStatusCode: false,
-      dnsSettings: rhttp.DnsSettings.static(overrides: _getOverrides()),
+      dnsSettings: rhttp.DnsSettings.static(overrides: overrides),
       tlsSettings: rhttp.TlsSettings(
-        sni: appdata.settings['sni'] != false,
-        verifyCertificates: appdata.settings['ignoreBadCertificate'] != true,
+        sni: sni,
+        verifyCertificates: verify,
       ),
     );
+    return (settings, key);
   }
 
   static Map<String, List<String>> _getOverrides() {
@@ -358,10 +381,15 @@ class RHttpAdapter implements HttpClientAdapter {
       options.headers['User-Agent'] = "venera/v${App.version}";
     }
 
-    var res = await rhttp.Rhttp.request(
+    var (settings, key) = await _buildSettings();
+    var client = await _clients.acquire(
+      key,
+      () => rhttp.RhttpClient.create(settings: settings),
+    );
+
+    var res = await client.request(
       method: rhttp.HttpMethod(options.method),
       url: options.uri.toString(),
-      settings: await settings,
       expectBody: rhttp.HttpExpectBody.stream,
       body: requestStream == null ? null : rhttp.HttpBody.stream(requestStream),
       headers: rhttp.HttpHeaders.rawMap(

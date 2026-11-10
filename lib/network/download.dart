@@ -1,5 +1,6 @@
 import 'dart:async';
 import 'dart:isolate';
+import 'dart:math';
 
 import 'package:flutter/widgets.dart' show ChangeNotifier;
 import 'package:flutter_saf/flutter_saf.dart';
@@ -1251,7 +1252,25 @@ class _ImageDownloadWrapper {
 
   var completers = <Completer<_ImageDownloadWrapper>>[];
 
-  var retry = 3;
+  var retry = _maxRetry;
+
+  static final _random = Random();
+
+  /// 这一类错误不是「网络抖了一下」，而是对端明确不想跟你握手：
+  /// TLS 协商还没走完就被 RST/FIN（`tls handshake eof`）、连接被重置。
+  /// 常见于 CDN 的 WAF 按 IP 限流。按普通抖动的 0.4 秒重试，5 个并发会在
+  /// 同一个瞬间再撞一次，只会把冷却期拖得更长，所以这类错误单独给长退避。
+  static bool _looksLikeHandshakeReject(Object e) {
+    var text = e.toString().toLowerCase();
+    return text.contains('handshake') ||
+        text.contains('rhttpconnectionexception') ||
+        text.contains('connection reset') ||
+        text.contains('connection closed') ||
+        text.contains('connection aborted');
+  }
+
+  /// 多重试几次也无害：一页失败会拖住整章，重试成本远低于从头再过一遍。
+  static const _maxRetry = 4;
 
   /// 多久收不到下一个字节就算这一页「假死」。
   ///
@@ -1310,7 +1329,14 @@ class _ImageDownloadWrapper {
       if (retry > 0) {
         // 别立刻重来：多任务并发时瞬时重试会把请求量翻几倍，源站那边
         // 正好又限一次速，越重试越慢。退一步再问。
-        await Future.delayed(Duration(milliseconds: 400 * (4 - retry)));
+        //
+        // 握手被掐要退得更远：那不是抖动，是对端在限流。
+        var base = _looksLikeHandshakeReject(e)
+            ? 1500 * (_maxRetry - retry)
+            : 400 * (_maxRetry - retry);
+        // 加抖动，否则 5 个并发会在同一毫秒一起回头，再被一起掐。
+        base += (base * 0.4 * _random.nextDouble()).round();
+        await Future.delayed(Duration(milliseconds: base));
         if (isCancelled) {
           return;
         }
