@@ -69,20 +69,28 @@ class _ReaderImagesState extends State<_ReaderImages> {
         if (!mounted) {
           return;
         }
-        // 这一章只下了一部分时，把后面的页接到网络 URL 上，翻过去照样能看。
-        images = await _fillPendingPages(images);
-        if (!mounted) {
-          return;
-        }
-        setState(() {
-          reader.images = images;
-          reader.isLoading = false;
-          inProgress = false;
-          _handleJumpToLastPage();
-          Future.microtask(() {
-            reader.updateHistory();
+        if (images.isEmpty) {
+          // 记录说这章下好了，磁盘上却一张图都没有（取消下载、手工删了
+          // 文件夹留下的脏记录）。以前这里会把空列表当成「本地就这些」
+          // 直接收工，用户看到的是 0 页；现在退回网络读。getImages 已经
+          // 把那条记录摘掉了，下次进来就走正常路径。
+          await _loadFromNetwork();
+        } else {
+          // 这一章只下了一部分时，把后面的页接到网络 URL 上，翻过去照样能看。
+          images = await _fillPendingPages(images);
+          if (!mounted) {
+            return;
+          }
+          setState(() {
+            reader.images = images;
+            reader.isLoading = false;
+            inProgress = false;
+            _handleJumpToLastPage();
+            Future.microtask(() {
+              reader.updateHistory();
+            });
           });
-        });
+        }
       } catch (e) {
         setState(() {
           error = e.toString();
@@ -91,30 +99,38 @@ class _ReaderImagesState extends State<_ReaderImages> {
         });
       }
     } else {
-      var cp = reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1);
-      var res = await reader.type.comicSource!.loadComicPages!(
-        reader.widget.cid,
-        cp,
-      );
-      if (res.error) {
-        setState(() {
-          error = res.errorMessage;
-          reader.isLoading = false;
-          inProgress = false;
-        });
-      } else {
-        setState(() {
-          reader.images = res.data;
-          reader.isLoading = false;
-          inProgress = false;
-          _handleJumpToLastPage();
-          Future.microtask(() {
-            reader.updateHistory();
-          });
-        });
-      }
+      await _loadFromNetwork();
     }
     context.readerScaffold.update();
+  }
+
+  /// 直接从源站要这一章的图。
+  Future<void> _loadFromNetwork() async {
+    var cp = reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1);
+    var res = await reader.type.comicSource!.loadComicPages!(
+      reader.widget.cid,
+      cp,
+    );
+    if (!mounted) {
+      return;
+    }
+    if (res.error) {
+      setState(() {
+        error = res.errorMessage;
+        reader.isLoading = false;
+        inProgress = false;
+      });
+    } else {
+      setState(() {
+        reader.images = res.data;
+        reader.isLoading = false;
+        inProgress = false;
+        _handleJumpToLastPage();
+        Future.microtask(() {
+          reader.updateHistory();
+        });
+      });
+    }
   }
 
   /// 已经落盘的页走本地，还没下到的页接上网地址。

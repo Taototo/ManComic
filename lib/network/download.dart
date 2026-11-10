@@ -127,7 +127,13 @@ abstract class DownloadTask with ChangeNotifier {
   static String newTaskUid() =>
       "${DateTime.now().microsecondsSinceEpoch}_${_uidSeq++}";
 
-  LocalComic toLocalComic();
+  /// 转成入库用的本地记录。
+  ///
+  /// [verifyChapters] 为 true 时，`downloadedChapters` 按磁盘上真正有图的
+  /// 章节算，而不是「打算下哪些」。入库那一刻用它：地址表里列了、但一页都
+  /// 没落下来的章节（地址为空、重试始终失败后被跳过）如果不剔掉，记录就跟
+  /// 磁盘对不上，阅读器信任记录去读目录，直接 PathNotFoundException。
+  LocalComic toLocalComic({bool verifyChapters = false});
 
   String get id;
 
@@ -1053,7 +1059,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   bool get isPaused => !_isRunning;
 
   @override
-  LocalComic toLocalComic() {
+  LocalComic toLocalComic({bool verifyChapters = false}) {
     return LocalComic(
       id: comic!.id,
       title: title,
@@ -1065,9 +1071,42 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       chapters: comic!.chapters,
       cover: File(_cover!.split("file://").last).name,
       comicType: ComicType(source.key.hashCode),
-      downloadedChapters: chapters ?? comic?.chapters?.ids.toList() ?? [],
+      downloadedChapters: verifyChapters
+          ? _chaptersWithPagesOnDisk()
+          : (chapters ?? comic?.chapters?.ids.toList() ?? []),
       createdAt: DateTime.now(),
     );
+  }
+
+  /// 磁盘上真正有正文页的章节 id。
+  ///
+  /// 「打算下哪些」和「下到了哪些」不是一回事：地址表里列了不代表落盘了。
+  /// 只扫顶层一次 `listSync`，命中即停，不会为几百章各读一遍。
+  List<String> _chaptersWithPagesOnDisk() {
+    var all = comic?.chapters;
+    if (all == null) {
+      return [];
+    }
+    var result = <String>[];
+    for (var id in all.ids) {
+      // 跟阅读、对账同一套目录解析：id 优先、标题兜底。
+      var dir = LocalManager.resolveChapterDirectory(
+        path!,
+        id,
+        all.allChapters[id],
+      );
+      try {
+        if (!dir.existsSync()) {
+          continue;
+        }
+        if (dir.listSync().any((e) => e is File && isPageFileName(e.name))) {
+          result.add(id);
+        }
+      } catch (_) {
+        // 读不动的目录当作没有；宁可记录少一章，也不能记着却打不开。
+      }
+    }
+    return result;
   }
 
   @override
@@ -1622,7 +1661,7 @@ class ArchiveDownloadTask extends DownloadTask {
   }
 
   @override
-  LocalComic toLocalComic() {
+  LocalComic toLocalComic({bool verifyChapters = false}) {
     return LocalComic(
       id: comic.id,
       title: title,

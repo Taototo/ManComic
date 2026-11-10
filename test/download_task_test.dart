@@ -247,7 +247,8 @@ class _FakeTask extends DownloadTask {
   Map<String, dynamic> toJson() => {};
 
   @override
-  LocalComic toLocalComic() => throw UnimplementedError();
+  LocalComic toLocalComic({bool verifyChapters = false}) =>
+      throw UnimplementedError();
 
   @override
   String get id => '';

@@ -436,14 +436,48 @@ class LocalManager with ChangeNotifier {
     return null;
   }
 
+  /// 一章在磁盘上的目录。
+  ///
+  /// 优先按 **章节 id**（下载写目录、阅读找目录、对账扫目录都用它）。id
+  /// 找不到时再按**标题**找一次：源站换过章节 id 时，磁盘上还是老 id 的
+  /// 目录名；早期版本也有按标题建目录的。两边都找不到就把 id 那份返回，
+  /// 由调用方决定「当作没有」。
+  ///
+  /// 同步实现：`existsSync` 一次只有几微秒，而这条路径在阅读器首屏上，
+  /// 不值得为了异步再串一个 event loop 轮次。
+  static Directory resolveChapterDirectory(
+    String dirPath,
+    String chapterId,
+    String? title,
+  ) {
+    var byId = Directory(
+      FilePath.join(dirPath, getChapterDirectoryName(chapterId)),
+    );
+    if (byId.existsSync()) {
+      return byId;
+    }
+    if (title != null && title != chapterId) {
+      var byTitle = Directory(
+        FilePath.join(dirPath, getChapterDirectoryName(title)),
+      );
+      if (byTitle.existsSync()) {
+        return byTitle;
+      }
+    }
+    return byId;
+  }
+
   Future<Directory> _pageDirectory(String id, ComicType type, Object ep) async {
     var target = _localTarget(id, type) ?? (throw "Comic Not Found");
     var directory = Directory(target.baseDir);
     var chapters = target.chapters;
     if (chapters != null) {
       var cid = ep is int ? chapters.ids.elementAt(ep - 1) : (ep as String);
-      cid = getChapterDirectoryName(cid);
-      directory = Directory(FilePath.join(directory.path, cid));
+      return resolveChapterDirectory(
+        directory.path,
+        cid,
+        chapters.allChapters[cid],
+      );
     }
     return directory;
   }
@@ -451,6 +485,14 @@ class LocalManager with ChangeNotifier {
   Future<List<File>> _pageFiles(String id, ComicType type, Object ep) async {
     var directory = await _pageDirectory(id, type, ep);
     var files = <File>[];
+    if (!await directory.exists()) {
+      // 记录说这一章下好了，目录却不在：取消下载、手工删了文件夹、或者旧
+      // 版本的脏记录都会这样。以前这里直接 `list()`，PathNotFoundException
+      // 一路抛到阅读器，整章变成红字错误页（「取消后重新下载的漫画打不开」
+      // 就是这个）。现在返回空让调用方退回网络，顺手把这条记录清掉。
+      _forgetMissingChapter(id, type, ep);
+      return files;
+    }
     await for (var entity in directory.list()) {
       if (entity is File) {
         // Do not exclude comic.cover, since it may be the first page of the chapter.
@@ -471,6 +513,37 @@ class LocalManager with ChangeNotifier {
       }
     }
     return files;
+  }
+
+  /// 把「记录里有、磁盘上没有」的这一章从 [LocalComic.downloadedChapters]
+  /// 里摘掉。
+  ///
+  /// 只在读图时发现目录缺失才会走到，命中一次就修一次，用户不用自己去
+  /// 「清理失效」。整本一章不剩的情况不在这里处理：这里删记录会让正在读的
+  /// 页面立刻变成「没下载」，那是详情页该干的事。
+  void _forgetMissingChapter(String id, ComicType type, Object ep) {
+    var comic = find(id, type);
+    if (comic == null) {
+      return;
+    }
+    var chapters = comic.chapters;
+    if (chapters == null) {
+      return;
+    }
+    var cid = ep is int ? chapters.ids.elementAtOrNull(ep - 1) : ep.toString();
+    if (cid == null || !comic.downloadedChapters.contains(cid)) {
+      return;
+    }
+    var remaining = comic.downloadedChapters.where((e) => e != cid).toList();
+    try {
+      _db.execute(
+        'UPDATE comics SET downloadedChapters = ? WHERE id = ? AND comic_type = ?;',
+        [jsonEncode(remaining), id, type.value],
+      );
+      notifyListeners();
+    } catch (e) {
+      Log.error("LocalManager", "Failed to forget missing chapter $cid: $e");
+    }
   }
 
   /// 本地图片的 [File] 列表，按页码排好序。
@@ -878,7 +951,10 @@ class LocalManager with ChangeNotifier {
   }
 
   void completeTask(DownloadTask task) {
-    add(task.toLocalComic());
+    // 入库时按磁盘核对一遍「已下载章节」。不核对的话，记录会把「地址表里
+    // 有、实际一页都没下来」的章节也算成下好了，阅读器信记录去读目录，
+    // 直接 PathNotFoundException（取消后重新下载的漫画打不开就是这个）。
+    add(task.toLocalComic(verifyChapters: true));
     downloadingTasks.remove(task);
     _notifyTasksChanged();
     saveCurrentDownloadingTasks(full: true);
@@ -956,8 +1032,11 @@ class LocalManager with ChangeNotifier {
         }
       } else {
         for (var chapter in chapters) {
-          var chapterDir = Directory(
-            FilePath.join(dirPath, getChapterDirectoryName(chapter)),
+          var chapterDir = resolveChapterDirectory(
+            dirPath,
+            chapter,
+            local?.chapters?.allChapters[chapter] ??
+                task.comic?.chapters?.allChapters[chapter],
           );
           if (keep.contains(chapter)) {
             var pages = written[chapter];
@@ -1076,8 +1155,14 @@ class LocalManager with ChangeNotifier {
     }
     var stillDownloaded = <String>[];
     for (var entry in chapters.allChapters.entries) {
-      var chapterDir = Directory(
-        FilePath.join(dirPath, getChapterDirectoryName(entry.value)),
+      // 目录是按**章节 id** 建的（下载写目录、阅读找目录都用 id）。这里
+      // 以前拿 `entry.value` 也就是标题去拼，两边永远对不上：取消一次下载，
+      // 整本书的「已下载章节」就被清空。走 [resolveChapterDirectory] 是为了
+      // 兼容源站换过 id、磁盘上还是老目录名的书。
+      var chapterDir = resolveChapterDirectory(
+        dirPath,
+        entry.key,
+        entry.value,
       );
       if (await _hasPage(chapterDir)) {
         stillDownloaded.add(entry.key);
@@ -1424,8 +1509,11 @@ class LocalManager with ChangeNotifier {
     }
     var shouldRemovedDirs = <Directory>[];
     for (var chapter in chapters) {
-      var dir = Directory(
-        FilePath.join(c.baseDir, getChapterDirectoryName(chapter)),
+      // 和读图、对账用同一套解析：老目录可能是按标题建的，只认 id 会删不掉。
+      var dir = resolveChapterDirectory(
+        c.baseDir,
+        chapter,
+        c.chapters?.allChapters[chapter],
       );
       if (dir.existsSync()) {
         shouldRemovedDirs.add(dir);
