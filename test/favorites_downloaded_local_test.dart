@@ -8,7 +8,7 @@ import 'package:venera/utils/title_sort.dart';
 ///
 /// 背景：
 /// - 「失效」分类整体移除（连带「一键清理 / 重新检测」两个按钮和源体检联动）；
-/// - 新增自动归拢的「已下载」分类：收藏里凡是本地库有的书都挪进去；
+/// - 收藏页「本地」分类直接读本地库（1.4.56 起不再靠挪收藏）；
 /// - 本地列表补一个 A-Z 排序（按拼音首字母，不是 SQLite 的码位序）；
 /// - 首页顶栏去掉与标题重复的「文件夹」图标；
 /// - 存储管理回到 1.4.51（不再有「下载残留」那一项）。
@@ -48,37 +48,73 @@ void main() {
     });
   });
 
-  group('「已下载」自动分类', () {
-    test('内置表不进 folderNames，且有独立的 hash 映射', () {
+  group('「本地」分类是本地库的投影', () {
+    test('收藏表里不再留 __downloaded__ 这张镜像表', () {
       var favorites = read('lib/foundation/favorites.dart');
-      expect(favorites.contains("downloadedFolderName = '__downloaded__'"), isTrue);
-      expect(favorites.contains('_downloadedHashedIds'), isTrue);
-      // 「全部」的统计不能把它算进去（和已阅一致）
-      expect(favorites.contains('folders.remove(downloadedFolderName)'), isTrue);
+      // 1.4.55 那一版把收藏挪进这张表：既动了用户分类，又漏掉从没收藏过的
+      // 下载。1.4.56 改成直接读本地库，表连迁移一起清掉。
+      expect(favorites.contains("downloadedFolderName = '__downloaded__'"), isFalse);
+      expect(favorites.contains('_downloadedHashedIds'), isFalse);
+      expect(favorites.contains('moveDownloadedToLocalFolder'), isFalse);
+      expect(favorites.contains('_legacyDownloadedFolderName'), isTrue);
+      expect(favorites.contains('_dropLegacyDownloadedFolder();'), isTrue);
+      // 1.4.55 是把收藏「挪」进去的、没记来源，直接删表等于连根拔掉；
+      // 改名成普通分类留着，用户自己决定去留。
+      expect(
+        favorites.contains('alter table "\$_legacyDownloadedFolderName" rename to'),
+        isTrue,
+      );
     });
 
-    test('归拢只看本地库，不联网探活', () {
-      var favorites = read('lib/foundation/favorites.dart');
-      expect(favorites.contains('Future<int> moveDownloadedToLocalFolder()'), isTrue);
-      expect(favorites.contains('LocalManager().find(item.id, item.type)'), isTrue);
-      // 一本漫画只属于一个分类：挪进来要顺手从原分类删掉
-      expect(favorites.contains('delete from "\$folder"'), isTrue);
-    });
-
-    test('启动跑一遍，下载完成入库再补一遍', () {
-      var init = read('lib/init.dart');
-      expect(init.contains('moveDownloadedToLocalFolder'), isTrue);
-      var local = read('lib/foundation/local.dart');
-      expect(local.contains('onComicAdded?.call(comic)'), isTrue);
-    });
-
-    test('侧栏有入口、页面有哨兵名和空态', () {
-      var sideBar = read('lib/pages/favorites/side_bar.dart');
-      expect(sideBar.contains('_localDownloadedFolderLabel'), isTrue);
-      expect(sideBar.contains('downloadedCount()'), isTrue);
+    test('列表内容来自本地库，不是收藏夹', () {
       var page = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(page.contains('const _localDownloadedFolderLabel'), isTrue);
-      expect(page.contains('No downloaded comics'), isTrue);
+      expect(page.contains('comics = localLibraryItems();'), isTrue);
+      expect(page.contains('LocalManager().getComics('), isTrue);
+      // 封面直接指向磁盘文件：本地书不该为了封面再发一次网络请求
+      expect(page.contains('file://\${comic.coverFile.path}'), isTrue);
+      // 下载完一本、删掉一本都要跟着刷新
+      expect(page.contains('LocalManager().addListener(updateComics)'), isTrue);
+    });
+
+    test('点封面进本地详情页，删除删的是本地文件', () {
+      var page = read('lib/pages/favorites/local_favorites_page.dart');
+      expect(
+        page.contains('LocalComicPage.open(ctx, local, heroID: heroID)'),
+        isTrue,
+      );
+      expect(page.contains('LocalManager().batchDeleteComics(localComics)'), isTrue);
+      // 已经在磁盘上的书，「下载」「移动到分类」都只会落空
+      expect(page.contains("favoriteOption('moveFromDownloaded')"), isFalse);
+    });
+
+    test('侧栏数量问本地库，名字叫「本地漫画」', () {
+      var sideBar = read('lib/pages/favorites/side_bar.dart');
+      expect(sideBar.contains('localLibraryCount()'), isTrue);
+      expect(sideBar.contains('LocalManager().length'), isTrue);
+      expect(sideBar.contains('"Local comics".tl'), isTrue);
+      var local = read('lib/foundation/local.dart');
+      // 每帧都要显示，只走 count(*)，不把整库读出来
+      expect(local.contains('SELECT count(*) FROM comics'), isTrue);
+    });
+  });
+
+  group('最近阅读指向本地漫画', () {
+    test('阅读器先查本地库，命中就不再向源站要目录', () {
+      var loading = read('lib/pages/reader/loading.dart');
+      expect(loading.contains('_findLocalComic'), isTrue);
+      final localLookup = loading.indexOf('var localComic = _findLocalComic(type);');
+      final networkFetch = loading.indexOf('await comicSource.loadComicInfo');
+      expect(localLookup, greaterThan(0));
+      // 本地优先：顺序反了就等于还是先联网
+      expect(localLookup, lessThan(networkFetch));
+    });
+
+    test('历史页点封面：本地有这本就进本地详情页', () {
+      var history = read('lib/pages/history_page.dart');
+      expect(history.contains('_localComicOf'), isTrue);
+      expect(history.contains('LocalComicPage.open'), isTrue);
+      // 没下过的书才回落到源站详情页
+      expect(history.contains('ComicPage('), isTrue);
     });
   });
 

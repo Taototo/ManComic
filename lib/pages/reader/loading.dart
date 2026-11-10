@@ -41,56 +41,58 @@ class _ReaderWithLoadingState
 
   @override
   Future<Res<ReaderProps>> loadData() async {
-    var comicSource = ComicSource.find(widget.sourceKey);
-    var history = HistoryManager().find(
-      widget.id,
-      ComicType.fromKey(widget.sourceKey),
-    );
-    if (comicSource == null) {
-      var localComic = LocalManager().find(
-        widget.id,
-        ComicType.fromKey(widget.sourceKey),
-      );
-      if (localComic == null) {
-        return Res.error("comic not found");
-      }
+    final type = ComicType.fromKey(widget.sourceKey);
+    var history = HistoryManager().find(widget.id, type);
+    // 下载到本地的书直接从磁盘读：章节表用下载那一刻的快照，图由 images.dart
+    // 按章走本地目录（缺页再回落到网络）。这样「继续阅读 / 最近阅读」不用先
+    // 请求一次源站拿目录，断网也进得去——而这正是用户点「最近阅读」的期望。
+    var localComic = _findLocalComic(type);
+    if (localComic != null) {
       return Res(
         ReaderProps(
-          type: ComicType.fromKey(widget.sourceKey),
+          type: type,
           cid: widget.id,
           name: localComic.title,
           chapters: localComic.chapters,
-          history: history ??
-              History.fromModel(
-                model: localComic,
-                ep: 0,
-                page: 0,
-              ),
+          history:
+              history ??
+              History.fromModel(model: localComic, ep: 0, page: 0),
           author: localComic.subtitle,
           tags: localComic.tags,
         ),
       );
-    } else {
-      var comic = await comicSource.loadComicInfo!(widget.id);
-      if (comic.error) {
-        return Res.fromErrorRes(comic);
-      }
-      return Res(
-        ReaderProps(
-          type: ComicType.fromKey(widget.sourceKey),
-          cid: widget.id,
-          name: comic.data.title,
-          chapters: comic.data.chapters,
-          history: history ??
-              History.fromModel(
-                model: comic.data,
-                ep: 0,
-                page: 0,
-              ),
-          author: comic.data.findAuthor() ?? "",
-          tags: comic.data.plainTags,
-        ),
-      );
+    }
+    var comicSource = ComicSource.find(widget.sourceKey);
+    if (comicSource == null) {
+      return Res.error("comic not found");
+    }
+    var comic = await comicSource.loadComicInfo!(widget.id);
+    if (comic.error) {
+      return Res.fromErrorRes(comic);
+    }
+    return Res(
+      ReaderProps(
+        type: type,
+        cid: widget.id,
+        name: comic.data.title,
+        chapters: comic.data.chapters,
+        history:
+            history ??
+            History.fromModel(model: comic.data, ep: 0, page: 0),
+        author: comic.data.findAuthor() ?? "",
+        tags: comic.data.plainTags,
+      ),
+    );
+  }
+
+  /// 本地库里有没有这本（`local` 类型的老记录也走这条路）。
+  /// 库还没初始化好时按「没有」处理，别让阅读页因为查库失败而打不开。
+  LocalComic? _findLocalComic(ComicType type) {
+    try {
+      return LocalManager().find(widget.id, type);
+    } catch (e, s) {
+      Log.error("Reader", "Failed to look up local comic: $e\n$s");
+      return null;
     }
   }
 }

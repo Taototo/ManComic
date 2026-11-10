@@ -915,7 +915,9 @@
     "Waiting for network": "等待网络",
     "@n retrying": "@n 个等待重试",
     "Downloaded": "已下载",
-    "No downloaded comics": "没有已下载的漫画"
+    "No downloaded comics": "没有已下载的漫画",
+    "No local comics": "本地还没有漫画",
+    "Delete @c local comics and files?": "删除 @c 本本地漫画及文件？"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1833,6 +1835,8 @@
     "Waiting for network": "等待網路",
     "@n retrying": "@n 個等待重試",
     "Downloaded": "已下載",
-    "No downloaded comics": "沒有已下載的漫畫"
+    "No downloaded comics": "沒有已下載的漫畫",
+    "No local comics": "本機還沒有漫畫",
+    "Delete @c local comics and files?": "刪除 @c 本本機漫畫及檔案？"
   }
 }

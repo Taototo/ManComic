@@ -217,6 +217,16 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
     );
   }
 
+  /// 本地库里的漫画数。「本地」分类是本地库的投影，不是收藏夹表，
+  /// 所以数量只能从这边取。库还没初始化好（启动早期 / 测试环境）时算 0。
+  int localLibraryCount() {
+    try {
+      return LocalManager().length;
+    } catch (_) {
+      return 0;
+    }
+  }
+
   Widget buildLocalFolder(String name, {bool withTopGap = false}) {
     bool isSelected = name == favPage.folder && !favPage.isNetwork;
     int count = 0;
@@ -225,14 +235,15 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
     } else if (name == _localReadFolderLabel) {
       count = LocalFavoritesManager().readCount();
     } else if (name == _localDownloadedFolderLabel) {
-      count = LocalFavoritesManager().downloadedCount();
+      // 它不是收藏夹，数量直接问本地库（下载完一本就变，不用等收藏表刷新）。
+      count = localLibraryCount();
     } else {
       count = LocalFavoritesManager().folderComics(name);
     }
     var folderName = switch (name) {
       _localAllFolderLabel => "All".tl,
       _localReadFolderLabel => "Finished Reading".tl,
-      _localDownloadedFolderLabel => "Downloaded".tl,
+      _localDownloadedFolderLabel => "Local comics".tl,
       _ => getFavoriteDataOrNull(name)?.title ?? name,
     };
     bool isAll = name == _localAllFolderLabel;

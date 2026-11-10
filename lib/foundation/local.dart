@@ -183,13 +183,6 @@ class LocalManager with ChangeNotifier {
   /// path to the directory where all the comics are stored
   late String path;
 
-  /// 新漫画入库后的回调。
-  ///
-  /// 收藏侧挂这个钩子把「已经下载到本地」的书归拢到「已下载」分类。做成回调
-  /// 而不是让 local.dart 直接依赖 favorites.dart：两边已经互相 import 了
-  /// （收藏要查本地库），再加一条静态调用就绕成环，测试里也不好替换。
-  void Function(LocalComic comic)? onComicAdded;
-
   Directory get directory => Directory(path);
 
   void _checkNoMedia() {
@@ -337,7 +330,6 @@ class LocalManager with ChangeNotifier {
       ],
     );
     notifyListeners();
-    onComicAdded?.call(comic);
   }
 
   void remove(String id, ComicType comicType) async {
@@ -351,6 +343,14 @@ class LocalManager with ChangeNotifier {
   void removeComic(LocalComic comic) {
     remove(comic.id, comic.comicType);
     notifyListeners();
+  }
+
+  /// 本地库里的漫画数量。
+  ///
+  /// 侧栏「本地」分类每帧都要显示它，所以只走 `count(*)`，不把整库读出来。
+  int get length {
+    var res = _db.select('SELECT count(*) FROM comics;');
+    return res.first[0] as int;
   }
 
   List<LocalComic> getComics(LocalSortType sortType) {

@@ -9,7 +9,6 @@ import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/display_refresh.dart';
-import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
@@ -110,7 +109,6 @@ Future<void> init() async {
   }
   CacheManager().setLimitSize(appdata.settings['cacheSize']);
   _checkOldConfigs();
-  _setupDownloadedFavoritesLink();
   if (App.isAndroid) {
     handleLinks();
     handleTextShare();
@@ -140,38 +138,6 @@ Future<void> init() async {
       methodChannel.invokeMethod("heartBeat");
     });
   }
-}
-
-/// 已下载的收藏自动归拢到「已下载」分类。
-///
-/// 收藏里的书只要本地库里有一本（下载完成才入库），就该出现在「已下载」里，
-/// 而不是散在各个自建分类中。两个时机：
-///
-/// 1. 启动后跑一遍——装上这个版本时，历史收藏已经躺在那儿了；
-/// 2. 每次下载完成入库时跑一遍（`LocalManager.onComicAdded`）——用户刚下完
-///    就切到收藏页，不该等下次重启才发现。
-///
-/// 只挪不删，也不联网：判定就是「本地库有没有这本书」。挪动本身很便宜（只
-/// 扫收藏表），但没有下载发生时一次库都不碰。
-void _setupDownloadedFavoritesLink() {
-  LocalManager().onComicAdded = (_) {
-    unawaited(
-      LocalFavoritesManager().moveDownloadedToLocalFolder().catchError((e, s) {
-        Log.error("Favorites", "Failed to move downloaded favorites: $e");
-        return 0;
-      }),
-    );
-  };
-  unawaited(() async {
-    try {
-      final moved = await LocalFavoritesManager().moveDownloadedToLocalFolder();
-      if (moved > 0) {
-        Log.info("Favorites", "Moved $moved comics to Downloaded");
-      }
-    } catch (e, s) {
-      Log.error("Favorites", "Failed to move downloaded favorites: $e\n$s");
-    }
-  }());
 }
 
 void _checkOldConfigs() {  if (appdata.settings['searchSources'] == null) {

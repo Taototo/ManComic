@@ -6,10 +6,14 @@ const _localAllFolderLabel = '^_^[%local_all%]^_^';
 /// [LocalFavoritesManager.readFolderName] 表。
 const _localReadFolderLabel = '^_^[%local_read%]^_^';
 
-/// 「已下载」虚拟文件夹的指代名，实际存储用
-/// [LocalFavoritesManager.downloadedFolderName] 表。
+/// 「本地」虚拟文件夹的指代名。
 ///
-/// 它是个自动分类：收藏里凡是本地库已经有的书，启动时都会被挪进来。
+/// 它不是一张收藏夹表，而是**本地库的投影**：库里有几本就显示几本，包括
+/// 从来没收藏过的书。所以既不用迁移数据，也不会出现「挪走的收藏回不来、
+/// 新下的书又进不去」这种不同步。
+///
+/// 哨兵名沿用 1.4.55 的取值：它被写进了 implicitData（上次选中的分类），
+/// 改字符串等于让老用户升级后回落到「未选择」。
 const _localDownloadedFolderLabel = '^_^[%local_downloaded%]^_^';
 
 /// If the number of comics in a folder exceeds this limit, it will be
@@ -58,11 +62,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   bool get isNormalFolder =>
       !isAllFolder && !isReadFolder && !isDownloadedFolder;
 
-  /// 当前页面对应的真实表名。「已阅」「已下载」用的是内置表，不能拿
-  /// widget.folder（那是 UI 哨兵名）去当表名查。
+  /// 当前页面对应的真实表名。「已阅」用的是内置表，不能拿 widget.folder
+  /// （那是 UI 哨兵名）去当表名查。「本地」没有表，它读的是本地库，凡是
+  /// 需要表名的收藏操作都得先判 [isDownloadedFolder] 绕开。
   String get localTable {
     if (isReadFolder) return LocalFavoritesManager.readFolderName;
-    if (isDownloadedFolder) return LocalFavoritesManager.downloadedFolderName;
     return widget.folder;
   }
 
@@ -108,9 +112,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     if (isReadFolder) {
       comics = manager.getFolderComics(LocalFavoritesManager.readFolderName);
     } else if (isDownloadedFolder) {
-      comics = manager.getFolderComics(
-        LocalFavoritesManager.downloadedFolderName,
-      );
+      comics = localLibraryItems();
     } else if (isAllFolder) {
       var totalComics = manager.totalComics;
       if (totalComics < _asyncDataFetchLimit) {
@@ -149,6 +151,35 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       }
     }
     setState(() {});
+  }
+
+  /// 本地库的投影：把 [LocalComic] 包成 [FavoriteItem]，好让这页现成的
+  /// 网格、搜索、筛选、多选原样复用。
+  ///
+  /// 封面直接给 `file://` 绝对路径——[comic.coverFile] 就在磁盘上，走这条路
+  /// 不用发网络请求（CachedImageProvider 对 file:// 是直接读文件）。
+  List<FavoriteItem> localLibraryItems() {
+    List<LocalComic> all;
+    try {
+      all = LocalManager().getComics(LocalSortType.timeDesc);
+    } catch (e, s) {
+      // 本地库还没初始化好（启动早期 / 测试环境）时当空库处理。
+      Log.error("Favorites", "Failed to read local library: $e\n$s");
+      return [];
+    }
+    return all
+        .map(
+          (comic) => FavoriteItem(
+            id: comic.id,
+            name: comic.title,
+            author: comic.subtitle,
+            type: comic.comicType,
+            tags: comic.tags,
+            coverPath: "file://${comic.coverFile.path}",
+            favoriteTime: comic.createdAt,
+          ),
+        )
+        .toList();
   }
 
   List<FavoriteItem> filterComics(List<FavoriteItem> curComics) {
@@ -235,7 +266,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     sortSelect =
         appdata.implicitData["local_favorites_sort"] ?? titleSortDefault;
     favPage = context.findAncestorStateOfType<_FavoritesPageState>()!;
-    if (!isAllFolder) {
+    if (isNormalFolder) {
       var (a, b) = LocalFavoritesManager().findLinked(widget.folder);
       networkSource = a;
       networkFolder = b;
@@ -246,6 +277,10 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     comics = [];
     updateComics();
     LocalFavoritesManager().addListener(updateComics);
+    if (isDownloadedFolder) {
+      // 「本地」分类读的是本地库，下完一本 / 删掉一本都得跟着刷新。
+      LocalManager().addListener(updateComics);
+    }
     super.initState();
   }
 
@@ -253,6 +288,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   void dispose() {
     super.dispose();
     LocalFavoritesManager().removeListener(updateComics);
+    if (isDownloadedFolder) {
+      LocalManager().removeListener(updateComics);
+    }
   }
 
   void selectAll() {
@@ -567,7 +605,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     } else if (title == _localReadFolderLabel) {
       title = "Finished Reading".tl;
     } else if (title == _localDownloadedFolderLabel) {
-      title = "Downloaded".tl;
+      title = "Local comics".tl;
     }
 
     Widget body = SmoothCustomScrollView(
@@ -677,13 +715,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       text: "Move to folder".tl,
                       onClick: () => favoriteOption('moveFromRead'),
                     ),
-                  // 「已下载」里的书想放回自建分类，也要给个出口。
-                  if (isDownloadedFolder)
-                    MenuEntry(
-                      icon: Icons.drive_file_move,
-                      text: "Move to folder".tl,
-                      onClick: () => favoriteOption('moveFromDownloaded'),
-                    ),
                   if (isNormalFolder)
                     MenuEntry(
                       icon: Icons.drive_file_move,
@@ -705,11 +736,13 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     text: "Invert Selection".tl,
                     onClick: invertSelection,
                   ),
-                  MenuEntry(
-                    icon: Icons.download,
-                    text: "Download".tl,
-                    onClick: downloadSelected,
-                  ),
+                  // 「本地」里的书已经在磁盘上了，再点「下载」只会全部落空。
+                  if (!isDownloadedFolder)
+                    MenuEntry(
+                      icon: Icons.download,
+                      text: "Download".tl,
+                      onClick: downloadSelected,
+                    ),
                   // 删除是危险操作，固定放在菜单最后。
                   // 内置分类里也要能删：失效里全是打不开的书，删掉才是主要
                   // 出路；已阅同理。
@@ -723,9 +756,13 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                         showConfirmDialog(
                           context: context,
                           title: "Delete".tl,
-                          content: "Delete @c comics?".tlParams({
-                            "c": selectedComics.length,
-                          }),
+                          content: isDownloadedFolder
+                              ? "Delete @c local comics and files?".tlParams({
+                                  "c": selectedComics.length,
+                                })
+                              : "Delete @c comics?".tlParams({
+                                  "c": selectedComics.length,
+                                }),
                           btnColor: context.colorScheme.error,
                           onConfirm: () {
                             _deleteComicWithId();
@@ -790,7 +827,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   ),
                   const SizedBox(height: 12),
                   Text(
-                    "No downloaded comics".tl,
+                    "No local comics".tl,
                     style: ts.s14.withColor(
                       context.colorScheme.onSurfaceVariant,
                     ),
@@ -829,14 +866,15 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       );
                     },
                   ),
-                MenuEntry(
-                  icon: Icons.download,
-                  text: "Download".tl,
-                  onClick: () {
-                    downloadComic(c as FavoriteItem);
-                    context.showMessage(message: "Download started".tl);
-                  },
-                ),
+                if (!isDownloadedFolder)
+                  MenuEntry(
+                    icon: Icons.download,
+                    text: "Download".tl,
+                    onClick: () {
+                      downloadComic(c as FavoriteItem);
+                      context.showMessage(message: "Download started".tl);
+                    },
+                  ),
                 MenuEntry(
                   icon: Icons.check,
                   text: "Select".tl,
@@ -882,15 +920,14 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   ),
                 if (isDownloadedFolder)
                   MenuEntry(
-                    icon: Icons.drive_file_move,
-                    text: "Move to folder".tl,
+                    icon: Icons.folder_open,
+                    text: "Open Folder".tl,
                     onClick: () {
-                      setState(() {
-                        selectedComics.clear();
-                        selectedComics[c as FavoriteItem] = true;
-                        multiSelectMode = true;
-                      });
-                      favoriteOption('moveFromDownloaded');
+                      var comic = c as FavoriteItem;
+                      var local = LocalManager().find(comic.id, comic.type);
+                      if (local != null) {
+                        openComicFolder(local);
+                      }
                     },
                   ),
                 if (!isAllFolder)
@@ -900,10 +937,29 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     color: context.colorScheme.error,
                     isDanger: true,
                     onClick: () {
+                      var comic = c as FavoriteItem;
+                      if (isDownloadedFolder) {
+                        var local = LocalManager().find(comic.id, comic.type);
+                        if (local == null) {
+                          return;
+                        }
+                        showConfirmDialog(
+                          context: context,
+                          title: "Delete".tl,
+                          content: "Delete @c local comics and files?"
+                              .tlParams({"c": 1}),
+                          btnColor: context.colorScheme.error,
+                          onConfirm: () {
+                            LocalManager().batchDeleteComics([local]);
+                            updateComics();
+                          },
+                        );
+                        return;
+                      }
                       LocalFavoritesManager().deleteComicWithId(
                         localTable,
-                        c.id,
-                        (c as FavoriteItem).type,
+                        comic.id,
+                        comic.type,
                       );
                     },
                   ),
@@ -921,6 +977,23 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   lastSelectedIndex = comics.indexOf(c);
                 });
               } else if (appdata.settings["onClickFavorite"] == "viewDetail") {
+                // 「本地」分类里的书进本地详情页：章节就是磁盘上的文件，能
+                // 直接读、能打开文件夹、能导出。在线详情页那一套（下载 /
+                // 点赞 / 评论 / 换源）对手机里的书不成立。
+                //
+                // 其余分类维持原样：收藏的是「源站上的那本书」，详情仍然去
+                // 源上看（新章节、评论都在那边）。只有确实下到本地的，才有
+                // 资格走本地页。
+                final local = isDownloadedFolder
+                    ? LocalManager().find(c.id, (c as FavoriteItem).type)
+                    : null;
+                if (local != null) {
+                  final ctx = App.mainNavigatorKey?.currentContext;
+                  if (ctx != null) {
+                    LocalComicPage.open(ctx, local, heroID: heroID);
+                  }
+                  return;
+                }
                 App.mainNavigatorKey?.currentContext?.to(
                   () => ComicPage(
                     id: c.id,
@@ -931,6 +1004,8 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   ),
                 );
               } else {
+                // 阅读走 ReaderWithLoading，那边本来就是本地优先（下载过的
+                // 章节直接读磁盘），所以这里不用再分叉。
                 App.mainNavigatorKey?.currentContext?.to(
                   () => ReaderWithLoading(id: c.id, sourceKey: c.sourceKey),
                 );
@@ -1001,9 +1076,7 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
           return PopUpWidgetScaffold(
             title: isReadFolder
                 ? "Finished Reading".tl
-                : isDownloadedFolder
-                    ? "Downloaded".tl
-                    : favPage.folder ?? "Unselected".tl,
+                : favPage.folder ?? "Unselected".tl,
             body: Padding(
               padding: EdgeInsets.only(bottom: context.padding.bottom + 16),
               child: Container(
@@ -1108,20 +1181,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                                 LocalFavoritesManager().moveFromRead(f, comic);
                               }
                             }
-                          } else if (option == 'moveFromDownloaded') {
-                            var comics = selectedComics.keys
-                                .map((e) => e as FavoriteItem)
-                                .toList();
-                            for (var f in selectedLocalFolders) {
-                              for (var comic in comics) {
-                                LocalFavoritesManager().moveFavorite(
-                                  LocalFavoritesManager.downloadedFolderName,
-                                  f,
-                                  comic.id,
-                                  comic.type,
-                                );
-                              }
-                            }
                           }
                           App.rootContext.pop();
                           updateComics();
@@ -1156,11 +1215,33 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   }
 
   void _deleteComicWithId() {
+    if (isDownloadedFolder) {
+      _deleteLocalComics();
+      return;
+    }
     var toBeDeleted = selectedComics.keys
         .map((e) => e as FavoriteItem)
         .toList();
     LocalFavoritesManager().batchDeleteComics(localTable, toBeDeleted);
     _cancel();
+  }
+
+  /// 「本地」分类里的删除 = 删本地库（连磁盘文件一起）。
+  ///
+  /// 这个分类就是本地库本身，把条目藏起来却留着文件，只会变成用户看不见的
+  /// 占用。真要保留文件可以去存储管理里清。
+  void _deleteLocalComics() {
+    var localComics = selectedComics.keys
+        .map((e) => e as FavoriteItem)
+        .map((e) => LocalManager().find(e.id, e.type))
+        .whereType<LocalComic>()
+        .toList();
+    _cancel();
+    if (localComics.isEmpty) {
+      return;
+    }
+    LocalManager().batchDeleteComics(localComics);
+    updateComics();
   }
 }
 

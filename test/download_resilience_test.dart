@@ -92,18 +92,13 @@ void main() {
     });
   });
 
-  group('收藏按「有没有下载」自动分批', () {
-    test('本地库里有的书会被挪进「已下载」分类', () {
+  group('收藏页「本地」分类', () {
+    test('内容来自本地库，跟收藏夹无关', () {
+      var page = read('lib/pages/favorites/local_favorites_page.dart');
+      expect(page.contains('comics = localLibraryItems();'), isTrue);
+      // 以前靠「把收藏挪进 __downloaded__」实现，既动分类又漏掉没收藏的下载
       var favorites = read('lib/foundation/favorites.dart');
-      expect(favorites.contains('moveDownloadedToLocalFolder'), isTrue);
-      expect(favorites.contains('downloadedFolderName'), isTrue);
-      // 判定只看本地库，不联网探活（几百条收藏逐个请求既慢又容易吃风控）
-      expect(favorites.contains('LocalManager().find('), isTrue);
-      // 下载完成入库时补一刀，不用等下次重启
-      var local = read('lib/foundation/local.dart');
-      expect(local.contains('onComicAdded'), isTrue);
-      var init = read('lib/init.dart');
-      expect(init.contains('moveDownloadedToLocalFolder'), isTrue);
+      expect(favorites.contains('moveDownloadedToLocalFolder'), isFalse);
     });
 
     test('「失效」分类连同判定一起移除了', () {

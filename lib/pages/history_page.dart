@@ -4,6 +4,10 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
 import 'package:venera/foundation/history.dart';
+import 'package:venera/foundation/local.dart';
+import 'package:venera/foundation/log.dart';
+import 'package:venera/pages/comic_details_page/comic_page.dart';
+import 'package:venera/pages/local_comic_page.dart';
 import 'package:venera/utils/translations.dart';
 
 class HistoryPage extends StatefulWidget {
@@ -274,20 +278,38 @@ class _HistoryPageState extends State<HistoryPage> {
               comics: comics,
               selections: selectedComics,
               onLongPressed: null,
-              onTap: multiSelectMode
-                  ? (c, heroID) {
-                      setState(() {
-                        if (selectedComics.containsKey(c as History)) {
-                          selectedComics.remove(c);
-                        } else {
-                          selectedComics[c] = true;
-                        }
-                        if (selectedComics.isEmpty) {
-                          multiSelectMode = false;
-                        }
-                      });
+              onTap: (c, heroID) {
+                final history = c as History;
+                if (multiSelectMode) {
+                  setState(() {
+                    if (selectedComics.containsKey(history)) {
+                      selectedComics.remove(history);
+                    } else {
+                      selectedComics[history] = true;
                     }
-                  : null,
+                    if (selectedComics.isEmpty) {
+                      multiSelectMode = false;
+                    }
+                  });
+                  return;
+                }
+                // 已经下到本地的书直接进本地详情页。以前一律跳源站详情页，
+                // 明明内容就在手机上，却还要联网、还要等源站响应。
+                final local = _localComicOf(history);
+                if (local != null) {
+                  LocalComicPage.open(context, local, heroID: heroID);
+                  return;
+                }
+                context.to(
+                  () => ComicPage(
+                    id: history.id,
+                    sourceKey: history.sourceKey,
+                    cover: history.cover,
+                    title: history.title,
+                    heroID: heroID,
+                  ),
+                );
+              },
               badgeBuilder: (c) {
                 return ComicSource.find(c.sourceKey)?.name;
               },
@@ -315,6 +337,16 @@ class _HistoryPageState extends State<HistoryPage> {
         ),
       ),
     );
+  }
+
+  /// 这条历史对应的本地漫画（没有下载过就是 null）。
+  LocalComic? _localComicOf(History h) {
+    try {
+      return LocalManager().find(h.id, h.type);
+    } catch (e, s) {
+      Log.error("History", "Failed to look up local comic: $e\n$s");
+      return null;
+    }
   }
 
   String getDescription(History h) {

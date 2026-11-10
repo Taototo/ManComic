@@ -20,6 +20,9 @@ import 'package:venera/foundation/res.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
+import 'package:venera/pages/local_comic_page.dart' show LocalComicPage;
+// openComicFolder 定义在本地列表页里（它管着 Android 的 FileProvider 回退链）
+import 'package:venera/pages/local_comics_page.dart' show openComicFolder;
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/pages/smart_shelf_page.dart';
