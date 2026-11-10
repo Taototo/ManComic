@@ -166,5 +166,20 @@
             <action android:name="android.intent.action.PROCESS_TEXT"/>
             <data android:mimeType="text/plain"/>
         </intent>
+        <!-- 「打开文件夹」要按解析结果挑文件管理器：Android 11 的包可见性不给
+             这几条，queryIntentActivities 只会返回空，最后又落到最宽泛的 */*，
+             被下载管理器接走。 -->
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="*/*"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="vnd.android.document/directory"/>
+        </intent>
+        <intent>
+            <action android:name="android.intent.action.VIEW"/>
+            <data android:mimeType="resource/folder"/>
+        </intent>
     </queries>
 </manifest>

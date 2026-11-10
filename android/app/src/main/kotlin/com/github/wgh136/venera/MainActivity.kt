@@ -577,27 +577,85 @@ class MainActivity : FlutterFragmentActivity() {
 
     /// 用系统文件管理器打开目录。
     ///
-    /// 走 FileProvider 的 content:// URI：目录的 MIME 是
-    /// vnd.android.document/directory，系统「文件」和主流文件管理器都认；
-    /// 依次再试 resource/folder 与 */*。都找不到接收方就返回 false，
-    /// 由 Dart 侧退化成「显示路径 + 复制」。
+    /// 两条路：
+    /// 1. `externalstorage.documents` 的文档 URI——文件管理器都认这个
+    ///    authority，能直接落到某个目录。但它进不去 `Android/data`（Android 11
+    ///    起系统禁止，会弹「无法访问此文件夹」），私有库目录直接跳过。
+    /// 2. 私有目录只能走 FileProvider 的 content:// URI。
+    ///
+    /// **不再把 `*/*` 随便丢给系统**。原来的写法按 DIR → resource/folder →
+    /// `*/*` 依次试，而国产 ROM 的文件管理器基本不声明目录 MIME，最后一步
+    /// 的 `*/*` 就被下载管理器接走了——打开的是「下载」页，用户看到的就是
+    /// 「点开文件夹跳错了地方」。现在 `*/*` 只交给认得出的文件管理器，一个
+    /// 都找不到就返回 false，由 Dart 侧退化成「显示路径 + 复制」。
     private fun openFolder(path: String): Boolean {
         val dir = File(path)
         if (!dir.exists()) {
             Log.w("Venera", "openFolder: not exists: $path")
             return false
         }
-        val uri = try {
+        if (!isInAppPrivateDir(path)) {
+            val docUri = externalStorageDocumentUri(dir)
+            if (docUri != null &&
+                tryOpenUri(
+                    docUri,
+                    listOf(
+                        DocumentsContract.Document.MIME_TYPE_DIR,
+                        "resource/folder"
+                    )
+                )
+            ) {
+                return true
+            }
+        }
+        val fileUri = try {
             FileProvider.getUriForFile(this, "$packageName.fileprovider", dir)
         } catch (e: Exception) {
             Log.w("Venera", "openFolder: cannot build content uri for $path", e)
-            return false
-        }
-        val mimes = listOf(
+            null
+        } ?: return false
+        val dirMimes = listOf(
             DocumentsContract.Document.MIME_TYPE_DIR,
-            "resource/folder",
-            "*/*"
+            "resource/folder"
         )
+        // 目录类型先试；这也是唯一「系统不会乱猜」的类型。
+        if (tryOpenUri(fileUri, dirMimes)) {
+            return true
+        }
+        // 没有应用声明目录 MIME。按包名把已知文件管理器挨个点一遍，
+        // 系统里声明了 `*/*` 的下载管理器不在这个名单里。
+        for (pkg in knownFileManagers()) {
+            if (tryOpenWithPackage(fileUri, pkg)) {
+                return true
+            }
+        }
+        for (pkg in queryFileBrowsers()) {
+            if (tryOpenWithPackage(fileUri, pkg)) {
+                return true
+            }
+        }
+        Log.w("Venera", "openFolder: no file manager accepted $path")
+        return false
+    }
+
+    /// 系统禁止文件管理器进入的目录（Android 11+）。
+    private fun isInAppPrivateDir(path: String): Boolean =
+        path.contains("/Android/data/") || path.contains("/Android/obb/")
+
+    private fun externalStorageDocumentUri(dir: File): Uri? {
+        val root = Environment.getExternalStorageDirectory().absolutePath
+            .trimEnd('/')
+        val full = dir.absolutePath
+        if (!full.startsWith("$root/")) return null
+        val relative = full.substring(root.length + 1)
+        if (relative.isEmpty()) return null
+        return DocumentsContract.buildDocumentUri(
+            "com.android.externalstorage.documents",
+            "primary:$relative"
+        )
+    }
+
+    private fun tryOpenUri(uri: Uri, mimes: List<String>): Boolean {
         for (mime in mimes) {
             val intent = Intent(Intent.ACTION_VIEW).apply {
                 setDataAndType(uri, mime)
@@ -605,16 +663,86 @@ class MainActivity : FlutterFragmentActivity() {
                 addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
                 addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
+            if (intent.resolveActivity(packageManager) == null) {
+                continue
+            }
             try {
-                if (intent.resolveActivity(packageManager) != null) {
-                    startActivity(intent)
-                    return true
-                }
+                startActivity(intent)
+                return true
             } catch (e: Exception) {
                 Log.w("Venera", "openFolder failed for mime $mime", e)
             }
         }
         return false
+    }
+
+    private fun tryOpenWithPackage(uri: Uri, pkg: String): Boolean {
+        for (mime in listOf(
+            DocumentsContract.Document.MIME_TYPE_DIR,
+            "resource/folder",
+            "*/*"
+        )) {
+            val intent = Intent(Intent.ACTION_VIEW).apply {
+                setDataAndType(uri, mime)
+                setPackage(pkg)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+            }
+            try {
+                startActivity(intent)
+                return true
+            } catch (e: Exception) {
+                // 没装 / 不认这个 MIME / 没有导出入口，换下一个
+            }
+        }
+        return false
+    }
+
+    /// 常见文件管理器的包名。
+    ///
+    /// 直接 startActivity 试错，不做 getPackageInfo 判断：Android 11 的包
+    /// 可见性下，查询没装包和不可见包都会抛，横竖都是 catch，少一次调用。
+    private fun knownFileManagers(): List<String> = listOf(
+        "com.android.documentsui",
+        "com.google.android.documentsui",
+        "com.android.fileexplorer",     // MIUI / 部分 AOSP ROM
+        "com.miui.fileexplorer",
+        "com.huawei.hidisk",
+        "com.huawei.filemanager",
+        "com.coloros.filemanager",
+        "com.oplus.filemanager",
+        "com.vivo.filemanager",
+        "com.iqoo.filemanager",
+        "com.sec.android.app.myfiles",
+        "com.oneplus.filemanager",
+        "com.zui.filemanager",
+        "com.android.rk"
+    )
+
+    /// 系统里声明了能开 `*/*` 的应用，过滤掉「不是文件管理器」的那些。
+    private fun queryFileBrowsers(): List<String> {
+        val intent = Intent(Intent.ACTION_VIEW).apply { type = "*/*" }
+        return packageManager.queryIntentActivities(intent, 0)
+            .map { it.activityInfo.packageName }
+            .filter { it != packageName && looksLikeFileBrowser(it) }
+    }
+
+    private fun looksLikeFileBrowser(pkg: String): Boolean {
+        val name = pkg.lowercase()
+        // 下载管理器接 `*/*` 最积极，正是「跳到下载页」的元凶。
+        if (name.contains("download")) return false
+        if (name.contains("browser") || name.contains("chrome") ||
+            name.contains("firefox") || name.contains("webkit")
+        ) return false
+        if (name.contains("mail") || name.contains("gmail")) return false
+        if (name.contains("music") || name.contains("video") ||
+            name.contains("gallery") || name.contains("photo")
+        ) return false
+        return name.contains("file") || name.contains("document") ||
+            name.contains("explorer") || name.contains("manager") ||
+            name.contains("hidisk") || name.contains("myfiles") ||
+            name.contains("folder")
     }
 
     private fun getProxy(): String {

@@ -310,13 +310,18 @@ class DownloadBackground {
     if (summary.running == 0 && summary.waiting > 0) {
       return "Waiting for network".tl;
     }
+    final percent = _percent(summary);
     // 速度必须排在最前面。
     //
     // 通知栏收起来只给一行，原来写成「3 个下载中 · 2 个排队 · 1.2 MB/s」，
     // 窄屏或者系统字体调大之后尾巴直接被省略号吃掉——用户看到的就是「只有
     // 状态没有速度」。放到开头，即使后面被截断，速度也还在。
+    //
+    // 百分比紧跟速度：进度条只是「大概到哪儿了」，具体数字还得有——用户
+    // 截图问「还有多少」的时候，看图不如看 47%。
     return [
       if (summary.speed > 0) "${_speedText(summary.speed)}/s",
+      if (percent >= 0) "$percent%",
       if (summary.running > 0)
         "@n downloading".tlParams({"n": summary.running}),
       if (summary.queued > 0) "@n queued".tlParams({"n": summary.queued}),

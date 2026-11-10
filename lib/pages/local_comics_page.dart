@@ -705,6 +705,10 @@ Future<void> openComicFolder(LocalComic comic) async {
 const _folderChannel = MethodChannel("venera/method_channel");
 
 void _showFolderPathDialog(String path) {
+  // 应用私有目录（Android/data/...）系统是明确不让文件管理器进的，
+  // 光甩一句「打不开」用户只会反复点。这里把原因和两条出路说清楚。
+  final isAppPrivate =
+      path.contains('/Android/data/') || path.contains('/Android/obb/');
   showDialog(
     context: App.rootContext,
     builder: (context) {
@@ -714,6 +718,16 @@ void _showFolderPathDialog(String path) {
           mainAxisSize: MainAxisSize.min,
           crossAxisAlignment: CrossAxisAlignment.start,
           children: [
+            if (isAppPrivate) ...[
+              Text(
+                "Android doesn't let file managers browse this app folder. "
+                        "Copy the path, or move the storage path to a public "
+                        "folder in settings."
+                    .tl,
+                style: ts.s12,
+              ),
+              const SizedBox(height: 12),
+            ],
             Text("Folder path".tl),
             const SizedBox(height: 8),
             SelectableText(

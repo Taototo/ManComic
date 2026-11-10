@@ -9,11 +9,13 @@ import 'package:venera/foundation/cache_manager.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/display_refresh.dart';
+import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/js_engine.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/notification_service.dart';
+import 'package:venera/foundation/source_health.dart';
 import 'package:venera/utils/download_background.dart';
 import 'package:venera/foundation/startup_gate.dart';
 import 'package:venera/foundation/update_check_policy.dart';
@@ -109,6 +111,7 @@ Future<void> init() async {
   }
   CacheManager().setLimitSize(appdata.settings['cacheSize']);
   _checkOldConfigs();
+  _setupSourceHealthFavoritesLink();
   if (App.isAndroid) {
     handleLinks();
     handleTextShare();
@@ -140,8 +143,38 @@ Future<void> init() async {
   }
 }
 
-void _checkOldConfigs() {
-  if (appdata.settings['searchSources'] == null) {
+/// 源体检失败 → 收藏自动清理。
+///
+/// 「源挂了」这件事收藏侧本来就会判（`_isInvalidItem` 会看
+/// `SourceHealthService.hasFailed`），缺的只是触发时机：以前得用户自己到
+/// 收藏「全部」里点「一键清理失效」。体检一直是进源页自动跑的，跑完这里
+/// 接一手，挂掉那些源下的漫画就自己进「失效」了。
+///
+/// 只在这一轮里失败集合真的变了时才会被调用（见 `_recordFailed`），
+/// 源全都好好的时候一次库都不扫。
+void _setupSourceHealthFavoritesLink() {
+  SourceHealthService.instance.onFailuresChanged = () async {
+    final moved = await LocalFavoritesManager().cleanupInvalid();
+    if (moved <= 0) {
+      return;
+    }
+    Log.info("Favorites", "Moved $moved comics to Invalid after source check");
+    // 检测多半是在进源页时自动跑的，用户未必正看着收藏——不吱一声的话，
+    // 「收藏怎么少了几本」就成了一个吓人的疑问。
+    try {
+      if (App.rootContext.mounted) {
+        App.rootContext.showMessage(
+          message: "Moved @a comics to Invalid".tlParams({"a": moved}),
+        );
+      }
+    } catch (e) {
+      // 启动早期还没有 Overlay 时 showMessage 会抛，吞掉即可，
+      // 该挪的已经挪完了。
+    }
+  };
+}
+
+void _checkOldConfigs() {  if (appdata.settings['searchSources'] == null) {
     appdata.settings['searchSources'] = ComicSource.all()
         .where((e) => e.searchPageData != null)
         .map((e) => e.key)

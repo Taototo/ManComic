@@ -28,8 +28,9 @@ enum SourceHealthStatus {
 
 /// 单个源的探测结果。
 ///
-/// 从 `SourceHealthPage` 里抽出来，因为源列表也要显示健康值。探测逻辑只该有
-/// 一份——两个页面各写一遍，早晚会出现「同一个源在两个页面结论不一样」。
+/// 体检原本是一个独立页面，现在并进了漫画源页：列表行显示状态点与分数、
+/// 点一行重测、顶栏一颗按钮全测。探测逻辑收在这里一份——页面各写一遍，
+/// 早晚会出现「同一个源在两处结论不一样」。
 class SourceHealth {
   SourceHealth(this.source) {
     if (source.searchPageData == null) {
@@ -113,7 +114,7 @@ class SourceHealth {
   }
 }
 
-/// 全源体检。单例，结果常驻内存，所以从源列表点进体检页不会重跑一遍。
+/// 全源体检。单例，结果常驻内存，列表与详情面板读的都是这一份。
 class SourceHealthService extends ChangeNotifier {
   SourceHealthService._() {
     final saved = appdata.implicitData[_failedKeysKey];
@@ -144,6 +145,24 @@ class SourceHealthService extends ChangeNotifier {
     if (changed) {
       appdata.implicitData[_failedKeysKey] = _failedKeys.toList();
       unawaited(appdata.writeImplicitData());
+      if (_running) {
+        _failedSinceBatch = true;
+      } else {
+        unawaited(_notifyFailuresChanged());
+      }
+    }
+  }
+
+  Future<void> _notifyFailuresChanged() async {
+    final handler = onFailuresChanged;
+    if (handler == null) {
+      return;
+    }
+    try {
+      await handler();
+    } catch (e, s) {
+      // 收藏清理失败不能连累检测结果的展示
+      Log.error("SourceHealth", "failure handler failed: $e\n$s");
     }
   }
 
@@ -158,6 +177,23 @@ class SourceHealthService extends ChangeNotifier {
   final _cache = <String, SourceHealth>{};
 
   bool _running = false;
+
+  /// 这一批检测里有没有源的「失败」状态动过。
+  ///
+  /// 不能每测一个源就收一次收藏（一轮下来八个源扫八遍库），攒到批次结束
+  /// 再一起处理；单独点某一行重测时 `_running` 是 false，立刻处理。
+  bool _failedSinceBatch = false;
+
+  /// 失败源集合变化后的回调。
+  ///
+  /// 收藏那边靠它把「源已经挂了」的漫画挪进「失效」分类——用户在源页面
+  /// 看到一片红，收藏里却还是满的，还得自己去找「一键清理失效」，这条
+  /// 联动就是为了省掉那一步。
+  ///
+  /// 做成回调而不是直接 import favorites：`favorites.dart` 已经引用了本
+  /// 文件（`_isInvalidItem` 要看 `hasFailed`），反向依赖会绕成环。注册在
+  /// `init.dart`，那里两边的初始化顺序是确定的。
+  Future<void> Function()? onFailuresChanged;
 
   bool get running => _running;
 
@@ -225,6 +261,11 @@ class SourceHealthService extends ChangeNotifier {
     _running = false;
     lastRunAt = DateTime.now();
     notifyListeners();
+    // 一轮测完才动收藏：中途每测挂一个就扫一遍库，八个源就是八次全表扫描。
+    if (_failedSinceBatch) {
+      _failedSinceBatch = false;
+      unawaited(_notifyFailuresChanged());
+    }
   }
 
   Future<void> testOne(SourceHealth item) async {

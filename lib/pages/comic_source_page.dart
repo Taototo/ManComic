@@ -13,7 +13,6 @@ import 'package:venera/foundation/source_health.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/network/cookie_jar.dart';
 import 'package:venera/pages/comic_source_help_page.dart';
-import 'package:venera/pages/source_health_page.dart';
 import 'package:venera/pages/webview.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/io.dart';
@@ -136,7 +135,7 @@ class _BodyState extends State<_Body> {
     super.initState();
     ComicSourceManager().addListener(updateUI);
     _health.addListener(updateUI);
-    // 只补测没有结果的源，所以从体检页退回来再进来不会又跑一遍。
+    // 只补测没有结果的源，所以在这个页面里来回切不会又跑一遍。
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _health.testAll(ComicSource.all());
     });
@@ -160,12 +159,20 @@ class _BodyState extends State<_Body> {
             SliverAppbar(
               title: Text('Comic Source'.tl),
               actions: [
+                // 体检页已经并进来了，全源重测就放在这颗按钮上。
+                // 单个源还是点那一行（见列表）。
                 IconButton(
-                  tooltip: "Source health".tl,
-                  icon: const Icon(Icons.monitor_heart_outlined),
-                  onPressed: () {
-                    context.to(() => const SourceHealthPage());
-                  },
+                  tooltip: "Test again".tl,
+                  icon: _health.running
+                      ? const SizedBox(
+                          width: 18,
+                          height: 18,
+                          child: CircularProgressIndicator(strokeWidth: 2),
+                        )
+                      : const Icon(Icons.refresh),
+                  onPressed: _health.running
+                      ? null
+                      : () => _health.testAll(sources, force: true),
                 ),
               ],
             ),
@@ -178,7 +185,7 @@ class _BodyState extends State<_Body> {
               //
               // 原来每个源是一张独立的玻璃卡：八个源就是八层模糊、八个圆角、
               // 八次阴影，滚动时每帧都在重算；而且卡与卡之间的空隙让「一共
-              // 有几个源、几个挂了」这件事散了。体检页那种单卡多行读起来是
+              // 有几个源、几个挂了」这件事散了。单个源一行读起来就是
               // 一张表，逐行对比健康状态快得多。
               SliverToBoxAdapter(child: _buildSourceList(context, sources)),
             ],
@@ -193,12 +200,14 @@ class _BodyState extends State<_Body> {
 
   Widget _buildListHeader(BuildContext context, List<ComicSource> sources) {
     final colors = context.colorScheme;
-    final healthy = sources
-        .map(_health.of)
-        .where((e) => e.status == SourceHealthStatus.ok)
-        .length;
-    final tested = sources.map(_health.of).where((e) => e.tested).length;
+    final items = sources.map(_health.of).toList();
+    final healthy =
+        items.where((e) => e.status == SourceHealthStatus.ok).length;
+    final failed =
+        items.where((e) => e.status == SourceHealthStatus.error).length;
+    final tested = items.where((e) => e.tested).length;
     final updating = _health.running;
+    final avg = _averageLatency(items);
     String text;
     if (tested == 0) {
       text = updating
@@ -217,9 +226,36 @@ class _BodyState extends State<_Body> {
         children: [
           Row(
             children: [
-              Text(text, style: ts.s12.withColor(colors.onSurfaceVariant)),
-              const Spacer(),
-              if (updating)
+              // 一行里塞了源数、可用数、失败数和平均延迟，窄屏放不下。
+              // 左边整体省略，别让 Row 溢出——测试里 360 宽就是这种屏。
+              Expanded(
+                child: Text.rich(
+                  TextSpan(
+                    children: [
+                      TextSpan(text: text),
+                      if (failed > 0)
+                        TextSpan(
+                          text: " · "
+                              "${"@n failed".tlParams({"n": failed})}",
+                          style: TextStyle(color: colors.error),
+                        ),
+                    ],
+                  ),
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: ts.s12.withColor(colors.onSurfaceVariant),
+                ),
+              ),
+              // 平均延迟只在有「通了的源」时才有意义，跟着可用数一起看。
+              if (avg != null)
+                Text(
+                  "${avg}ms",
+                  style: ts.s10.withColor(
+                    colors.onSurfaceVariant.withValues(alpha: 0.75),
+                  ),
+                ),
+              if (updating) ...[
+                const SizedBox(width: 8),
                 SizedBox(
                   width: 11,
                   height: 11,
@@ -228,6 +264,7 @@ class _BodyState extends State<_Body> {
                     color: colors.onSurfaceVariant,
                   ),
                 ),
+              ],
             ],
           ),
           // 行本身现在就是体检入口，这个动作没有可见的按钮，必须写出来，
@@ -242,6 +279,19 @@ class _BodyState extends State<_Body> {
         ],
       ),
     );
+  }
+
+  /// 体检页并进来时一起搬过来的平均延迟：只看「测通了」的源，
+  /// 失败源的耗时没有参考价值（都挂在超时上）。
+  int? _averageLatency(List<SourceHealth> items) {
+    final latencies = items
+        .where((e) => e.status == SourceHealthStatus.ok && e.latency != null)
+        .map((e) => e.latency!)
+        .toList();
+    if (latencies.isEmpty) {
+      return null;
+    }
+    return latencies.reduce((a, b) => a + b) ~/ latencies.length;
   }
 
   /// 一页源 = 一张卡 + 每行一个源。
@@ -730,13 +780,13 @@ class _RingPainter extends CustomPainter {
       old.strokeWidth != strokeWidth;
 }
 
-/// 一个源 = 一行，版式和「漫画源体检」页的行完全对齐。
+/// 一个源 = 一行，版式和原来的体检表完全对齐。
 ///
 /// 左边那个状态圆点替掉了原来的首字头像：八个源竖排下来，八个小圆点连成
 /// 一条颜色带，哪几个挂了扫一眼就能看出来；而「每个源一种彩色方块」其实
 /// 不携带任何信息——名字就写在旁边，颜色只是让眼睛多跳一次。
 ///
-/// 体检功能直接搬到了行上：点行 = 重测这一个源（和体检页一致），进详情改
+/// 体检功能直接搬到了行上：点行 = 重测这一个源，进详情改
 /// 由右侧箭头负责。重测是高频动作，进详情是低频动作，不该抢同一个手势。
 class _SourceRow extends StatelessWidget {
   const _SourceRow({
