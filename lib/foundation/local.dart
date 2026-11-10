@@ -892,6 +892,226 @@ class LocalManager with ChangeNotifier {
     pumpQueue();
   }
 
+  /// 放弃一次下载（用户点了「取消」）。
+  ///
+  /// 「取消」和「暂停」必须是两件事：暂停保留已经下好的页，取消就是把这次
+  /// 下载从记录和磁盘上一起抹掉。顺序不能反：
+  ///
+  /// 1. 先把任务摘掉并**等任务表/进度表落盘**。以前是先摘再异步删目录，
+  ///    进程在那一刻被划掉（用户按取消之后顺手清理后台，太常见了）就只剩
+  ///    下「记录没了、文件还在」——下次点下载，磁盘扫描把它当成已下过，
+  ///    于是只从断点往后下。
+  /// 2. 再删这次写进去的页。库里本来就登记为「已下好」的章节一页都不动，
+  ///    同一本书一边补新章节一边取消，不该把老内容带走。
+  /// 3. 最后按目录里真实剩下的内容重写 `downloadedChapters`。这一步以前
+  ///    完全没有，于是取消之后章节表还认为那几章已经下好，章节选择里它们
+  ///    是勾上且不可点的灰项，「下载全部」也会跳过——表现就是「只下后面的
+  ///    章节」，而且用户没有任何办法把它们选回来。
+  Future<void> discardTask(DownloadTask task) async {
+    var known = downloadingTasks.remove(task);
+    _lastWatchdogRetry.remove(task.progressKey);
+    _watchdogAttempts.remove(task.progressKey);
+    _notifyTasksChanged();
+    if (known) {
+      await saveCurrentDownloadingTasks(full: true);
+    }
+    if (!task.keepFilesOnCancel) {
+      var key = task.progressKey;
+      var purge = _purgeTaskFiles(task).whenComplete(() {
+        _purging.remove(key);
+      });
+      _purging[key] = purge;
+      await purge;
+      _notifyTasksChanged();
+    }
+    pumpQueue();
+  }
+
+  /// 「这条记录还在删文件」的标记，键是 [DownloadTask.progressKey]。
+  ///
+  /// 取消之后立刻又点下载是很自然的操作，而删除目录是异步的。不做标记的话
+  /// 新任务可能在删到一半时扫描磁盘，把马上要消失的页当成「已经下过」跳过，
+  /// 最后缺一大段——用户看到的就是「重下只补了后面几章」。
+  final Map<String, Future<void>> _purging = {};
+
+  /// 删掉这个任务写到磁盘上的东西。[discardTask] 的后半段。
+  Future<void> _purgeTaskFiles(DownloadTask task) async {
+    var dirPath = task.path;
+    if (dirPath == null) {
+      return;
+    }
+    var local = find(task.id, task.comicType);
+    // 库里已经登记为「下好」的章节：只删这次写进去的那几页。
+    var keep = local?.downloadedChapters.toSet() ?? const <String>{};
+    var dir = Directory(dirPath);
+
+    if (task is ImagesDownloadTask) {
+      var written = task.pagesWrittenThisRun;
+      var chapters = task.selectedChapters ?? task.knownChapters;
+      if (chapters == null) {
+        // 刚建任务就被取消，连要下哪些章节都还不知道。库里没有这本书时
+        // 目录一定是这个任务刚建的空壳，可以整个删；库里有时不敢动。
+        if (local == null) {
+          await _deleteDirectoryQuietly(dir);
+        }
+      } else {
+        for (var chapter in chapters) {
+          var chapterDir = Directory(
+            FilePath.join(dirPath, getChapterDirectoryName(chapter)),
+          );
+          if (keep.contains(chapter)) {
+            var pages = written[chapter];
+            if (pages != null && pages.isNotEmpty) {
+              await _deletePages(chapterDir, pages);
+            }
+          } else {
+            await _deleteDirectoryQuietly(chapterDir);
+          }
+        }
+        // 章节删光了就把空壳目录一起收掉：留着它，下次下载会新建一个
+        // 「标题(1)」，空目录永远躺在存储里。
+        await _deleteIfEmpty(dir);
+      }
+    } else {
+      // 压缩包下载没有断点续传：解压出来的就是这次的全部产物。
+      await _deleteDirectoryQuietly(dir);
+    }
+
+    await _reconcileDownloadedChapters(task.id, task.comicType, dirPath, local);
+  }
+
+  static Future<void> _deleteDirectoryQuietly(Directory dir) async {
+    try {
+      if (await dir.exists()) {
+        await dir.delete(recursive: true);
+      }
+    } catch (e) {
+      Log.error("LocalManager", "Failed to delete ${dir.path}: $e");
+    }
+  }
+
+  /// 目录里除了 `.nomedia` 什么都没有时，把目录本身删掉。
+  static Future<void> _deleteIfEmpty(Directory dir) async {
+    try {
+      if (!await dir.exists()) {
+        return;
+      }
+      await for (var entity in dir.list(followLinks: false)) {
+        if (entity is File && entity.name == '.nomedia') {
+          continue;
+        }
+        return;
+      }
+      await dir.delete(recursive: true);
+    } catch (_) {}
+  }
+
+  /// 删掉章节目录里指定页码的图。
+  static Future<void> _deletePages(Directory dir, Set<int> pages) async {
+    try {
+      if (!await dir.exists()) {
+        return;
+      }
+      await for (var entity in dir.list(followLinks: false)) {
+        if (entity is! File) {
+          continue;
+        }
+        var index = int.tryParse(entity.name.split('.').first);
+        if (index == null || !pages.contains(index)) {
+          continue;
+        }
+        try {
+          await entity.delete();
+        } catch (_) {}
+      }
+    } catch (e) {
+      Log.error("LocalManager", "Failed to delete pages in ${dir.path}: $e");
+    }
+  }
+
+  /// 按磁盘上的真实内容重写这本书的「已下载章节」。
+  ///
+  /// 取消下载之后必须做一次：否则章节表还挂着已经不存在的章节，章节选择里
+  /// 它们是灰的、「下载全部」也会跳过它们，用户只能下后面的章节。
+  /// 目录彻底空了就连库记录一起删掉，这本回到「没下载过」的状态。
+  Future<void> _reconcileDownloadedChapters(
+    String id,
+    ComicType type,
+    String dirPath,
+    LocalComic? local,
+  ) async {
+    var dir = Directory(dirPath);
+    var hasPages = false;
+    try {
+      if (await dir.exists()) {
+        await for (var entity in dir.list(recursive: true, followLinks: false)) {
+          if (entity is File && isPageFileName(entity.name)) {
+            hasPages = true;
+            break;
+          }
+        }
+      }
+    } catch (e) {
+      // 扫不动就当「不知道」，别把库记录删掉。下次启动还有机会修。
+      Log.error("LocalManager", "Failed to scan ${dir.path}: $e");
+      return;
+    }
+
+    if (!hasPages) {
+      await _deleteDirectoryQuietly(dir);
+      if (local != null) {
+        remove(id, type);
+      }
+      return;
+    }
+
+    if (local == null) {
+      // 任务取消、库本来就没有这本书：剩下的残页下次下载会覆盖，不建记录。
+      return;
+    }
+
+    var chapters = local.chapters;
+    if (chapters == null) {
+      return;
+    }
+    var stillDownloaded = <String>[];
+    for (var entry in chapters.allChapters.entries) {
+      var chapterDir = Directory(
+        FilePath.join(dirPath, getChapterDirectoryName(entry.value)),
+      );
+      if (await _hasPage(chapterDir)) {
+        stillDownloaded.add(entry.key);
+      }
+    }
+    if (stillDownloaded.length == local.downloadedChapters.length &&
+        stillDownloaded.every((e) => local.downloadedChapters.contains(e))) {
+      return;
+    }
+    if (stillDownloaded.isEmpty) {
+      remove(id, type);
+      return;
+    }
+    _db.execute(
+      'UPDATE comics SET downloadedChapters = ? WHERE id = ? AND comic_type = ?;',
+      [jsonEncode(stillDownloaded), id, type.value],
+    );
+    notifyListeners();
+  }
+
+  static Future<bool> _hasPage(Directory dir) async {
+    try {
+      if (!await dir.exists()) {
+        return false;
+      }
+      await for (var entity in dir.list(followLinks: false)) {
+        if (entity is File && isPageFileName(entity.name)) {
+          return true;
+        }
+      }
+    } catch (_) {}
+    return false;
+  }
+
   void moveToFirst(DownloadTask task) {
     if (downloadingTasks.firstOrNull == task) {
       if (task.isPaused && !task.userPaused) {
@@ -915,7 +1135,7 @@ class LocalManager with ChangeNotifier {
     _progressTimer = null;
     return _enqueueWrite(() async {
       await _writeJson(
-        File(FilePath.join(App.dataPath, _tasksFile)),
+        File(FilePath.join(App.dataPath, tasksFileName)),
         downloadingTasks.map((e) => e.toJson()).toList(),
       );
       await _writeProgressFile();
@@ -939,9 +1159,10 @@ class LocalManager with ChangeNotifier {
   /// 也会在恢复时按磁盘重算，丢那点不影响什么。
   static const _progressFlushDelay = Duration(milliseconds: 1200);
 
-  static const _tasksFile = 'downloading_tasks.json';
+  /// 任务定义（含整本地址表）与进度快照分两个文件存，清理残留时也要认这两个名字。
+  static const tasksFileName = 'downloading_tasks.json';
 
-  static const _progressFile = 'downloading_progress.json';
+  static const progressFileName = 'downloading_progress.json';
 
   Timer? _progressTimer;
 
@@ -962,7 +1183,7 @@ class LocalManager with ChangeNotifier {
     for (var task in downloadingTasks) {
       map[task.progressKey] = task.toProgressJson();
     }
-    await _writeJson(File(FilePath.join(App.dataPath, _progressFile)), map);
+    await _writeJson(File(FilePath.join(App.dataPath, progressFileName)), map);
   }
 
   /// 排队串行写，避免两次写同时操作同一个临时文件。
@@ -986,7 +1207,7 @@ class LocalManager with ChangeNotifier {
   }
 
   void restoreDownloadingTasks() {
-    var file = File(FilePath.join(App.dataPath, _tasksFile));
+    var file = File(FilePath.join(App.dataPath, tasksFileName));
     if (file.existsSync()) {
       try {
         var tasks = jsonDecode(file.readAsStringSync());
@@ -1041,7 +1262,7 @@ class LocalManager with ChangeNotifier {
   /// 所以「下到第几页」这类高频变化都在这里。读不到不影响：磁盘扫描会
   /// 在真正开始下之前把进度重算一遍。
   void _applySavedProgress() {
-    var file = File(FilePath.join(App.dataPath, _progressFile));
+    var file = File(FilePath.join(App.dataPath, progressFileName));
     if (!file.existsSync()) {
       return;
     }
@@ -1053,7 +1274,12 @@ class LocalManager with ChangeNotifier {
       for (var task in downloadingTasks) {
         var entry = map[task.progressKey];
         if (entry is Map) {
-          task.applyProgressJson(Map<String, dynamic>.from(entry));
+          var json = Map<String, dynamic>.from(entry);
+          // 只认这个任务自己写的那份（见 DownloadTask.acceptsProgress）。
+          if (!task.acceptsProgress(json)) {
+            continue;
+          }
+          task.applyProgressJson(json);
         }
       }
     } catch (e) {
@@ -1062,9 +1288,26 @@ class LocalManager with ChangeNotifier {
   }
 
   void addTask(DownloadTask task) {
-    if (!downloadingTasks.contains(task)) {
-      downloadingTasks.add(task);
+    var pendingPurge = _purging[task.progressKey];
+    if (pendingPurge != null) {
+      // 这本刚取消，旧任务还在删文件。等它删完再建新任务：现在就去扫磁盘
+      // 会把那批马上要消失的页当成「已下过」，下完缺一大段。
+      unawaited(pendingPurge.whenComplete(() => addTask(task)));
+      return;
     }
+    var existing = findTask(task.id, task.comicType);
+    if (existing != null) {
+      // 同一本已经在队列里（暂停中 / 出错等重试 / 上次取消没删干净）。
+      // 以前这里直接 `add` 失败就结束：用户点了「下载」，界面弹「已开始」，
+      // 实际上什么都没发生。现在把暂停和错误状态清掉，接着下。
+      existing.userPaused = false;
+      _notifyTasksChanged();
+      saveCurrentDownloadingTasks(full: true);
+      existing.resume();
+      pumpQueue();
+      return;
+    }
+    downloadingTasks.add(task);
     _notifyTasksChanged();
     saveCurrentDownloadingTasks(full: true);
     pumpQueue();
@@ -1120,10 +1363,32 @@ class LocalManager with ChangeNotifier {
     );
   }
 
+  /// 这本漫画如果还在下载队列里，先停掉。
+  ///
+  /// 不停的话两个方向都会出错：下载那边会继续往刚删掉的目录里写文件，
+  /// 下完了还会走 `completeTask` → `add()` 把这本书重新插回库——用户看到
+  /// 的就是「删了又自己回来了」。
+  ///
+  /// [keepFiles] 对应删除对话框里「同时删除磁盘文件」没勾的情况：那种时候
+  /// 文件得留着，不能被取消顺手删掉。
+  void _cancelTaskFor(String id, ComicType type, {bool keepFiles = false}) {
+    var task = findTask(id, type);
+    if (task == null) {
+      return;
+    }
+    task.keepFilesOnCancel = keepFiles;
+    // 这里不 await：cancel 的同步部分已经把任务从队列摘掉、后续写入都停了，
+    // 删目录的活儿让它自己异步跑完，UI 不必等。
+    unawaited(task.cancel());
+  }
+
   void deleteComic(LocalComic c, [bool removeFileOnDisk = true]) {
+    _cancelTaskFor(c.id, c.comicType, keepFiles: !removeFileOnDisk);
     if (removeFileOnDisk) {
-      var dir = Directory(FilePath.join(path, c.directory));
-      dir.deleteIgnoreError(recursive: true);
+      // 用 baseDir 而不是 `join(path, directory)`：手工导入 / 搬过库的记录里
+      // `directory` 存的是绝对路径，拼上去会得到一个不存在的路径，于是
+      // `deleteIgnoreError` 静默什么都不做，文件全留下。
+      Directory(c.baseDir).deleteIgnoreError(recursive: true);
     }
     // Deleting a local comic means that it's no longer available, thus both favorite and history should be deleted.
     if (c.comicType == ComicType.local) {
@@ -1182,11 +1447,15 @@ class LocalManager with ChangeNotifier {
     }
 
     var shouldRemovedDirs = <Directory>[];
+    for (var c in comics) {
+      _cancelTaskFor(c.id, c.comicType, keepFiles: !removeFileOnDisk);
+    }
     _db.execute('BEGIN TRANSACTION;');
     try {
       for (var c in comics) {
         if (removeFileOnDisk) {
-          var dir = Directory(FilePath.join(path, c.directory));
+          // 同 deleteComic：绝对路径的记录只能按 baseDir 找。
+          var dir = Directory(c.baseDir);
           if (dir.existsSync()) {
             shouldRemovedDirs.add(dir);
           }
@@ -1253,6 +1522,26 @@ class LocalManager with ChangeNotifier {
     }
     return builder.toString();
   }
+}
+
+/// 文件名是不是「正文页」。
+///
+/// 下载写下的图一律以页码命名（`0.jpg`、`12.webp`），封面是 `cover.*`，
+/// 隐藏文件和 json 都不算。取消下载后重算「还剩哪些章节」、以及清理残留
+/// 目录时都靠这条判断，别在两处各写一遍。
+bool isPageFileName(String name) {
+  if (name.startsWith('.')) {
+    return false;
+  }
+  if (name.startsWith('cover')) {
+    return false;
+  }
+  var dot = name.lastIndexOf('.');
+  var stem = dot <= 0 ? name : name.substring(0, dot);
+  if (stem.isEmpty) {
+    return false;
+  }
+  return int.tryParse(stem) != null;
 }
 
 /// 把本地已经落盘的页和远端页表拼起来，返回阅读器要的图片列表。

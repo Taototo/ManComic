@@ -331,7 +331,9 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
                           icon: Icons.close,
                           text: "Cancel".tl,
                           onClick: () {
-                            task.cancel();
+                            // 取消会连带删掉这次写下的页，可能要几秒；
+                            // 任务先摘掉（列表立刻少一行），删除在后台跑完。
+                            unawaited(task.cancel());
                           },
                         ),
                       ],

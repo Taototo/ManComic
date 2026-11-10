@@ -33,6 +33,13 @@ abstract class DownloadTask with ChangeNotifier {
   /// 该被调度器自动拉起来，手动暂停的不行，否则用户按暂停毫无作用。
   bool userPaused = false;
 
+  /// 取消时把已经下好的文件留在磁盘上。
+  ///
+  /// 只有「删除本地漫画但勾了『保留文件』」这一种情况会用到：书要从库里
+  /// 删掉，文件用户想留着（以后重新导入 / 自己搬走）。默认 false——取消
+  /// 就是把这次下载抹掉。
+  bool keepFilesOnCancel = false;
+
   /// 已写入磁盘的字节数（估算进度用，任务刚建好时为 0）
   int get downloadedBytes;
 
@@ -42,7 +49,12 @@ abstract class DownloadTask with ChangeNotifier {
   /// bytes per second
   int get speed;
 
-  void cancel();
+  /// 放弃这次下载。
+  ///
+  /// 返回的 Future 在「任务已摘掉、它写下的文件也删干净」之后才完成。
+  /// 取消不等于暂停：暂停保留已经下好的页，取消是把这次下载从磁盘上抹掉，
+  /// 所以调用方可以依靠它来保证「取消完再点下载」不会读到上半次的残留。
+  Future<void> cancel();
 
   void pause();
 
@@ -65,7 +77,22 @@ abstract class DownloadTask with ChangeNotifier {
   /// [toJson] 里有整本的图片地址表，一部中长篇就是几百 KB；每下一页写一次
   /// 会让主线程反复做 jsonEncode + 落盘，多任务并发时下载页直接卡住。
   /// 进度本身只有几个数字，可以随便写。
-  Map<String, dynamic> toProgressJson() => {"userPaused": userPaused};
+  Map<String, dynamic> toProgressJson() => {
+        "uid": uid,
+        "userPaused": userPaused,
+      };
+
+  /// 这条进度快照是不是这个任务自己写的。
+  ///
+  /// 进度文件按「类型:id」索引，同一本漫画取消后再下一次会撞上同一个键。
+  /// 照单全收的话，新任务一开局就是「下过 500 页、目录在 xxx」，然后顺着
+  /// 旧目录把上次没删干净的页当成已下过，只从断点往后下。
+  ///
+  /// 老版本写的进度没有 uid，仍然收下——升级时不能把正在下的任务打回 0。
+  bool acceptsProgress(Map<String, dynamic> json) {
+    var saved = json["uid"];
+    return saved == null || saved == uid;
+  }
 
   /// 把 [toProgressJson] 的结果盖回任务上。
   void applyProgressJson(Map<String, dynamic> json) {
@@ -81,6 +108,23 @@ abstract class DownloadTask with ChangeNotifier {
 
   /// 进度文件里的键。用「类型 + id」而不是列表下标，任务重排不会串。
   String get progressKey => "${comicType.value}:$id";
+
+  /// 这个任务实例的身份。
+  ///
+  /// 进度文件按 [progressKey] 索引，而「同一本漫画取消后再下一次」拿到的
+  /// 是**同一个键**。以前只按 key 合并进度，新任务就会被套上旧任务的
+  /// `downloadedCount` 和 `path`：一开局就自称「下过几百页」，再顺着 path
+  /// 把上次没删干净的目录认回来，于是只从断点往后下——用户看到的就是
+  /// 「取消没用，它还记得上次的进度」。
+  ///
+  /// 每次新建任务换一个 uid，进度只认自己写的那一份。老版本落下的进度
+  /// 没有 uid 字段，仍然按 key 认领（升级时不至于把正在下的任务打回 0）。
+  String uid = newTaskUid();
+
+  static int _uidSeq = 0;
+
+  static String newTaskUid() =>
+      "${DateTime.now().microsecondsSinceEpoch}_${_uidSeq++}";
 
   LocalComic toLocalComic();
 
@@ -138,39 +182,23 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   });
 
   @override
-  void cancel() {
+  Future<void> cancel() async {
     _isRunning = false;
     _cancelled = true;
     _retryTimer?.cancel();
     _retryTimer = null;
-    LocalManager().removeTask(this);
-    var local = LocalManager().find(id, comicType);
-    if (path != null) {
-      if (local == null) {
-        Future.sync(() async {
-          var tasks = this.tasks.values.toList();
-          for (var i = 0; i < tasks.length; i++) {
-            if (!tasks[i].isComplete) {
-              tasks[i].cancel();
-              await tasks[i].wait();
-            }
-          }
-          try {
-            await Directory(path!).delete(recursive: true);
-          }
-          catch(e) {
-            Log.error("Download", "Failed to delete directory: $e");
-          }
-        });
-      } else if (chapters != null) {
-        for (var c in chapters!) {
-          var dir = Directory(FilePath.join(path!, c));
-          if (dir.existsSync()) {
-            dir.deleteSync(recursive: true);
-          }
-        }
-      }
+    stopRecorder();
+    // 在飞的页先停掉。以前这里的 `await task.wait()` 是个死等：页下载被取消后
+    // `start()` 直接 return，从不 complete 它的 completer，于是「删目录」这步
+    // 永远轮不到——半本漫画留在磁盘上，下次点下载又被当成「已经下过」。
+    // 现在 cancel() 会把等待者一并唤醒，下面才真的能走到删文件。
+    final inflight = tasks.values.where((e) => !e.isComplete).toList();
+    for (final t in inflight) {
+      t.cancel();
     }
+    tasks.clear();
+    notifyListeners();
+    await LocalManager().discardTask(this);
   }
 
   @override
@@ -281,6 +309,21 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   /// 记账」之间被杀，那一页就白下；在「记完账、文件没落盘」之间被杀，
   /// 那一页就永远缺一张。改成以磁盘为准，两种都能自愈。
   final _diskPages = <String, Set<int>>{};
+
+  /// 本次运行真正写进磁盘的页码（章节名 → 页码）。
+  ///
+  /// 取消下载时只删这些。不能用「整个章节目录」代替：同一本漫画重下时
+  /// 章节目录是共享的，整目录删会把用户上次下好的内容一起带走。
+  final _writtenPages = <String, Set<int>>{};
+
+  /// 取消时要用：这次写了哪些页。
+  Map<String, Set<int>> get pagesWrittenThisRun => _writtenPages;
+
+  /// 这次任务选的章节；null = 整本。
+  List<String>? get selectedChapters => chapters;
+
+  /// 已经拉到的地址表里的章节；null = 还没拉到。
+  List<String>? get knownChapters => _images?.keys.toList();
 
   int get _maxConcurrentTasks {
     var value = appdata.settings["downloadThreads"];
@@ -486,6 +529,11 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   }
 
   void _scheduleTasks() {
+    // 取消之后还有挂在旧页上的 `.then(_scheduleTasks)` 回调会跑到这里。
+    // 不挡住的话它会给下一页新建下载器——任务已经从队列里消失，下载却还在继续。
+    if (_cancelled || !_isRunning || _images == null || _images!.isEmpty) {
+      return;
+    }
     var chapterName = _images!.keys.elementAt(_chapter);
     var images = _images![chapterName]!;
     var downloaded = _diskPages[chapterName] ?? const <int>{};
@@ -761,11 +809,19 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     }
 
     while (_chapter < _images!.length) {
+      // 取消可能在两页之间发生（那一刻没有 await 挂着），这里必须自己让路，
+      // 否则循环会接着为下一页建下载器，取消完还在偷偷下。
+      if (_cancelled || !_isRunning) {
+        return;
+      }
       var chapterName = _images!.keys.elementAt(_chapter);
       var images = _images![chapterName]!;
       var onDisk = _diskPages[chapterName] ?? const <int>{};
       tasks.clear();
       while (_index < images.length) {
+        if (_cancelled || !_isRunning) {
+          return;
+        }
         if (onDisk.contains(_index)) {
           _index++;
           continue;
@@ -788,6 +844,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           return;
         }
         (_diskPages[chapterName] ??= <int>{}).add(_index);
+        (_writtenPages[chapterName] ??= <int>{}).add(_index);
         _index++;
         _downloadedCount++;
         _message = "$_downloadedCount/$_totalCount";
@@ -890,6 +947,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
 
   @override
   Map<String, dynamic> toProgressJson() => {
+        "uid": uid,
         "cover": _cover,
         "chapter": _chapter,
         "index": _index,
@@ -934,6 +992,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   Map<String, dynamic> toJson() {
     return {
       "type": "ImagesDownloadTask",
+      "uid": uid,
       "source": source.key,
       "comicId": comicId,
       "comic": comic?.toJson(),
@@ -972,6 +1031,7 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       chapters: ListOrNull.from(json["chapters"]),
     )
       ..path = json["path"]
+      ..uid = json["uid"] ?? DownloadTask.newTaskUid()
       .._cover = json["cover"]
       .._images = images
       .._chapterPageHint = (json["chapterPages"] as Map?)?.map(
@@ -1179,6 +1239,14 @@ class _ImageDownloadWrapper {
 
   void cancel() {
     isCancelled = true;
+    // 取消也要把等待者叫醒。不叫醒的话 `task.wait()` 永远悬着，上层那条
+    // 「等所有在飞的页停下来再删目录」就变成了死等，删除永远不会发生。
+    for (var c in completers) {
+      if (!c.isCompleted) {
+        c.complete(this);
+      }
+    }
+    completers.clear();
   }
 
   var completers = <Completer<_ImageDownloadWrapper>>[];
@@ -1259,7 +1327,7 @@ class _ImageDownloadWrapper {
   }
 
   Future<_ImageDownloadWrapper> wait() {
-    if (isComplete) {
+    if (isComplete || isCancelled) {
       return Future.value(this);
     }
     var c = Completer<_ImageDownloadWrapper>();
@@ -1337,14 +1405,12 @@ class ArchiveDownloadTask extends DownloadTask {
   }
 
   @override
-  void cancel() async {
+  Future<void> cancel() async {
     _isRunning = false;
     await _downloader?.stop();
-    if (path != null) {
-      Directory(path!).deleteIgnoreError(recursive: true);
-    }
+    // 压缩包下载没有断点续传：目录里那点东西就是这次解压出来的，整本丢掉。
+    await LocalManager().discardTask(this);
     path = null;
-    LocalManager().removeTask(this);
   }
 
   @override
@@ -1495,6 +1561,7 @@ class ArchiveDownloadTask extends DownloadTask {
   Map<String, dynamic> toJson() {
     return {
       "type": "ArchiveDownloadTask",
+      "uid": uid,
       "archiveUrl": archiveUrl,
       "comic": comic.toJson(),
       "path": path,
@@ -1511,6 +1578,7 @@ class ArchiveDownloadTask extends DownloadTask {
       ComicDetails.fromJson(json["comic"]),
     )
       ..path = json["path"]
+      ..uid = json["uid"] ?? DownloadTask.newTaskUid()
       ..userPaused = json["userPaused"] ?? false;
   }
 

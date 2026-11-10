@@ -113,7 +113,9 @@ void main() {
     test('只带小字段，能原样盖回去', () {
       var task = _FakeTask()..userPaused = true;
       var json = task.toProgressJson();
-      expect(json, {"userPaused": true});
+      // uid 是任务实例的身份。进度文件按「类型:id」索引，同一本漫画取消后
+      // 再下一次会撞上同一个键，只有 uid 能把这两轮分开（见 acceptsProgress）。
+      expect(json, {"uid": task.uid, "userPaused": true});
       var restored = _FakeTask();
       restored.applyProgressJson(json);
       expect(restored.userPaused, isTrue);
@@ -224,7 +226,7 @@ class _FakeTask extends DownloadTask {
   int get speed => 0;
 
   @override
-  void cancel() {}
+  Future<void> cancel() async {}
 
   @override
   void pause() {}
