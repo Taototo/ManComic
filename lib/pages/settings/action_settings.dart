@@ -65,18 +65,6 @@ class _FavoritesSettingsState extends State<FavoritesSettings> {
           title: "Show local favorites before network favorites".tl,
           settingKey: "localFavoritesFirst",
         ).toSliver(),
-        _CallbackSetting(
-          title: "Delete all unavailable local favorite items".tl,
-          callback: () async {
-            var controller = showLoadingDialog(context);
-            var count = await LocalFavoritesManager().removeInvalid();
-            controller.close();
-            context.showMessage(
-              message: "Deleted @a favorite items".tlParams({'a': count}),
-            );
-          },
-          actionTitle: 'Delete'.tl,
-        ).toSliver(),
       ],
     );
   }

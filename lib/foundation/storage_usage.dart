@@ -9,7 +9,6 @@ import 'dart:io';
 
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/cache_manager.dart';
-import 'package:venera/foundation/download_cleanup.dart';
 import 'package:venera/foundation/local.dart';
 
 /// 存储占用的一个分类。
@@ -21,8 +20,6 @@ class StorageUsage {
     required this.path,
     this.clearable = false,
     this.isChild = false,
-    this.detail,
-    this.detailParams,
   });
 
   /// 稳定标识。清理时按它决定删什么，**不要**用 label（会翻译）。
@@ -40,11 +37,6 @@ class StorageUsage {
 
   /// 是否为上层分类的子项（UI 上缩进显示）。
   final bool isChild;
-
-  /// 副标题里追加的一句说明（翻译键 + 参数），没有就只显示体积。
-  final String? detail;
-
-  final Map<String, String>? detailParams;
 }
 
 /// 递归统计目录占用。
@@ -182,28 +174,6 @@ Future<List<StorageUsage>> computeStorageUsage() async {
     ),
   );
 
-  // 下载残留：取消/删除之后没删干净的目录、过期的进度条目、下载临时文件。
-  //
-  // 挂在「本地漫画」下面（isChild）而不是单独算一项：残留目录本来就躺在
-  // 本地漫画目录里，上面那行已经把它们的字节数算进去了，再算一遍总数会虚高。
-  final junk = await scanDownloadJunk();
-  result.add(
-    StorageUsage(
-      id: 'download_junk',
-      label: 'Download leftovers',
-      bytes: junk.bytes,
-      path: localDir.path,
-      clearable: !junk.isEmpty,
-      isChild: true,
-      detail: junk.isEmpty
-          ? 'Nothing to clean'
-          : '@a folders · @b files',
-      detailParams: junk.isEmpty
-          ? null
-          : {'a': '${junk.dirCount}', 'b': '${junk.fileCount}'},
-    ),
-  );
-
   result.add(
     StorageUsage(
       id: 'logs',
@@ -222,8 +192,6 @@ Future<void> clearStorageUsage(StorageUsage usage) async {
   switch (usage.id) {
     case 'cache':
       await CacheManager().clear();
-    case 'download_junk':
-      await clearDownloadJunk();
     case 'logs':
       try {
         await logFile().delete();

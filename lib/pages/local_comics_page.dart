@@ -99,6 +99,10 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                     value: LocalSortType.name,
                   ),
                   RadioListTile<LocalSortType>(
+                    title: Text("Name A-Z".tl),
+                    value: LocalSortType.titleAZ,
+                  ),
+                  RadioListTile<LocalSortType>(
                     title: Text("Date".tl),
                     value: LocalSortType.timeAsc,
                   ),

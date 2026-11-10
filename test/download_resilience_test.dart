@@ -92,13 +92,29 @@ void main() {
     });
   });
 
-  group('失效分类可以原路退回', () {
-    test('记录来源分类并支持恢复', () {
+  group('收藏按「有没有下载」自动分批', () {
+    test('本地库里有的书会被挪进「已下载」分类', () {
       var favorites = read('lib/foundation/favorites.dart');
-      expect(favorites.contains('restoreValidInvalid'), isTrue);
-      expect(favorites.contains('origin TEXT'), isTrue);
+      expect(favorites.contains('moveDownloadedToLocalFolder'), isTrue);
+      expect(favorites.contains('downloadedFolderName'), isTrue);
+      // 判定只看本地库，不联网探活（几百条收藏逐个请求既慢又容易吃风控）
+      expect(favorites.contains('LocalManager().find('), isTrue);
+      // 下载完成入库时补一刀，不用等下次重启
+      var local = read('lib/foundation/local.dart');
+      expect(local.contains('onComicAdded'), isTrue);
+      var init = read('lib/init.dart');
+      expect(init.contains('moveDownloadedToLocalFolder'), isTrue);
+    });
+
+    test('「失效」分类连同判定一起移除了', () {
+      var favorites = read('lib/foundation/favorites.dart');
+      // 1.4.55 删掉：老库里的表也要清掉，否则会冒充普通分类出现在侧栏
+      expect(favorites.contains('_legacyInvalidFolderName'), isTrue);
+      expect(favorites.contains('invalidCount'), isFalse);
+      expect(favorites.contains('restoreValidInvalid'), isFalse);
       var page = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(page.contains('recheckInvalid'), isTrue);
+      expect(page.contains('recheckInvalid'), isFalse);
+      expect(page.contains('Clean up invalid'), isFalse);
     });
   });
 
@@ -115,29 +131,6 @@ void main() {
     test('通知栏进度也按页数算，不用字节估算', () {
       var local = read('lib/foundation/local.dart');
       expect(local.contains('progress += task.progress'), isTrue);
-    });
-  });
-
-  group('源检测失败也算失效', () {
-    test('一键清理会带上体检挂掉的源', () {
-      var favorites = read('lib/foundation/favorites.dart');
-      expect(favorites.contains('SourceHealthService.instance.hasFailed'), isTrue);
-    });
-
-    test('失败结果落盘，重启后清理仍然有效', () {
-      var health = read('lib/foundation/source_health.dart');
-      expect(health.contains('sourceHealthFailedKeys'), isTrue);
-      expect(health.contains('_recordFailed'), isTrue);
-      // 测通之后要把旧的失败记录删掉，否则角标永远恢复不了
-      expect(health.contains('_failedKeys.remove'), isTrue);
-    });
-
-    test('清理弹窗要提示会连源检测失败的一起移', () {
-      var page = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(
-        page.contains('failed the health check are moved too'),
-        isTrue,
-      );
     });
   });
 

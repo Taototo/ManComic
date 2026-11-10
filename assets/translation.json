@@ -913,7 +913,9 @@
     "@a% left": "剩余 @a%",
     "Comics from sources that failed the health check are moved too": "源检测失败的作品也会一起移入",
     "Waiting for network": "等待网络",
-    "@n retrying": "@n 个等待重试"
+    "@n retrying": "@n 个等待重试",
+    "Downloaded": "已下载",
+    "No downloaded comics": "没有已下载的漫画"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1829,6 +1831,8 @@
     "@a% left": "剩餘 @a%",
     "Comics from sources that failed the health check are moved too": "源檢測失敗的作品也會一起移入",
     "Waiting for network": "等待網路",
-    "@n retrying": "@n 個等待重試"
+    "@n retrying": "@n 個等待重試",
+    "Downloaded": "已下載",
+    "No downloaded comics": "沒有已下載的漫畫"
   }
 }

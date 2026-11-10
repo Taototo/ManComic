@@ -14,6 +14,7 @@ import 'package:venera/network/download.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/download_background.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/title_sort.dart';
 
 import 'app.dart';
 import 'appdata.dart';
@@ -182,6 +183,13 @@ class LocalManager with ChangeNotifier {
   /// path to the directory where all the comics are stored
   late String path;
 
+  /// 新漫画入库后的回调。
+  ///
+  /// 收藏侧挂这个钩子把「已经下载到本地」的书归拢到「已下载」分类。做成回调
+  /// 而不是让 local.dart 直接依赖 favorites.dart：两边已经互相 import 了
+  /// （收藏要查本地库），再加一条静态调用就绕成环，测试里也不好替换。
+  void Function(LocalComic comic)? onComicAdded;
+
   Directory get directory => Directory(path);
 
   void _checkNoMedia() {
@@ -329,6 +337,7 @@ class LocalManager with ChangeNotifier {
       ],
     );
     notifyListeners();
+    onComicAdded?.call(comic);
   }
 
   void remove(String id, ComicType comicType) async {
@@ -345,6 +354,15 @@ class LocalManager with ChangeNotifier {
   }
 
   List<LocalComic> getComics(LocalSortType sortType) {
+    // A-Z 要按「读音」排，不能交给 SQLite：库里存的是 UTF-8，汉字会落成
+    // 按码位排，结果是乱序。这里取全量再按首字母排（见 comicTitleSortKey）。
+    if (sortType == LocalSortType.titleAZ) {
+      var all = _db
+          .select('SELECT * FROM comics;')
+          .map((row) => LocalComic.fromRow(row))
+          .toList();
+      return sortByTitleAZ(all, (e) => e.title);
+    }
     var res = _db.select('''
       SELECT * FROM comics
       ORDER BY
@@ -1655,6 +1673,7 @@ List<String> mergeLocalPages(Map<int, String> local, List<String> remote) {
 
 enum LocalSortType {
   name("name"),
+  titleAZ("title_az"),
   timeAsc("time_asc"),
   timeDesc("time_desc");
 

@@ -38,11 +38,7 @@ class _StorageSettingsState extends State<StorageSettings> {
     showConfirmDialog(
       context: context,
       title: "Clear @a".tlParams({'a': usage.label.tl}),
-      // 下载残留那一项值得单独解释：用户会担心「清掉的是不是我下好的漫画」。
-      content: usage.id == 'download_junk'
-          ? "Only folders from cancelled or deleted downloads are removed, plus stale progress records and temp files."
-              .tl
-          : "This cannot be undone.".tl,
+      content: "This cannot be undone.".tl,
       confirmText: "Clear".tl,
       onConfirm: () => _doClear(usage),
     );
@@ -167,20 +163,6 @@ class _StorageSettingsState extends State<StorageSettings> {
     );
   }
 
-  /// 副标题：体积，后面可选追加一句「几个目录 / 几个文件」。
-  ///
-  /// 「下载残留」光给个体积没意义——用户真正想知道的是「有没有东西要清」，
-  /// 所以那一行补上数量；清完变成 0 时这行还在，只是写着「没有需要清理的」，
-  /// 免得入口时有时无。
-  String _subtitleOf(StorageUsage usage) {
-    final size = bytesToReadableString(usage.bytes);
-    final detail = usage.detail;
-    if (detail == null) {
-      return size;
-    }
-    return "$size · ${detail.tlParams(usage.detailParams ?? const {})}";
-  }
-
   Widget _buildRow(StorageUsage usage) {
     return ListTile(
       contentPadding: EdgeInsetsDirectional.only(
@@ -195,7 +177,7 @@ class _StorageSettingsState extends State<StorageSettings> {
         style: usage.isChild ? ts.s14 : null,
       ),
       subtitle: Text(
-        _subtitleOf(usage),
+        bytesToReadableString(usage.bytes),
         style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
       ),
       trailing: usage.clearable

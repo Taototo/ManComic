@@ -326,6 +326,15 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
   /// 取消时要用：这次写了哪些页。
   Map<String, Set<int>> get pagesWrittenThisRun => _writtenPages;
 
+  /// 这次下载里「重试到顶仍然失败、被跳过」的章节名。
+  ///
+  /// 只是给人看的：任务照常结束（能下的都下完了），缺的那几章用户回头
+  /// 可以单独再点一次。别拿它参与「是否完成」的判断——那会让整本重新变成
+  /// 永远下不完。
+  final _failedChapters = <String>{};
+
+  Set<String> get failedChapters => _failedChapters;
+
   /// 这次任务选的章节；null = 整本。
   List<String>? get selectedChapters => chapters;
 
@@ -846,9 +855,15 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
           return;
         }
         if (task.error != null) {
+          // 一页重试到顶还是失败：跳过**整章**，接着下下一章。
+          //
+          // 以前这里是整本进 error、等看门狗再来一遍——而源站那几张图本身
+          // 就是坏的（截断 / 404），重来一百次拿到的还是同一份字节，结果
+          // 整本书永远卡在同一个百分比、还一直重拉。用户要的是「能下的先
+          // 下完」，缺的那一章回头单独补。
           Log.error("Download", task.error.toString());
-          _setError("Error: ${task.error}", autoRetry: true);
-          return;
+          _markChapterFailed(chapterName);
+          break;
         }
         (_diskPages[chapterName] ??= <int>{}).add(_index);
         (_writtenPages[chapterName] ??= <int>{}).add(_index);
@@ -864,8 +879,28 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       _chapter++;
     }
 
+    if (_failedChapters.isNotEmpty) {
+      // 有缺章就别报「全部下好」：给一个能看懂的收尾状态，任务照常结束。
+      _message = "${_failedChapters.length} chapters skipped";
+      notifyListeners();
+      Log.warning(
+        "Download",
+        "Finished with ${_failedChapters.length} failed chapters: "
+        "${_failedChapters.join(', ')}",
+      );
+    }
     LocalManager().completeTask(this);
     stopRecorder();
+  }
+
+  /// 记下「这一章没下全」。章节名对单章漫画是空串，日志里换成序号更好认。
+  void _markChapterFailed(String chapterName) {
+    var label = chapterName.isEmpty
+        ? (_images!.length > 1 ? "chapter ${_chapter + 1}" : "comic")
+        : chapterName;
+    if (_failedChapters.add(label)) {
+      Log.warning("Download", "Skipped chapter: $label");
+    }
   }
 
   @override
@@ -1308,8 +1343,11 @@ class _ImageDownloadWrapper {
         text.contains('connection aborted');
   }
 
-  /// 多重试几次也无害：一页失败会拖住整章，重试成本远低于从头再过一遍。
-  static const _maxRetry = 4;
+  /// 一页最多试几次（含第一次）。
+  ///
+  /// 5 次是「网络抖两下能救回来」和「别在死链上耗一晚上」的分界：再往上加
+  /// 只会把整章失败的时间拖长，而重试到顶的页基本都是源文件本身坏了。
+  static const _maxRetry = 5;
 
   /// 多久收不到下一个字节就算这一页「假死」。
   ///

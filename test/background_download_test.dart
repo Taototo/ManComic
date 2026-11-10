@@ -164,13 +164,16 @@ void main() {
       expect(local.contains('waiting: waiting'), isTrue);
     });
 
-    test('详情/封面/地址表失败也自动重试', () {
+    test('详情/封面/地址表失败也自动重试，逐页失败改成跳章', () {
       var download = read('lib/network/download.dart');
-      // 逐页失败以外的四条路径
+      // 详情、封面、单章地址表、多章地址表四条路径仍然整任务重试
       expect(
-        RegExp(r'autoRetry: true').allMatches(download).length >= 5,
+        RegExp(r'autoRetry: true').allMatches(download).length >= 4,
         isTrue,
       );
+      // 单页重试到顶不再把整本拖成 error：跳过这一章接着下一章
+      expect(download.contains('_markChapterFailed'), isTrue);
+      expect(download.contains('_failedChapters'), isTrue);
       // 地址表只拉到一半必须整份作废，否则重试时会被当成「已经有了」
       expect(download.contains('_images = null;'), isTrue);
     });

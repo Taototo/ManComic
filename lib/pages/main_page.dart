@@ -211,14 +211,8 @@ class _MainPageState extends State<MainPage> {
         // 收藏页自己的按钮（同步 / 排序 / 多选 / 搜索 / 更多）。原来它们长在
         // 页面那条标题栏里，现在整条搬到顶栏，由页面登记、这里拼进来。
         if (index == _tabFavorites) ..._favoritesTopBar.actions,
-        // 收藏夹抽屉的入口。原来它长在收藏页自己的标题栏里（那一栏已经
-        // 去掉，页面顶部才能和主页一致），现在提到顶栏图标位上。
-        if (index == _tabFavorites)
-          PaneActionEntry(
-            icon: Icons.folder_outlined,
-            label: "Folders".tl,
-            onTap: () => _favoritesFolders.open?.call(),
-          ),
+        // 这里原本还有一颗「文件夹」图标，和标题点击是同一个入口——顶栏宽度
+        // 只够 6 颗图标，同一件事占两处不值当，分类菜单只留标题那一下。
         // 收藏页自带「在当前文件夹里搜」的放大镜，这里再放一个全局搜索就是
         // 同一屏两颗放大镜（原来截图里那两个就是这么来的）。
         if (index != _tabHome && index != _tabFavorites)

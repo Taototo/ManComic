@@ -1,7 +1,6 @@
 import 'dart:async';
 
 import 'package:flutter/foundation.dart';
-import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/utils/translations.dart';
@@ -116,55 +115,9 @@ class SourceHealth {
 
 /// 全源体检。单例，结果常驻内存，列表与详情面板读的都是这一份。
 class SourceHealthService extends ChangeNotifier {
-  SourceHealthService._() {
-    final saved = appdata.implicitData[_failedKeysKey];
-    if (saved is List) {
-      _failedKeys.addAll(saved.whereType<String>());
-    }
-  }
+  SourceHealthService._();
 
   static final SourceHealthService instance = SourceHealthService._();
-
-  /// 上次测出「失败」的源 key，跟着 implicitData 落盘。
-  ///
-  /// 体检结果本身只在内存里，重启就没了。但「收藏 → 一键清理失效」要靠它
-  /// 判断哪些源挂了——只放内存的话，重启后第一次清理会把那些源当成正常，
-  /// 一条也挪不动。源重新测通就从这个集合里删掉。
-  static const _failedKeysKey = 'sourceHealthFailedKeys';
-
-  final _failedKeys = <String>{};
-
-  /// 这个源上次体检是不是失败的。
-  bool hasFailed(String key) => _failedKeys.contains(key);
-
-  void _recordFailed(SourceHealth item) {
-    final key = item.source.key;
-    final changed = item.status == SourceHealthStatus.error
-        ? _failedKeys.add(key)
-        : _failedKeys.remove(key);
-    if (changed) {
-      appdata.implicitData[_failedKeysKey] = _failedKeys.toList();
-      unawaited(appdata.writeImplicitData());
-      if (_running) {
-        _failedSinceBatch = true;
-      } else {
-        unawaited(_notifyFailuresChanged());
-      }
-    }
-  }
-
-  Future<void> _notifyFailuresChanged() async {
-    final handler = onFailuresChanged;
-    if (handler == null) {
-      return;
-    }
-    try {
-      await handler();
-    } catch (e, s) {
-      // 收藏清理失败不能连累检测结果的展示
-      Log.error("SourceHealth", "failure handler failed: $e\n$s");
-    }
-  }
 
   /// 用尽量短的常见字探测，多数源都能返回结果
   static const probeKeyword = "a";
@@ -177,23 +130,6 @@ class SourceHealthService extends ChangeNotifier {
   final _cache = <String, SourceHealth>{};
 
   bool _running = false;
-
-  /// 这一批检测里有没有源的「失败」状态动过。
-  ///
-  /// 不能每测一个源就收一次收藏（一轮下来八个源扫八遍库），攒到批次结束
-  /// 再一起处理；单独点某一行重测时 `_running` 是 false，立刻处理。
-  bool _failedSinceBatch = false;
-
-  /// 失败源集合变化后的回调。
-  ///
-  /// 收藏那边靠它把「源已经挂了」的漫画挪进「失效」分类——用户在源页面
-  /// 看到一片红，收藏里却还是满的，还得自己去找「一键清理失效」，这条
-  /// 联动就是为了省掉那一步。
-  ///
-  /// 做成回调而不是直接 import favorites：`favorites.dart` 已经引用了本
-  /// 文件（`_isInvalidItem` 要看 `hasFailed`），反向依赖会绕成环。注册在
-  /// `init.dart`，那里两边的初始化顺序是确定的。
-  Future<void> Function()? onFailuresChanged;
 
   bool get running => _running;
 
@@ -218,7 +154,6 @@ class SourceHealthService extends ChangeNotifier {
 
   /// 源被删除/重装后清掉它的结果
   void forget(String key) {
-    _failedKeys.remove(key);
     if (_cache.remove(key) != null) {
       notifyListeners();
     }
@@ -261,11 +196,6 @@ class SourceHealthService extends ChangeNotifier {
     _running = false;
     lastRunAt = DateTime.now();
     notifyListeners();
-    // 一轮测完才动收藏：中途每测挂一个就扫一遍库，八个源就是八次全表扫描。
-    if (_failedSinceBatch) {
-      _failedSinceBatch = false;
-      unawaited(_notifyFailuresChanged());
-    }
   }
 
   Future<void> testOne(SourceHealth item) async {
@@ -292,7 +222,6 @@ class SourceHealthService extends ChangeNotifier {
         item
           ..status = SourceHealthStatus.unsupported
           ..checkedAt = DateTime.now();
-        _recordFailed(item);
         notifyListeners();
         return;
       }
@@ -321,7 +250,6 @@ class SourceHealthService extends ChangeNotifier {
             : e.toString().split("\n").first;
     }
     item.checkedAt = DateTime.now();
-    _recordFailed(item);
     notifyListeners();
   }
 }

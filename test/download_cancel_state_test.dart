@@ -5,7 +5,6 @@ import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/comic_type.dart';
-import 'package:venera/foundation/download_cleanup.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/download.dart';
 
@@ -182,87 +181,4 @@ void main() {
     });
   });
 
-  group('下载残留扫描', () {
-    Directory dir(String name) =>
-        Directory("${root.path}/$name")..createSync(recursive: true);
-
-    test('没人认领的下载目录会被找出来', () async {
-      var orphan = dir("取消了一半的书");
-      File("${orphan.path}/0.jpg").writeAsBytesSync(List.filled(10, 1));
-      File("${orphan.path}/details.json").writeAsStringSync("{}");
-
-      var claimed = dir("库里的书");
-      File("${claimed.path}/0.jpg").writeAsBytesSync(List.filled(10, 1));
-
-      // 用户自己丢进本地目录的普通文件夹：里面没有页码命名的图，不能动
-      var plain = dir("我的笔记");
-      File("${plain.path}/readme.txt").writeAsStringSync("hi");
-
-      var found = await findOrphanDirs(
-        root: root,
-        claimedPaths: {claimed.path},
-        claimedIsComplete: true,
-      );
-      expect(
-        found
-            .map((e) => e.uri.pathSegments.where((s) => s.isNotEmpty).last)
-            .toList(),
-        ["取消了一半的书"],
-      );
-    });
-
-    test('认领信息不完整时一个都不判为残留', () async {
-      var orphan = dir("取消了一半的书");
-      File("${orphan.path}/0.jpg").writeAsBytesSync(List.filled(10, 1));
-      var found = await findOrphanDirs(
-        root: root,
-        claimedPaths: {},
-        claimedIsComplete: false,
-      );
-      expect(found, isEmpty);
-    });
-
-    test('隐藏目录和空目录不算残留', () async {
-      dir(".trash");
-      dir("空目录");
-      var found = await findOrphanDirs(
-        root: root,
-        claimedPaths: {},
-        claimedIsComplete: true,
-      );
-      expect(found, isEmpty);
-    });
-
-    test('下载临时文件和过期进度条目', () async {
-      File("${dataDir.path}/downloading_tasks.json.tmp").writeAsStringSync("[]");
-      File("${dataDir.path}/downloading_progress.json.tmp")
-          .writeAsStringSync("{}");
-      File("${dataDir.path}/archive_downloading.zip").writeAsBytesSync([1, 2]);
-      File("${dataDir.path}/downloading_progress.json").writeAsStringSync(
-        jsonEncode({
-          "${ComicType("test-src".hashCode).value}:999": {"uid": "gone"},
-        }),
-      );
-
-      var temps = await findDownloadTempFiles();
-      expect(temps.map((e) => e.uri.pathSegments.last).toSet(), {
-        "downloading_tasks.json.tmp",
-        "downloading_progress.json.tmp",
-        "archive_downloading.zip",
-      });
-
-      var stale = await findStaleProgressKeys();
-      expect(stale, ["${ComicType("test-src".hashCode).value}:999"]);
-    });
-
-    test('有任务时它的进度条目不算过期', () async {
-      LocalManager().downloadingTasks = [
-        ImagesDownloadTask.fromJson(taskJson())!,
-      ];
-      File("${dataDir.path}/downloading_progress.json").writeAsStringSync(
-        jsonEncode({progressKey(): {"userPaused": true}}),
-      );
-      expect(await findStaleProgressKeys(), isEmpty);
-    });
-  });
 }
