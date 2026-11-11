@@ -256,7 +256,11 @@ class ReadingStats {
         "values (?, ?, ?, ?, ?, ?, ?, ?);",
         [
           start.millisecondsSinceEpoch,
-          _dayKey(end),
+          // day 必须和 start 同一天。以前用 end：跨午夜的会话（23:50–00:10）
+          // 会落成「今天」，而按日汇总用的是 `start >= 今天0点` 过滤，那 10
+          // 分钟就两边都不算；年度报告里 activeDays 用 day、byMonth/byHour
+          // 用 start，同一条记录会落在不同的月份。
+          _dayKey(start),
           seconds,
           sourceKey,
           title,
@@ -398,15 +402,19 @@ class ReadingStats {
   static void removeComic(String sourceKey, String title, {String? comicId}) {
     try {
       if (comicId != null && comicId.isNotEmpty) {
+        // 有 id 就只按 id 删。以前删完 id 还会再按标题删一遍，同一源下
+        // 两本同名作品会一起消失。
         _database.execute(
           "delete from reading_session where source = ? and comic_id = ?;",
           [sourceKey, comicId],
         );
+      } else {
+        // 老数据没有 comic_id，只能退回标题（尽量少删，仅此一条）。
+        _database.execute(
+          "delete from reading_session where source = ? and title = ?;",
+          [sourceKey, title],
+        );
       }
-      _database.execute(
-        "delete from reading_session where source = ? and title = ?;",
-        [sourceKey, title],
-      );
     } catch (_) {
       // 删除失败不影响使用
     }

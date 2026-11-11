@@ -92,6 +92,9 @@ class _ReaderImagesState extends State<_ReaderImages> {
           });
         }
       } catch (e) {
+        if (!mounted) {
+          return;
+        }
         setState(() {
           error = e.toString();
           reader.isLoading = false;
@@ -100,6 +103,9 @@ class _ReaderImagesState extends State<_ReaderImages> {
       }
     } else {
       await _loadFromNetwork();
+    }
+    if (!mounted) {
+      return;
     }
     context.readerScaffold.update();
   }
@@ -117,6 +123,15 @@ class _ReaderImagesState extends State<_ReaderImages> {
     if (res.error) {
       setState(() {
         error = res.errorMessage;
+        reader.isLoading = false;
+        inProgress = false;
+      });
+    } else if (res.data.isEmpty) {
+      // 源站返回空列表（下架、解析失败、"公告"章）时不能把 images 设成空表：
+      // maxPage 会算成 0，底部栏的 `page.clamp(1, 0)` 直接抛 ArgumentError，
+      // 画廊还会把两个哨兵页当成真实页来回跳。当成错误处理，至少能重试。
+      setState(() {
+        error = "No images found in this chapter".tl;
         reader.isLoading = false;
         inProgress = false;
       });
@@ -374,7 +389,9 @@ class _GalleryModeState extends State<_GalleryMode>
       },
       onPointerMove: (event) {
         if (isLongPressing) {
-          var controller = photoViewControllers[reader.page]!;
+          var controller = photoViewControllers[reader.page];
+          // 章节评论页是 customChild，没有对应的 PhotoViewController。
+          if (controller == null) return;
           Offset value = event.delta;
           if (isLongPressing) {
             controller.updateMultiple(position: controller.position + value);
@@ -584,7 +601,9 @@ class _GalleryModeState extends State<_GalleryMode>
       context.readerScaffold.addImageFavorite();
       return;
     }
-    var controller = photoViewControllers[reader.page]!;
+    var controller = photoViewControllers[reader.page];
+    // 评论页没有 controller；以前这里强断言，双击评论页必崩。
+    if (controller == null) return;
     controller.onDoubleClick?.call();
   }
 
@@ -593,7 +612,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (!appdata.settings['enableLongPressToZoom'] || fingers != 1) {
       return;
     }
-    var photoViewController = photoViewControllers[reader.page]!;
+    var photoViewController = photoViewControllers[reader.page];
+    if (photoViewController == null) return;
     double target = photoViewController.getInitialScale!.call()! * 1.75;
     var size = reader.size;
     Offset zoomPosition;
@@ -614,7 +634,8 @@ class _GalleryModeState extends State<_GalleryMode>
     if (!appdata.settings['enableLongPressToZoom'] || !isLongPressing) {
       return;
     }
-    var photoViewController = photoViewControllers[reader.page]!;
+    var photoViewController = photoViewControllers[reader.page];
+    if (photoViewController == null) return;
     double target = photoViewController.getInitialScale!.call()!;
     photoViewController.animateScale?.call(target);
     isLongPressing = false;

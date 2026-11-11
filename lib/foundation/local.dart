@@ -115,6 +115,7 @@ class LocalComic with HistoryMixin implements Comic {
     if (downloadedChapters.isNotEmpty && chapters != null) {
       final chapters = this.chapters!;
       if (chapters.isGrouped) {
+        groupLoop:
         for (int i = 0; i < chapters.groupCount; i++) {
           var group = chapters.getGroupByIndex(i);
           var keys = group.keys.toList();
@@ -123,7 +124,9 @@ class LocalComic with HistoryMixin implements Comic {
             if (downloadedChapters.contains(chapterId)) {
               firstDownloadedChapter = j + 1;
               firstDownloadedChapterGroup = i + 1;
-              break;
+              // 必须跳出外层：只 break 内层的话，后面还有下载章的分组会
+              // 覆盖成「最后一组」，点阅读不是从第一话已下章开始。
+              break groupLoop;
             }
           }
         }
@@ -310,7 +313,11 @@ class LocalManager with ChangeNotifier {
 
   Future<void> add(LocalComic comic, [String? id]) async {
     var old = find(id ?? comic.id, comic.comicType);
-    var downloaded = comic.downloadedChapters;
+    // 用 Set 合并，别就地 addAll：`isDownloaded` 更新章节表时传进来的就是
+    // 库里同一份 downloadedChapters，并自己会把它翻一倍。而「源站加一话」
+    // 正好会走那条路，所以这不是极端情况——列表翻倍后删除章节弹窗同章两行、
+    // 导出 cbz/pdf 出现重复章节、本地库显示「8/5」。
+    var downloaded = <String>{...comic.downloadedChapters};
     if (old != null) {
       downloaded.addAll(old.downloadedChapters);
     }
@@ -325,7 +332,7 @@ class LocalManager with ChangeNotifier {
         jsonEncode(comic.chapters),
         comic.cover,
         comic.comicType.value,
-        jsonEncode(downloaded),
+        jsonEncode(downloaded.toList()),
         comic.createdAt.millisecondsSinceEpoch,
       ],
     );
@@ -367,7 +374,7 @@ class LocalManager with ChangeNotifier {
       SELECT * FROM comics
       ORDER BY
         ${sortType.value == 'name' ? 'title' : 'created_at'}
-        ${sortType.value == 'time_asc' ? 'ASC' : 'DESC'}
+        ${sortType.value == 'time_asc' || sortType.value == 'name' ? 'ASC' : 'DESC'}
       ;
     ''');
     return res.map((row) => LocalComic.fromRow(row)).toList();
@@ -382,6 +389,56 @@ class LocalManager with ChangeNotifier {
       return null;
     }
     return LocalComic.fromRow(res.first);
+  }
+
+  /// 向源站要一次最新目录并写回本地库。
+  ///
+  /// 章节表有三个来源：源站、`details.json`、本地库。以前只有本地详情页会
+  /// 刷新本地库，而「最近阅读 / 继续阅读」直接信本地快照——源站加了章节后，
+  /// 同一本书从详情页进和从最近阅读进，章节序号会对不上，跳到另一话。
+  ///
+  /// 写回是安全的：章节目录按章节 id 建，换一份新表不会动已下好的文件。
+  /// 返回是否真的更新了。失败静默（离线是常态）。
+  Future<bool> refreshChapters(LocalComic comic) async {
+    if (comic.comicType == ComicType.local) {
+      return false;
+    }
+    var source = comic.comicType.comicSource;
+    if (source?.loadComicInfo == null) {
+      return false;
+    }
+    try {
+      var res = await source!.loadComicInfo!(comic.id);
+      if (res.error) {
+        return false;
+      }
+      var remote = res.data.chapters;
+      if (remote == null) {
+        return false;
+      }
+      var old = comic.chapters;
+      if (old != null && remote.ids.join(",") == old.ids.join(",")) {
+        return false;
+      }
+      await add(
+        LocalComic(
+          id: comic.id,
+          title: comic.title,
+          subtitle: comic.subtitle,
+          tags: comic.tags,
+          directory: comic.directory,
+          chapters: remote,
+          cover: comic.cover,
+          comicType: comic.comicType,
+          downloadedChapters: comic.downloadedChapters,
+          createdAt: comic.createdAt,
+        ),
+      );
+      return true;
+    } catch (_) {
+      // 离线 / 源挂了：本地章节照样能读，不该因为刷新失败影响进入阅读。
+      return false;
+    }
   }
 
   @override
@@ -838,7 +895,15 @@ class LocalManager with ChangeNotifier {
   void retryErroredTasks() {
     // 不能一口气全 resume：resume() 会立刻开跑，绕过并发上限。只补满空位，
     // 剩下的等前面的完成后由 pumpQueue 自然接手。
-    var slots = maxConcurrentTasks;
+    //
+    // 「空位」要先扣掉正在跑的：以前只数「这次要拉起的个数」，3 本在跑 +
+    // 3 本 error 会再拉起 3 本，实际并发翻倍（×downloadThreads 后更夸张），
+    // 反而更容易被源站限流。
+    var running = downloadingTasks.where((t) => !t.isPaused && !t.isError).length;
+    var slots = maxConcurrentTasks - running;
+    if (slots <= 0) {
+      return;
+    }
     var retried = 0;
     for (var task in downloadingTasks) {
       if (slots <= 0) {
@@ -877,6 +942,10 @@ class LocalManager with ChangeNotifier {
     }
     _notifyTasksChanged();
     saveCurrentDownloadingTasks(full: true);
+    // 只清 userPaused 不够：pumpQueue 会明确跳过 isError 的任务，队列里
+    // 全是失败任务时「全部开始」看起来点了没反应，得等看门狗 60 秒。
+    // retryErroredTasks 内部按剩余并发位补满，不会一口气全拉起来。
+    retryErroredTasks();
     pumpQueue();
   }
 
@@ -968,11 +1037,13 @@ class LocalManager with ChangeNotifier {
     }
   }
 
-  void completeTask(DownloadTask task) {
+  void completeTask(DownloadTask task, [LocalComic? local]) {
     // 入库时按磁盘核对一遍「已下载章节」。不核对的话，记录会把「地址表里
     // 有、实际一页都没下来」的章节也算成下好了，阅读器信记录去读目录，
     // 直接 PathNotFoundException（取消后重新下载的漫画打不开就是这个）。
-    add(task.toLocalComic(verifyChapters: true));
+    //
+    // [local] 允许调用方把已经核好的结果传进来，省掉第二次扫目录。
+    add(local ?? task.toLocalComic(verifyChapters: true));
     downloadingTasks.remove(task);
     _notifyTasksChanged();
     saveCurrentDownloadingTasks(full: true);

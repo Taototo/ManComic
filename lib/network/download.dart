@@ -16,6 +16,7 @@ import 'package:venera/network/images.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/file_type.dart';
 import 'package:venera/utils/io.dart';
+import 'package:venera/utils/translations.dart';
 import 'package:zip_flutter/zip_flutter.dart';
 
 import 'file_downloader.dart';
@@ -889,8 +890,38 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         "${_failedChapters.join(', ')}",
       );
     }
-    LocalManager().completeTask(this);
+    // 入库前按磁盘核一遍，只算真正下完整的章节。全都没下成时留在列表里当
+    // 失败任务等用户重试——以前无条件 completeTask，本地库会多出一本
+    // 「已下载」却每章都打不开的空书，还占着列表位置。
+    var local = toLocalComic(verifyChapters: true);
+    if (local.downloadedChapters.isEmpty) {
+      _setError(
+        "No page was downloaded. The source may be returning broken images.",
+        autoRetry: false,
+      );
+      return;
+    }
+    if (_failedChapters.isNotEmpty) {
+      _showIncompleteNotice();
+    }
+    LocalManager().completeTask(this, local);
     stopRecorder();
+  }
+
+  /// 缺章时给一条能看见的提示。
+  ///
+  /// 任务一完成就从下载列表里摘掉，`_message` 那行来不及被看到；用户只会在
+  /// 几天后翻到某章「只有半截」或者「灰着不能选」，不知道该重下哪一章。
+  void _showIncompleteNotice() {
+    try {
+      var failCount = _failedChapters.length;
+      App.rootContext.showMessage(
+        message:
+            "@c chapters were not fully downloaded".tlParams({"c": failCount}),
+      );
+    } catch (_) {
+      // 后台/无 UI 时没有 rootContext，日志里已经记过，不影响入库。
+    }
   }
 
   /// 记下「这一章没下全」。章节名对单章漫画是空串，日志里换成序号更好认。
@@ -1113,10 +1144,13 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
     );
   }
 
-  /// 磁盘上真正有正文页的章节 id。
+  /// 磁盘上**下完整**的章节 id。
   ///
   /// 「打算下哪些」和「下到了哪些」不是一回事：地址表里列了不代表落盘了。
-  /// 只扫顶层一次 `listSync`，命中即停，不会为几百章各读一遍。
+  /// 而且「有一页」也不等于「下完了」——跳章时失败那一页之前的页已经写进
+  /// 目录，若只判「存在任意一页」，缺半截的章节会被记成已下载，详情页随即
+  /// 把它灰度禁用，用户既看不出缺页也补不回来。所以这里按地址表的页数逐页
+  /// 核对，只有 0..length-1 都在盘上才算这一章下好。
   List<String> _chaptersWithPagesOnDisk() {
     var all = comic?.chapters;
     if (all == null) {
@@ -1134,7 +1168,29 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         if (!dir.existsSync()) {
           continue;
         }
-        if (dir.listSync().any((e) => e is File && isPageFileName(e.name))) {
+        var pages = <int>{};
+        for (var e in dir.listSync()) {
+          if (e is! File || !isPageFileName(e.name)) {
+            continue;
+          }
+          var index = int.tryParse(e.name.split('.').first);
+          // 0 字节是上次写到一半被打断；和 _scanChapterPages 同一口径。
+          if (index != null && e.lengthSync() > 0) {
+            pages.add(index);
+          }
+        }
+        if (pages.isEmpty) {
+          continue;
+        }
+        var expected = _images?[id]?.length;
+        // 拿不到地址表（旧任务、只下部分章节）时退回「有页就算」，不能因为
+        // 少一份元数据就把真正下好的章节丢掉。
+        if (expected == null || expected <= 0) {
+          result.add(id);
+          continue;
+        }
+        // 只比页数、不要求从 0 开始：老版本按 1 号起编号的目录也应当算完整。
+        if (pages.length >= expected) {
           result.add(id);
         }
       } catch (_) {

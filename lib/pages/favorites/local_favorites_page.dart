@@ -74,6 +74,10 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   bool isLoading = false;
 
+  /// 加载期间收到的变更通知。丢弃的话，页面会停在「开始加载那一刻」的快照：
+  /// 大收藏夹异步读库要几百毫秒，这期间在别处取消的收藏会重新冒出来。
+  bool _reloadPending = false;
+
   late String readFilterSelect;
 
   late String sortSelect;
@@ -107,8 +111,22 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     });
   }
 
+  void _runPendingReload() {
+    if (_reloadPending) {
+      _reloadPending = false;
+      updateComics();
+    }
+  }
+
   void updateComics() {
-    if (isLoading) return;
+    // 导入同步、新建/排序分类这些 .then 回调没有 mounted 判断，统一在这里挡住。
+    if (!mounted) {
+      return;
+    }
+    if (isLoading) {
+      _reloadPending = true;
+      return;
+    }
     if (isReadFolder) {
       comics = manager.getFolderComics(LocalFavoritesManager.readFolderName);
     } else if (isDownloadedFolder) {
@@ -122,13 +140,25 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
         manager
             .getAllComicsAsync()
             .minTime(const Duration(milliseconds: 200))
-            .then((value) {
-              if (mounted) {
-                setState(() {
-                  isLoading = false;
-                  comics = value;
-                });
+            .then<void>((value) {
+              if (!mounted) {
+                return;
               }
+              setState(() {
+                isLoading = false;
+                comics = value;
+              });
+              _runPendingReload();
+            }, onError: (Object e, StackTrace s) {
+              // 没有错误分支时 isLoading 永远不复位，页面就停在转圈上。
+              Log.error("Favorites", "Failed to load all comics: $e\n$s");
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                isLoading = false;
+              });
+              _runPendingReload();
             });
       }
     } else {
@@ -140,13 +170,24 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
         manager
             .getFolderComicsAsync(widget.folder)
             .minTime(const Duration(milliseconds: 200))
-            .then((value) {
-              if (mounted) {
-                setState(() {
-                  isLoading = false;
-                  comics = value;
-                });
+            .then<void>((value) {
+              if (!mounted) {
+                return;
               }
+              setState(() {
+                isLoading = false;
+                comics = value;
+              });
+              _runPendingReload();
+            }, onError: (Object e, StackTrace s) {
+              Log.error("Favorites", "Failed to load folder comics: $e\n$s");
+              if (!mounted) {
+                return;
+              }
+              setState(() {
+                isLoading = false;
+              });
+              _runPendingReload();
             });
       }
     }
@@ -184,10 +225,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   List<FavoriteItem> filterComics(List<FavoriteItem> curComics) {
     return curComics.where((comic) {
-      var history = HistoryManager().find(
-        comic.id,
-        ComicType(comic.sourceKey.hashCode),
-      );
+      // 直接用条目自己的 type。以前从 `sourceKey.hashCode` 反推，导入手工
+      // 导入的书（local 是 value=0 的特例）和源已卸载的收藏（sourceKey 会
+      // 退化成 "Unknown:N"）永远查不到历史，于是「已完成」筛出来是空的、
+      // 「未完成」里却还挂着已读完的书。
+      var history = HistoryManager().find(comic.id, comic.type);
       if (readFilterSelect == "UnCompleted") {
         return history == null || history.page != history.maxPage;
       } else if (readFilterSelect == "Completed") {
@@ -286,51 +328,51 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   @override
   void dispose() {
-    super.dispose();
+    // 控制器要释放：切分类会重建这个 State，不释放就每次漏一个。
+    scrollController.dispose();
     LocalFavoritesManager().removeListener(updateComics);
     if (isDownloadedFolder) {
       LocalManager().removeListener(updateComics);
     }
+    super.dispose();
   }
 
   void selectAll() {
     setState(() {
-      if (searchMode) {
-        selectedComics = searchResults.asMap().map((k, v) => MapEntry(v, true));
-      } else {
-        selectedComics = comics.asMap().map((k, v) => MapEntry(v, true));
-      }
+      // 只选「看得见」的那些。网格渲染的是 filterComics(comics)，全选却遍历
+      // 原始 comics 的话，切到「未读」再全选删除会把已读的一起删掉。
+      var visible = searchMode ? searchResults : filterComics(comics);
+      selectedComics = visible.asMap().map((k, v) => MapEntry(v, true));
     });
   }
 
   void invertSelection() {
     setState(() {
-      if (searchMode) {
-        for (var c in searchResults) {
-          if (selectedComics.containsKey(c)) {
-            selectedComics.remove(c);
-          } else {
-            selectedComics[c] = true;
-          }
-        }
-      } else {
-        for (var c in comics) {
-          if (selectedComics.containsKey(c)) {
-            selectedComics.remove(c);
-          } else {
-            selectedComics[c] = true;
-          }
+      // 同上：反选只反转可见项，并丢掉被筛掉的旧选中，避免「看不见却被删」。
+      var visible = searchMode ? searchResults : filterComics(comics);
+      var next = <FavoriteItem, bool>{};
+      for (var c in visible) {
+        if (!selectedComics.containsKey(c)) {
+          next[c] = true;
         }
       }
+      selectedComics = next;
     });
   }
 
   bool downloadComic(FavoriteItem c) {
     var source = c.type.comicSource;
     if (source != null) {
-      bool isDownloaded = LocalManager().isDownloaded(c.id, (c).type);
-      if (isDownloaded) {
-        return false;
+      // 「已经下好了」必须按章节表核对，不能只看库里有没有这条记录：
+      // isDownloaded 两参数时下过一话就返回 true，于是补章的入口静默失效，
+      // 界面还照样弹「Download started」——用户以为在补，其实队列里没有。
+      var local = LocalManager().find(c.id, c.type);
+      if (local != null && local.chapters != null) {
+        var ids = local.chapters!.ids;
+        if (ids.isNotEmpty &&
+            local.downloadedChapters.toSet().containsAll(ids)) {
+          return false;
+        }
       }
       LocalManager().addTask(
         ImagesDownloadTask(source: source, comicId: c.id, comicTitle: c.title),
@@ -871,8 +913,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     icon: Icons.download,
                     text: "Download".tl,
                     onClick: () {
-                      downloadComic(c as FavoriteItem);
-                      context.showMessage(message: "Download started".tl);
+                      var started = downloadComic(c as FavoriteItem);
+                      context.showMessage(
+                        message:
+                            started ? "Download started".tl : "Downloaded".tl,
+                      );
                     },
                   ),
                 MenuEntry(
@@ -1230,6 +1275,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   ///
   /// 这个分类就是本地库本身，把条目藏起来却留着文件，只会变成用户看不见的
   /// 占用。真要保留文件可以去存储管理里清。
+  ///
+  /// 但要区分两种书：**从网络源下载的**清掉磁盘副本后书还在源站，收藏和
+  /// 历史都该留着（可以重新下）；**手工导入的**只在本地存在，连库记录一起
+  /// 删。以前这里统一用默认参数，把下载书的收藏记录和阅读历史顺手删了，
+  /// 而确认框只写「删除本地漫画和文件」——用户没预期丢这些东西。
   void _deleteLocalComics() {
     var localComics = selectedComics.keys
         .map((e) => e as FavoriteItem)
@@ -1240,7 +1290,17 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     if (localComics.isEmpty) {
       return;
     }
-    LocalManager().batchDeleteComics(localComics);
+    var imported =
+        localComics.where((c) => c.comicType == ComicType.local).toList();
+    var downloaded =
+        localComics.where((c) => c.comicType != ComicType.local).toList();
+    if (imported.isNotEmpty) {
+      LocalManager().batchDeleteComics(imported);
+    }
+    if (downloaded.isNotEmpty) {
+      // removeFileOnDisk: true, removeFavoriteAndHistory: false
+      LocalManager().batchDeleteComics(downloaded, true, false);
+    }
     updateComics();
   }
 }

@@ -169,6 +169,9 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
   void dispose() {
     _warmTimer?.cancel();
     sliderFocus.dispose();
+    // 阅读器里可能锁过竖屏/横屏。不恢复的话退出后整个 App 都锁着，
+    // 只有重启或再进一次阅读器才能解开。全项目只有这里改方向锁。
+    SystemChrome.setPreferredOrientations(DeviceOrientation.values);
     super.dispose();
   }
 
@@ -219,11 +222,18 @@ class _ReaderScaffoldState extends State<_ReaderScaffold> {
     if (!_isOpen) {
       SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
     } else {
-      if (!appdata.settings['showSystemStatusBar']) {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.immersive);
-      } else {
-        SystemChrome.setEnabledSystemUIMode(SystemUiMode.edgeToEdge);
-      }
+      // 读「按这本书」的设置，和进阅读器时同一套键。以前这里读全局的
+      // showSystemStatusBar，用户给某本书单独设了沉浸，只要开关一次工具栏
+      // 就永久变回 edgeToEdge。
+      var reader = context.reader;
+      var showBar = appdata.settings.getReaderSetting(
+        reader.cid,
+        reader.type.sourceKey,
+        'showSystemStatusBar',
+      );
+      SystemChrome.setEnabledSystemUIMode(
+        showBar ? SystemUiMode.edgeToEdge : SystemUiMode.immersive,
+      );
     }
     setState(() {
       _isOpen = !_isOpen;
@@ -1356,12 +1366,22 @@ class _BatteryWidgetState extends State<_BatteryWidget> {
     try {
       _batteryLevel = await _battery.batteryLevel;
       state = await _battery.batteryState;
+      // 用户可能在这两次 await 之间就退出了阅读器：那时 dispose 已经跑过
+      // （当时 _timer 还是 null，没被取消），这里再建 Timer 就永远停不下来，
+      // 之后每秒对已销毁的 State 调 setState。
+      if (!mounted) {
+        return;
+      }
       if (_batteryLevel > 0 && state != BatteryState.unknown) {
         setState(() {
           _hasBattery = true;
         });
         _timer = Timer.periodic(const Duration(seconds: 1), (timer) {
           _battery.batteryLevel.then((level) {
+            if (!mounted) {
+              timer.cancel();
+              return;
+            }
             if (_batteryLevel != level) {
               setState(() {
                 _batteryLevel = level;

@@ -203,9 +203,55 @@ class HistoryManager with ChangeNotifier {
     }
     _db = sqlite3.open("${App.dataPath}/history.db");
 
+    _db.execute(_createHistoryTableSql);
+
+    var columns = _db.select("PRAGMA table_info(history);");
+    if (!columns.any((element) => element["name"] == "chapter_group")) {
+      _db.execute("alter table history add column chapter_group int;");
+    }
+
+    _migratePrimaryKey();
+
+    notifyListeners();
+    ImageFavoriteManager().init();
+    isInitialized = true;
+  }
+
+  /// 主键必须是 `(id, type)`。
+  ///
+  /// 老库只有 `id text primary key`，而接口层一直按 `(id, type)` 找。本地导入
+  /// 书的 id 是 `"1"`、`"2"`…，网络源也常见 `"1"`/`"12345"`，两边撞上就
+  /// `insert or replace` 互相顶掉：读一本会改掉另一本的进度，删一条会「删了
+  /// 还在」。DDL 走一次重命名 + 建新表 + 搬数据，单表几百行，启动时几十毫秒。
+  void _migratePrimaryKey() {
+    var tableInfo = _db.select(
+      "select sql from sqlite_master where type = 'table' and name = 'history';",
+    );
+    var createSql = tableInfo.isEmpty
+        ? ""
+        : (tableInfo.first["sql"] as String? ?? "");
+    var normalized = createSql.toLowerCase().replaceAll(RegExp(r"\s+"), " ");
+    if (normalized.isEmpty ||
+        normalized.contains("primary key (id, type)") ||
+        normalized.contains("primary key(id, type)")) {
+      return;
+    }
+    _db.execute("alter table history rename to history_legacy;");
+    _db.execute(_createHistoryTableSql);
+    // 显式列名，别用 `select *`：老库的列顺序不保证和当前一致。
     _db.execute("""
+        insert or replace into history
+          (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group)
+        select id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group
+        from history_legacy;
+      """);
+    _db.execute("drop table history_legacy;");
+    Log.info("History", "Rebuilt history table with (id, type) primary key");
+  }
+
+  static const _createHistoryTableSql = """
         create table if not exists history  (
-          id text primary key,
+          id text,
           title text,
           subtitle text,
           cover text,
@@ -215,19 +261,12 @@ class HistoryManager with ChangeNotifier {
           page int,
           readEpisode text,
           max_page int,
-          chapter_group int
+          chapter_group int,
+          primary key (id, type)
         );
-      """);
+      """;
 
-    var columns = _db.select("PRAGMA table_info(history);");
-    if (!columns.any((element) => element["name"] == "chapter_group")) {
-      _db.execute("alter table history add column chapter_group int;");
-    }
-
-    notifyListeners();
-    ImageFavoriteManager().init();
-    isInitialized = true;
-  }
+  static String _cacheKey(String id, int type) => "$type\u0000$id";
 
   static const _insertHistorySql = """
         insert or replace into history (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group)
@@ -262,14 +301,20 @@ class HistoryManager with ChangeNotifier {
     }
 
     _haveAsyncTask = true;
-    await _addHistoryAsync(_db.handle.address, newItem);
-    _haveAsyncTask = false;
+    try {
+      await _addHistoryAsync(_db.handle.address, newItem);
+    } finally {
+      // 必须放 finally：写库抛一次（库被关、磁盘满、导入数据换了句柄）之后，
+      // 这个标志会永远停在 true，后面每次 addHistoryAsync 都在上面的 while
+      // 里无限等待——本次运行内所有阅读进度都不再落盘。
+      _haveAsyncTask = false;
+    }
     if (_cachedHistoryIds == null) {
       updateCache();
     } else {
-      _cachedHistoryIds![newItem.id] = true;
+      _cachedHistoryIds![_cacheKey(newItem.id, newItem.type.value)] = true;
     }
-    cachedHistories[newItem.id] = newItem;
+    cachedHistories[_cacheKey(newItem.id, newItem.type.value)] = newItem;
     if (cachedHistories.length > 10) {
       cachedHistories.remove(cachedHistories.keys.first);
     }
@@ -296,9 +341,9 @@ class HistoryManager with ChangeNotifier {
     if (_cachedHistoryIds == null) {
       updateCache();
     } else {
-      _cachedHistoryIds![newItem.id] = true;
+      _cachedHistoryIds![_cacheKey(newItem.id, newItem.type.value)] = true;
     }
-    cachedHistories[newItem.id] = newItem;
+    cachedHistories[_cacheKey(newItem.id, newItem.type.value)] = newItem;
     if (cachedHistories.length > 10) {
       cachedHistories.remove(cachedHistories.keys.first);
     }
@@ -348,10 +393,15 @@ void clearUnfavoritedHistory() {
   void updateCache() {
     _cachedHistoryIds = {};
     var res = _db.select("""
-        select id from history;
+        select id, type from history;
       """);
     for (var element in res) {
-      _cachedHistoryIds![element["id"] as String] = true;
+      // 缓存键必须带 type：只按 id 索引时，本地书和网络书 id 相同会让
+      // find() 直接命中对方那条记录（进度串书）。
+      _cachedHistoryIds![_cacheKey(
+        element["id"] as String,
+        element["type"] as int,
+      )] = true;
     }
     for (var key in cachedHistories.keys.toList()) {
       if (!_cachedHistoryIds!.containsKey(key)) {
@@ -364,11 +414,12 @@ void clearUnfavoritedHistory() {
     if (_cachedHistoryIds == null) {
       updateCache();
     }
-    if (!_cachedHistoryIds!.containsKey(id)) {
+    var key = _cacheKey(id, type.value);
+    if (!_cachedHistoryIds!.containsKey(key)) {
       return null;
     }
-    if (cachedHistories.containsKey(id)) {
-      return cachedHistories[id];
+    if (cachedHistories.containsKey(key)) {
+      return cachedHistories[key];
     }
 
     var res = _db.select("""

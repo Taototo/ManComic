@@ -1167,6 +1167,11 @@ class LocalFavoritesManager with ChangeNotifier {
         deleteComicWithId(folder, comic.id, comic.type);
       }
     }
+    // 「全部」的角标来自 _hashedIds（它不含已阅），而 addComic 已经先把
+    // 其它分类删掉了，下面循环里的 comicExists 全是 false，一次都不会走到
+    // reduceHashedId。批量版在结尾刷了一次，单本版漏了——结果是书从「全部」
+    // 里消失了，角标却还是旧数字，要重启才恢复。
+    refreshHashedIds();
   }
 
   /// 批量移入「已阅」（同样从所有普通收藏夹移除）。

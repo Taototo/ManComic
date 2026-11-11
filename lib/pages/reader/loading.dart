@@ -48,6 +48,9 @@ class _ReaderWithLoadingState
     // 请求一次源站拿目录，断网也进得去——而这正是用户点「最近阅读」的期望。
     var localComic = _findLocalComic(type);
     if (localComic != null) {
+      // 后台补一次目录，**不 await**：这次仍然用本地快照（断网也要能进），
+      // 拉到了下次进来就和源站对齐，不会长期停在下载那一刻的章节表。
+      unawaited(LocalManager().refreshChapters(localComic));
       return Res(
         ReaderProps(
           type: type,

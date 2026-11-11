@@ -82,7 +82,17 @@ void main() {
         page.contains('LocalComicPage.open(ctx, local, heroID: heroID)'),
         isTrue,
       );
-      expect(page.contains('LocalManager().batchDeleteComics(localComics)'), isTrue);
+      // 删除要分清两种书：
+      // - 下载自网络源：只清磁盘副本（removeFavoriteAndHistory: false），
+      //   收藏和阅读历史留着，删完还能重新下；
+      // - 手工导入：只在本地存在，连库记录一起删。
+      // 以前统一用默认参数，会顺手抹掉下载书的收藏记录，而确认框只写
+      // 「删除本地漫画和文件」。
+      expect(
+        page.contains('batchDeleteComics(downloaded, true, false)'),
+        isTrue,
+      );
+      expect(page.contains('batchDeleteComics(imported)'), isTrue);
       // 已经在磁盘上的书，「下载」「移动到分类」都只会落空
       expect(page.contains("favoriteOption('moveFromDownloaded')"), isFalse);
     });

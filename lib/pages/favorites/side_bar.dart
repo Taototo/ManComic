@@ -56,12 +56,29 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
     findNetworkFolders();
     appdata.settings.addListener(updateFolders);
     LocalFavoritesManager().addListener(updateFolders);
+    // 「本地」分类是本地库的投影，数量得跟着库走。原来只监听收藏表，
+    // 下载完成时侧栏角标停在旧数字，点进去内容却是新的。
+    // LocalManager 每下完一页都会通知，这里只在数量真的变了才重建。
+    _lastLocalCount = localLibraryCount();
+    LocalManager().addListener(_onLocalLibraryChanged);
     super.initState();
+  }
+
+  int _lastLocalCount = 0;
+
+  void _onLocalLibraryChanged() {
+    var count = localLibraryCount();
+    if (count == _lastLocalCount || !mounted) {
+      return;
+    }
+    _lastLocalCount = count;
+    setState(() {});
   }
 
   @override
   void dispose() {
     super.dispose();
+    LocalManager().removeListener(_onLocalLibraryChanged);
     appdata.settings.removeListener(updateFolders);
     LocalFavoritesManager().removeListener(updateFolders);
   }

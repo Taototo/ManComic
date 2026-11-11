@@ -132,7 +132,9 @@ class _ReaderState extends State<Reader>
   /// This is used for display purposes and history recording.
   @override
   int get maxPage {
-    if (images == null) return 1;
+    // 空章节也算 1 页：返回 0 会让底部栏的 `page.clamp(1, maxPage)` 抛
+    // ArgumentError。真正的「本章没有图」由 images.dart 的 error 分支处理。
+    if (images == null || images!.isEmpty) return 1;
     return !showSingleImageOnFirstPage()
         ? (images!.length / imagesPerPage).ceil()
         : 1 + ((images!.length - 1) / imagesPerPage).ceil();
@@ -210,6 +212,13 @@ class _ReaderState extends State<Reader>
     chapter = widget.initialChapter ?? 1;
     if (chapter < 1) {
       chapter = 1;
+    }
+    // 历史里存的是章节下标，源站删章后会越界。不钳住的话，后面
+    // `chapters.ids.elementAtOrNull(chapter - 1)` 拿到 null、
+    // 章节抽屉的 `elementAt` 直接 RangeError。
+    var chapterCount = widget.chapters?.length ?? 0;
+    if (chapterCount > 0 && chapter > chapterCount) {
+      chapter = chapterCount;
     }
     if (widget.initialChapterGroup != null) {
       for (int i = 0; i < (widget.initialChapterGroup! - 1); i++) {
@@ -313,6 +322,10 @@ class _ReaderState extends State<Reader>
   @override
   void dispose() {
     _recordReadingSession();
+    // 防抖中的历史写入也要取消：退出后它还会跑一次（此时可能正在导入数据、
+    // 库已关闭），抛出的异常虽然被吞掉，但会白白占住 _haveAsyncTask。
+    _updateHistoryTimer?.cancel();
+    _updateHistoryTimer = null;
     WidgetsBinding.instance.removeObserver(this);
     if (isFullscreen) {
       fullscreen();
@@ -341,6 +354,10 @@ class _ReaderState extends State<Reader>
         state == AppLifecycleState.hidden ||
         state == AppLifecycleState.detached;
     if (inBackground) {
+      // 进后台先结算这一段：一是后台/锁屏时间不该算成阅读时长（休息提醒
+      // 本来就把切后台当休息），二是系统可能在后台回收进程，dispose 根本
+      // 不会执行，整场阅读会凭空消失。
+      _recordReadingSession();
       if (autoPageTurningTimer != null) {
         autoPageTurningTimer!.cancel();
         autoPageTurningTimer = null;
@@ -349,6 +366,8 @@ class _ReaderState extends State<Reader>
       }
       pauseRestReminder();
     } else if (state == AppLifecycleState.resumed) {
+      // 回来重新开始计时，否则 dispose 时会把在后台待的时间也记进去。
+      _sessionStart ??= DateTime.now();
       if (_autoPageTurningPausedInBackground) {
         _autoPageTurningPausedInBackground = false;
         _startAutoPageTurning(cid, type);
@@ -473,6 +492,10 @@ class _ReaderState extends State<Reader>
       } else {
         history!.readEpisode.add(chapter.toString());
         history!.ep = chapter;
+        // 必须清掉 group：这本以前是分卷的，源站改成扁平章节后，下次
+        // 「继续阅读」还会带着旧 group 进来，initState 对非分组章节调
+        // getGroupByIndex → 空断言崩溃。
+        history!.group = null;
       }
       history!.time = DateTime.now();
       _updateHistoryTimer?.cancel();
@@ -847,7 +870,9 @@ abstract mixin class _ReaderLocation {
       'autoPageTurningInterval',
     );
     autoPageTurningTimer = Timer.periodic(Duration(seconds: interval), (_) {
-      if (page == maxPage) {
+      // 用 >= 而不是 ==：章节评论页的页码是 maxPage + 1，只判等的话定时器
+      // 既不会停、toNextPage() 又返回 false，变成「显示自动阅读中但永远不动」。
+      if (page >= maxPage) {
         // 到最后一页就停。定时器必须一并置 null，否则按钮一直显示「自动阅读中」，
         // 实际早就停了，再点一下还会走进「取消」分支。
         autoPageTurningTimer?.cancel();

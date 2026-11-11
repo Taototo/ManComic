@@ -12,11 +12,13 @@ class ComicType {
   int get hashCode => value.hashCode;
 
   String get sourceKey {
-    if(this == local) {
+    if (this == local) {
       return "local";
-    } else {
-      return comicSource!.key;
     }
+    // 源被卸载后 fromIntKey 返回 null。以前这里 `comicSource!.key` 直接抛
+    // 空断言，而封面角标每次 build 都会读 sourceKey——用户卸一个源，
+    // 打开本地漫画列表就崩。和 FavoriteItem 用同一个兜底格式。
+    return comicSource?.key ?? "Unknown:$value";
   }
 
   ComicSource? get comicSource {

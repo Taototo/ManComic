@@ -192,6 +192,12 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
       comicId: comic.id,
     );
     _loadRecent(notify: true);
+    // 年度/本月汇总也要重算：只刷最近列表的话，同一页里「最近 30 天」
+    // 已经没有这本了，「今年读了多久/几本」却还算着它。
+    setState(() {
+      _summary = ReadingStats.summary(_year);
+      _week = ReadingStats.week();
+    });
   }
 
   void _switchYear(int year) {
