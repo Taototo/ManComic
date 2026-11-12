@@ -935,7 +935,11 @@
     "@a pages on device": "本地 @a 页",
     "Download @c chapters": "下载 @c 话",
     "Not downloaded": "未下载",
-    "Already in the download queue": "这本已经在下载队列里了"
+    "Already in the download queue": "这本已经在下载队列里了",
+    "Scanning @a / @b": "正在数页 @a / @b",
+    "@a chapters were confirmed when downloaded": "有 @a 话在下载时已确认完整，这次没再问源站",
+    "Check them again": "全部再核对一遍",
+    "@a pages, gaps inside": "本地 @a 页，中间有缺页"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1873,6 +1877,10 @@
     "@a pages on device": "本機 @a 頁",
     "Download @c chapters": "下載 @c 話",
     "Not downloaded": "未下載",
-    "Already in the download queue": "這本已經在下載佇列裡了"
+    "Already in the download queue": "這本已經在下載佇列裡了",
+    "Scanning @a / @b": "正在數頁 @a / @b",
+    "@a chapters were confirmed when downloaded": "有 @a 話在下載時已確認完整，這次沒再問來源",
+    "Check them again": "全部再核對一遍",
+    "@a pages, gaps inside": "本機 @a 頁，中間有缺頁"
   }
 }

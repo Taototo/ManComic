@@ -600,6 +600,61 @@ class LocalManager with ChangeNotifier {
     return files;
   }
 
+  /// 体检用：数一章的页，同时看出「中间有没有断号」。
+  ///
+  /// 和 [countChapterPages] 的区别有两个：章节目录由调用方一次算好（体检要
+  /// 扫几百话，每话再查一次库、再把整份章节表 JSON 解一遍是白花的工），以及
+  /// 顺手返回页码信息。
+  ///
+  /// 下载按 0 起的页码命名（`0.jpg`、`12.webp`），所以：
+  /// - `pages` 是非空文件数；
+  /// - `slots` 是「最大页码 + 1」，也就是本该有的页数下限；
+  /// - `first` 是最小页码，没有页时是 -1。
+  ///
+  /// `first == 0 && slots > pages` 说明 0..slots-1 里少了几个 —— 这一章缺页
+  /// **不用问源站就能确定**。`first > 0` 时不下结论：手工导入、老版本按 1 起
+  /// 编号的目录都长这样，宁可交给源站核对，也不能把整本报成一堆缺页。
+  Future<({int pages, int slots, int first})> countChapterPagesIn(
+    String baseDir,
+    String chapterId,
+    String? title,
+  ) async {
+    try {
+      var directory = resolveChapterDirectory(baseDir, chapterId, title);
+      if (!await directory.exists()) {
+        return (pages: 0, slots: 0, first: -1);
+      }
+      var pages = 0;
+      var slots = 0;
+      var first = -1;
+      await for (var entity in directory.list()) {
+        if (entity is! File) {
+          continue;
+        }
+        var index = pageIndexOfFileName(entity.name);
+        if (index == null) {
+          continue;
+        }
+        if (first < 0 || index < first) {
+          first = index;
+        }
+        if (index + 1 > slots) {
+          slots = index + 1;
+        }
+        try {
+          if (entity.lengthSync() > 0) {
+            pages++;
+          }
+        } catch (_) {
+          // 读不到大小的文件当没有
+        }
+      }
+      return (pages: pages, slots: slots, first: first);
+    } catch (_) {
+      return (pages: 0, slots: 0, first: -1);
+    }
+  }
+
   /// 这一话在磁盘上有几页。
   ///
   /// 给「缺失章节体检」用：只数文件，**不碰数据库记录**——[_pageFiles] 在
@@ -1761,25 +1816,31 @@ class LocalManager with ChangeNotifier {
   }
 }
 
+/// 文件名里的页码。不是正文页（封面、隐藏文件、json、非数字命名）返回 null。
+///
+/// 下载写下的图一律以页码命名（`0.jpg`、`12.webp`），体检靠这个判断「中间
+/// 断了没有」，[isPageFileName] 也是它的一个特例。
+int? pageIndexOfFileName(String name) {
+  if (name.startsWith('.')) {
+    return null;
+  }
+  if (name.startsWith('cover')) {
+    return null;
+  }
+  var dot = name.lastIndexOf('.');
+  var stem = dot <= 0 ? name : name.substring(0, dot);
+  if (stem.isEmpty) {
+    return null;
+  }
+  return int.tryParse(stem);
+}
+
 /// 文件名是不是「正文页」。
 ///
 /// 下载写下的图一律以页码命名（`0.jpg`、`12.webp`），封面是 `cover.*`，
 /// 隐藏文件和 json 都不算。取消下载后重算「还剩哪些章节」、以及清理残留
 /// 目录时都靠这条判断，别在两处各写一遍。
-bool isPageFileName(String name) {
-  if (name.startsWith('.')) {
-    return false;
-  }
-  if (name.startsWith('cover')) {
-    return false;
-  }
-  var dot = name.lastIndexOf('.');
-  var stem = dot <= 0 ? name : name.substring(0, dot);
-  if (stem.isEmpty) {
-    return false;
-  }
-  return int.tryParse(stem) != null;
-}
+bool isPageFileName(String name) => pageIndexOfFileName(name) != null;
 
 /// 把本地已经落盘的页和远端页表拼起来，返回阅读器要的图片列表。
 ///

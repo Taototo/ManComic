@@ -2,6 +2,7 @@ import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:venera/foundation/comic_gaps.dart';
+import 'package:venera/foundation/local.dart' show pageIndexOfFileName;
 
 /// 体检这套东西最容易错在两个方向：把「不知道」当成「不缺」（缺页永远补不
 /// 回来），或者把已经完整的也列进来（用户被拉去重下一整本）。这里锁住分类
@@ -84,6 +85,99 @@ void main() {
         expectedPages: const {0: 9},
       );
       expect(gaps.map((e) => e.id), ['a', 'b']);
+    });
+
+    test('页码断了也算缺，不必问源站', () {
+      var gaps = ComicGapScanner.classifyGaps(
+        ids: const ['a', 'b'],
+        titles: const ['1', '2'],
+        localPages: const {'a': 28, 'b': 30},
+        expectedPages: const {},
+        slots: const {'a': 30},
+      );
+      expect(gaps.single.id, 'a');
+      expect(gaps.single.kind, ChapterGapKind.incomplete);
+      expect(gaps.single.holes, isTrue);
+      expect(
+        gaps.single.expectedPages,
+        0,
+        reason: '没问源站就不知道总数，不能瞎编一个',
+      );
+    });
+
+    test('页码从 1 起不算断号', () {
+      expect(
+        ComicGapScanner.hasPageHole(pages: 30, slots: 31, first: 1),
+        isFalse,
+        reason: '老版本/手工导入按 1 起编号，不能把整本判成缺页',
+      );
+      expect(ComicGapScanner.hasPageHole(pages: 29, slots: 30, first: 0), isTrue);
+      expect(
+        ComicGapScanner.hasPageHole(pages: 30, slots: 30, first: 0),
+        isFalse,
+      );
+    });
+  });
+
+  group('扫描要快', () {
+    test('记录里已确认过的章节不再问源站', () {
+      var src = read('lib/foundation/comic_gaps.dart');
+      expect(
+        src.contains('verifyRecorded || !loaded.contains(ids[i])'),
+        isTrue,
+        reason: '一话一个请求，八百话的书就是八百个请求——只查有疑问的',
+      );
+    });
+
+    test('一页没有、页码断了的章节也都不问源站', () {
+      var src = read('lib/foundation/comic_gaps.dart');
+      expect(src.contains('(counts[ids[i]] ?? 0) > 0'), isTrue);
+      expect(src.contains('!holes.containsKey(ids[i])'), isTrue);
+    });
+
+    test('进度分两遍报，各自的分母', () {
+      var src = read('lib/foundation/comic_gaps.dart');
+      expect(
+        src.contains('onProgress?.call(i + 1, ids.length, false)'),
+        isTrue,
+      );
+      expect(
+        src.contains('onProgress?.call(checked, suspects.length, true)'),
+        isTrue,
+        reason: '分母写成 ids.length 时进度条永远停在半路，看着像卡死',
+      );
+    });
+
+    test('源站连续问不到就中止', () {
+      var src = read('lib/foundation/comic_gaps.dart');
+      expect(src.contains('maxConsecutiveFailures'), isTrue);
+      expect(src.contains('aborted = true'), isTrue);
+      expect(
+        read('lib/pages/missing_chapters_page.dart')
+            .contains('LinearProgressIndicator'),
+        isTrue,
+      );
+    });
+  });
+
+  group('页码解析', () {
+    test('下载按 0 起编号，封面和 json 不算页', () {
+      expect(pageIndexOfFileName('0.jpg'), 0);
+      expect(pageIndexOfFileName('12.webp'), 12);
+      expect(pageIndexOfFileName('cover.webp'), isNull);
+      expect(pageIndexOfFileName('details.json'), isNull);
+      expect(pageIndexOfFileName('.nomedia'), isNull);
+      expect(pageIndexOfFileName('page1.jpg'), isNull);
+    });
+
+    test('正文页判定只有一份实现', () {
+      var src = read('lib/foundation/local.dart');
+      expect(
+        src.contains(
+          'bool isPageFileName(String name) => pageIndexOfFileName(name) != null;',
+        ),
+        isTrue,
+      );
     });
   });
 
