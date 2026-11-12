@@ -208,6 +208,70 @@ void main() {
     });
   });
 
+  group('本地文件打不开', () {
+    // 现象：手机上明明有图（缓存目录里躺着 jpg），点进去却转圈然后报
+    // 「Request timed out」。根因是阅读器拿「数据库记录」而不是「磁盘」
+    // 决定读本地还是读网络，记录一旦和文件对不上就整章走网络。
+
+    test('记录说没下载，也要先看盘', () {
+      var src = read('lib/pages/reader/images.dart');
+      expect(
+        src.contains('await manager.hasLocalPages(reader.cid, reader.type, ep)'),
+        isTrue,
+        reason: '磁盘才是事实，记录只是索引',
+      );
+      // 旧判据只看「整本在不在下载中」，整本下完后就再也不看盘了
+      expect(
+        src.contains('LocalManager().isDownloading(reader.cid, reader.type)'),
+        isFalse,
+      );
+    });
+
+    test('查本地文件用章节 id，不用行号', () {
+      var src = read('lib/pages/reader/images.dart');
+      // 阅读器的目录和本地库那份未必一样，行号会指到别的一话，
+      // 还会顺手把那一话的记录当脏数据摘掉
+      expect(src.contains('Object get _localEp'), isTrue);
+      expect(
+        src.contains('reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1)'),
+        isTrue,
+      );
+      expect(
+        src.contains('await manager.getImages(reader.cid, reader.type, ep)'),
+        isTrue,
+      );
+      expect(
+        src.contains('manager.getPageMap(reader.cid, reader.type, ep)'),
+        isTrue,
+      );
+      // 记录判定也得有按 id 的版本
+      expect(
+        read('lib/foundation/local.dart').contains(
+          'bool isChapterRecorded(String id, ComicType type, Object ep)',
+        ),
+        isTrue,
+      );
+    });
+
+    test('本地页先显示，缺的页在后台补', () {
+      var src = read('lib/pages/reader/images.dart');
+      var body = src.substring(
+        src.indexOf('void load() async'),
+        src.indexOf('/// 直接从源站要这一章的图'),
+      );
+      expect(body.contains('unawaited('), isTrue);
+      // 「先 await 网络补页再 setState」会让断网时本地文件也打不开，
+      // 源站抽风时还要先转十几秒圈才看到第一页
+      expect(body.contains('images = await _fillPendingPages(images)'), isFalse);
+    });
+
+    test('本地漫画没有源站时不会空断言崩掉', () {
+      var src = read('lib/pages/reader/images.dart');
+      expect(src.contains('if (source?.loadComicPages == null)'), isTrue);
+      expect(src.contains('reader.type.comicSource!.loadComicPages!'), isFalse);
+    });
+  });
+
   group('并发与统计', () {
     test('补位前先扣掉正在跑的任务，不突破并发上限', () {
       var src = read('lib/foundation/local.dart');

@@ -730,6 +730,28 @@ class LocalManager with ChangeNotifier {
     );
   }
 
+  /// 记录里是否已经算「下完了」，按章节 **id** 判。
+  ///
+  /// [isDownloaded] 要的是行号，而阅读器手里的目录和库里那份未必一样（源站
+  /// 插话、翻正倒序、某一边刚刷新），同一个行号会指到不同的话。查文件用的是
+  /// 章节 id，所以判断「缺不缺页」也得用同一把钥匙，否则会给已经下全的章节
+  /// 白拉一次地址表，或者反过来把缺页的章节当成完整。
+  bool isChapterRecorded(String id, ComicType type, Object ep) {
+    var comic = find(id, type);
+    if (comic == null) {
+      return false;
+    }
+    var chapters = comic.chapters;
+    if (chapters == null) {
+      return true;
+    }
+    var cid = ep is int ? chapters.ids.elementAtOrNull(ep - 1) : ep.toString();
+    if (cid == null) {
+      return false;
+    }
+    return comic.downloadedChapters.contains(cid);
+  }
+
   List<DownloadTask> downloadingTasks = [];
 
   /// 同时开跑的下载任务数上限。

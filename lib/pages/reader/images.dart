@@ -35,37 +35,49 @@ class _ReaderImagesState extends State<_ReaderImages> {
     }
   }
 
+  /// 当前章节在磁盘上的「钥匙」。
+  ///
+  /// 阅读器手里的章节表和本地库里那份未必是同一份：源站插了一话、用户翻过
+  /// 正倒序、或者某一边刚刷新过，同一个行号在两份表里就指向不同的话。按行号
+  /// 去磁盘找文件，轻则读到别的一话，重则把好端端那一话的记录当成脏数据摘掉
+  /// （[LocalManager._pageFiles] 找不到目录就会 `_forgetMissingChapter`）。
+  /// 本地目录是按章节 id 建的，所以手里有章节表就传 id，不要传行号。
+  Object get _localEp =>
+      reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1) ??
+      reader.chapter;
+
   void load() async {
     if (inProgress) return;
     inProgress = true;
+    final manager = LocalManager();
+    final ep = _localEp;
+    // 照常调一次：源站目录变了的话，它会把新目录写回本地库。
+    manager.isDownloaded(
+      reader.cid,
+      reader.type,
+      reader.chapter,
+      reader.widget.chapters,
+    );
+    // 但「要不要补页」只看这一话在记录里算不算下完，而且必须按**章节 id**
+    // 判——行号在两份目录表里未必指同一话。
+    final recorded = manager.isChapterRecorded(reader.cid, reader.type, ep);
+    // 数据库只记「这章下完了」，磁盘才是事实。
+    //
+    // 记录和文件对不上的情况比想象中多：跳章失败留下的半章（整本下完时
+    // 按页数核对过、故意不记）、旧版本的脏记录、用户手工搬过的文件夹。
+    // 以前只认记录，于是图明明躺在手机里，阅读器却转头去找网络——断网或者
+    // 源站抽风时，用户看到的就是「明明下载了却打不开」。所以记录说不算本地，
+    // 就先看盘：只要这一章的目录里有图，就本地读。
     var useLocal =
         reader.type == ComicType.local ||
-        (LocalManager().isDownloaded(
-          reader.cid,
-          reader.type,
-          reader.chapter,
-          reader.widget.chapters,
-        ));
-    // 边下边看：这本还在下载，但当前这一章已经落到磁盘上了，就直接本地读。
-    // 判断按章做而不是按本做——否则「刚下完第 1 话」的书会因为整本没完成
-    // 而被判去走网络，本地那些图就白下了。
-    if (!useLocal && LocalManager().isDownloading(reader.cid, reader.type)) {
-      useLocal = await LocalManager().hasLocalPages(
-        reader.cid,
-        reader.type,
-        reader.chapter,
-      );
-      if (!mounted) {
-        return;
-      }
+        recorded ||
+        await manager.hasLocalPages(reader.cid, reader.type, ep);
+    if (!mounted) {
+      return;
     }
     if (useLocal) {
       try {
-        var images = await LocalManager().getImages(
-          reader.cid,
-          reader.type,
-          reader.chapter,
-        );
+        var images = await manager.getImages(reader.cid, reader.type, ep);
         if (!mounted) {
           return;
         }
@@ -76,11 +88,7 @@ class _ReaderImagesState extends State<_ReaderImages> {
           // 把那条记录摘掉了，下次进来就走正常路径。
           await _loadFromNetwork();
         } else {
-          // 这一章只下了一部分时，把后面的页接到网络 URL 上，翻过去照样能看。
-          images = await _fillPendingPages(images);
-          if (!mounted) {
-            return;
-          }
+          // 先把本地这几页显示出来，再让缺的页去网络补——不能倒过来等。
           setState(() {
             reader.images = images;
             reader.isLoading = false;
@@ -90,6 +98,9 @@ class _ReaderImagesState extends State<_ReaderImages> {
               reader.updateHistory();
             });
           });
+          unawaited(
+            _extendPendingPages(images, reader.chapter, ep, recorded),
+          );
         }
       } catch (e) {
         if (!mounted) {
@@ -112,11 +123,20 @@ class _ReaderImagesState extends State<_ReaderImages> {
 
   /// 直接从源站要这一章的图。
   Future<void> _loadFromNetwork() async {
+    final source = reader.type.comicSource;
+    if (source?.loadComicPages == null) {
+      // 导入的本地漫画没有源站可问（`ComicType.local`）。以前这里直接
+      // `comicSource!` 会在目录为空时抛 Null check，整页变成红字异常；
+      // 这本来只是「这一话没有图」，说清楚就行。
+      setState(() {
+        error = "No images found in this chapter".tl;
+        reader.isLoading = false;
+        inProgress = false;
+      });
+      return;
+    }
     var cp = reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1);
-    var res = await reader.type.comicSource!.loadComicPages!(
-      reader.widget.cid,
-      cp,
-    );
+    var res = await source!.loadComicPages!(reader.widget.cid, cp);
     if (!mounted) {
       return;
     }
@@ -148,31 +168,70 @@ class _ReaderImagesState extends State<_ReaderImages> {
     }
   }
 
+  /// 本地这几页先给用户看，缺的页再去网络接上。
+  ///
+  /// 关键在「先显示」：以前是等网络补完才 setState，源站抽风时读者要先转
+  /// 十几秒超时圈才看到第一页，网络彻底不通时甚至等于「本地文件打不开」——
+  /// 本地阅读本来就该是不依赖网络的那条路。补页只往后追加，页码不挪位，
+  /// 用户正在看的那一页不受影响。
+  Future<void> _extendPendingPages(
+    List<String> local,
+    int chapter,
+    Object ep,
+    bool recorded,
+  ) async {
+    final List<String> extended;
+    try {
+      extended = await _fillPendingPages(
+        local,
+        chapter: chapter,
+        ep: ep,
+        recorded: recorded,
+      );
+    } catch (e) {
+      Log.info("Reader", "Failed to extend local pages: $e");
+      return;
+    }
+    if (!mounted || reader.chapter != chapter) {
+      return;
+    }
+    if (extended.length <= local.length) {
+      return;
+    }
+    setState(() {
+      reader.images = extended;
+    });
+  }
+
   /// 已经落盘的页走本地，还没下到的页接上网地址。
   ///
-  /// 只在这一章确实处于下载中时才补：已经下全的章不该为了多一次网络请求
-  /// 白等。拼接按文件名里的页码对齐而不是按顺序排队，否则中间失败过一页
-  /// 就会整段错位，用户看到的是「第 7 页其实是第 8 页」。
-  Future<List<String>> _fillPendingPages(List<String> local) async {
-    final task = LocalManager().findTask(reader.cid, reader.type);
-    if (task is! ImagesDownloadTask || task.path == null) {
+  /// 搬运中、或者当初没下全（记录里没有它）的章节才补：已经下全的章不该为了
+  /// 多一次网络请求白等。拼接按文件名里的页码对齐而不是按顺序排队，否则中间
+  /// 失败过一页就会整段错位，用户看到的是「第 7 页其实是第 8 页」。
+  Future<List<String>> _fillPendingPages(
+    List<String> local, {
+    required int chapter,
+    required Object ep,
+    required bool recorded,
+  }) async {
+    final manager = LocalManager();
+    final task = manager.findTask(reader.cid, reader.type);
+    final downloading = task is ImagesDownloadTask && task.path != null;
+    // 库里记着「下完了」又没有在跑的下载：这一章不缺页，别为它多发一次请求。
+    if (!downloading && recorded) {
       return local;
     }
     final source = reader.type.comicSource;
     if (source?.loadComicPages == null) {
       return local;
     }
-    final cp = reader.widget.chapters?.ids.elementAtOrNull(reader.chapter - 1);
+    final cp = reader.widget.chapters?.ids.elementAtOrNull(chapter - 1);
     try {
       final res = await source!.loadComicPages!(reader.widget.cid, cp);
       if (res.error) {
         return local;
       }
-      final map = await LocalManager().getPageMap(
-        reader.cid,
-        reader.type,
-        reader.chapter,
-      );
+      final map = await manager.getPageMap(reader.cid, reader.type, ep);
       // 文件名对不上页码（导入的 epub/pdf），拼不了，老实只显示本地页。
       if (map.isEmpty) {
         return local;
