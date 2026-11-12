@@ -231,4 +231,66 @@ void main() {
       );
     });
   });
+
+  group('同一页面里同一功能的重复入口', () {
+    test('本地详情页：手机端横向那排不再重复收藏与继续阅读', () {
+      var src = read('lib/pages/local_comic_page.dart');
+      var start = src.indexOf('scrollDirection: Axis.horizontal');
+      var bar = src.substring(start, src.indexOf('.fixHeight(48)', start));
+      // Continue / Start / Favorite 三个图标在移动端都要让位给下面那排
+      // 大按钮，否则一屏里两颗 Favorite、两颗 Continue。
+      expect('!isMobile'.allMatches(bar).length, 3);
+      expect(bar.contains("text: 'Share'.tl"), isTrue, reason: '分享没有替代品，保持无条件');
+    });
+
+    test('下载页：错误任务只给 Retry，不再同时给 Start', () {
+      var src = read('lib/pages/downloading_page.dart');
+      var start = src.indexOf('if (task.isError)');
+      var block = src.substring(
+        start,
+        src.indexOf('Icons.vertical_align_top', start),
+      );
+      // isPaused = !isRunning，错误任务必然也算 paused。两个独立的 if 会
+      // 让菜单同时出现 Retry 和 Start，其实都是 resume()。
+      expect(block.contains('else if (!task.isPaused)'), isTrue);
+    });
+
+    test('本地漫画页：单本菜单不再重复「View Detail」', () {
+      var src = read('lib/pages/local_comics_page.dart');
+      var start = src.indexOf('menu: [');
+      var single = src.substring(
+        start,
+        src.indexOf('...exportActions([comic])', start),
+      );
+      expect(single.contains('"View Detail".tl'), isFalse, reason: '点整行已经进详情');
+
+      var multiStart = src.indexOf('Widget buildMultiSelectMenu()');
+      var multi = src.substring(multiStart, multiStart + 1400);
+      expect(
+        multi.contains('"View Detail".tl'),
+        isTrue,
+        reason: '多选态点行是切换勾选，必须保留这条路径',
+      );
+    });
+
+    test('收藏页：单本移动不再借道多选', () {
+      var src = read('lib/pages/favorites/local_favorites_page.dart');
+      var start = src.indexOf('builtInMenuActions: kComicMenuActionsFavorite');
+      var menu = src.substring(start, src.indexOf('if (!isAllFolder)', start));
+      // 只剩「Select」那一项会开多选；移动不该再把整页切进多选态。
+      expect('multiSelectMode = true'.allMatches(menu).length, 1);
+      expect('targets: [c as FavoriteItem]'.allMatches(menu).length, 2);
+    });
+
+    test('收藏页：favoriteOption 支持显式指定目标书', () {
+      var src = read('lib/pages/favorites/local_favorites_page.dart');
+      expect(
+        src.contains('void favoriteOption(String option, {List<FavoriteItem>? targets})'),
+        isTrue,
+      );
+      expect(src.contains('targets ??'), isTrue);
+      // 单本路径没进过多选，不该顺手把多选态关掉
+      expect(src.contains('if (targets == null) {'), isTrue);
+    });
+  });
 }

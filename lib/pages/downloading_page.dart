@@ -293,6 +293,9 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
                     ),
                     MenuButton(
                       entries: [
+                        // 错误任务的 isPaused 也是 true（isPaused = !isRunning），
+                        // 以前这里会同时给出「Retry」和「Start」两个项，其实是
+                        // 同一个 resume()。错误优先，其余状态再分暂停/开始。
                         if (task.isError)
                           MenuEntry(
                             icon: Icons.refresh,
@@ -301,8 +304,8 @@ class _DownloadTaskTileState extends State<_DownloadTaskTile> {
                               task.resume();
                               LocalManager().pumpQueue();
                             },
-                          ),
-                        if (!task.isPaused)
+                          )
+                        else if (!task.isPaused)
                           MenuEntry(
                             icon: Icons.pause,
                             text: "Pause".tl,

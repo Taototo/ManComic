@@ -406,14 +406,10 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                       selectedComics[comic] = true;
                     });
                   },
+                  // 点整行就是进详情页，这里不再放「View Detail」。
+                  // 多选菜单里那一条要保留：多选态下点行是切换勾选，
+                  // 没有别的路径能进详情。
                   menu: [
-                    MenuEntry(
-                      icon: Icons.chrome_reader_mode_outlined,
-                      text: "View Detail".tl,
-                      onClick: () {
-                        LocalComicPage.open(context, comic, heroID: index);
-                      },
-                    ),
                     MenuEntry(
                       icon: Icons.folder_open,
                       text: "Open Folder".tl,

@@ -952,17 +952,23 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       updateComics();
                     },
                   ),
+                if (isNormalFolder)
+                  MenuEntry(
+                    icon: Icons.drive_file_move,
+                    text: "Move to folder".tl,
+                    onClick: () {
+                      favoriteOption('move', targets: [c as FavoriteItem]);
+                    },
+                  ),
                 if (isReadFolder)
                   MenuEntry(
                     icon: Icons.drive_file_move,
                     text: "Move to folder".tl,
                     onClick: () {
-                      setState(() {
-                        selectedComics.clear();
-                        selectedComics[c as FavoriteItem] = true;
-                        multiSelectMode = true;
-                      });
-                      favoriteOption('moveFromRead');
+                      favoriteOption(
+                        'moveFromRead',
+                        targets: [c as FavoriteItem],
+                      );
                     },
                   ),
                 if (isDownloadedFolder)
@@ -1111,7 +1117,15 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     );
   }
 
-  void favoriteOption(String option) {
+  /// [targets] 显式指定要移动的书，不传就用当前多选集合。
+  ///
+  /// 「已阅」里的单本移动以前是「把那本书塞进 selectedComics、打开
+  /// multiSelectMode，再调本方法」来复用的 —— 用户只点了一下菜单，整页
+  /// 突然进入多选态。现在把书直接传进来，多选那条路径完全不变。
+  void favoriteOption(String option, {List<FavoriteItem>? targets}) {
+    var movables =
+        targets ??
+        selectedComics.keys.map((e) => e as FavoriteItem).toList();
     var targetFolders = LocalFavoritesManager().folderNames
         .where((folder) => folder != favPage.folder)
         .toList();
@@ -1209,29 +1223,26 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                             return;
                           }
                           if (option == 'move') {
-                            var comics = selectedComics.keys
-                                .map((e) => e as FavoriteItem)
-                                .toList();
                             for (var f in selectedLocalFolders) {
                               LocalFavoritesManager().batchMoveFavorites(
                                 favPage.folder as String,
                                 f,
-                                comics,
+                                movables,
                               );
                             }
                           } else if (option == 'moveFromRead') {
-                            var comics = selectedComics.keys
-                                .map((e) => e as FavoriteItem)
-                                .toList();
                             for (var f in selectedLocalFolders) {
-                              for (var comic in comics) {
+                              for (var comic in movables) {
                                 LocalFavoritesManager().moveFromRead(f, comic);
                               }
                             }
                           }
                           App.rootContext.pop();
                           updateComics();
-                          _cancel();
+                          // 单本路径没有进过多选，别顺手把多选态关掉。
+                          if (targets == null) {
+                            _cancel();
+                          }
                         },
                         child: Text("Move".tl),
                       ),

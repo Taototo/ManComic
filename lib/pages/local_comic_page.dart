@@ -411,28 +411,33 @@ class _LocalComicPageState extends State<LocalComicPage> {
                 ListView(
                   scrollDirection: Axis.horizontal,
                   padding: const EdgeInsets.symmetric(horizontal: 8),
+                  // 手机上一律由下面那排大按钮负责「收藏」和「继续阅读」，
+                  // 这一排只留它们替代不了的东西。以前两边都无条件渲染，
+                  // 一屏里能同时看到两颗 Favorite、两颗 Continue/Read。
                   children: [
-                    if (hasHistory)
+                    if (hasHistory && !isMobile)
                       _LocalActionButton(
                         icon: const Icon(Icons.menu_book),
                         text: 'Continue'.tl,
                         onPressed: () => _read(),
                         color: context.useTextColor(Colors.yellow),
                       ),
-                    _LocalActionButton(
-                      icon: const Icon(Icons.play_circle_outline),
-                      text: 'Start'.tl,
-                      onPressed: () => _read(page: 1),
-                      color: context.useTextColor(Colors.orange),
-                    ),
-                    _LocalActionButton(
-                      icon: const Icon(Icons.bookmark_outline_outlined),
-                      activeIcon: const Icon(Icons.bookmark),
-                      isActive: _isFavorite,
-                      text: 'Favorite'.tl,
-                      onPressed: _toggleFavorite,
-                      color: context.useTextColor(Colors.purple),
-                    ),
+                    if (!isMobile || hasHistory)
+                      _LocalActionButton(
+                        icon: const Icon(Icons.play_circle_outline),
+                        text: 'Start'.tl,
+                        onPressed: () => _read(page: 1),
+                        color: context.useTextColor(Colors.orange),
+                      ),
+                    if (!isMobile)
+                      _LocalActionButton(
+                        icon: const Icon(Icons.bookmark_outline_outlined),
+                        activeIcon: const Icon(Icons.bookmark),
+                        isActive: _isFavorite,
+                        text: 'Favorite'.tl,
+                        onPressed: _toggleFavorite,
+                        color: context.useTextColor(Colors.purple),
+                      ),
                     _LocalActionButton(
                       icon: const Icon(Icons.share),
                       text: 'Share'.tl,
