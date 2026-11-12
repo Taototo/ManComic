@@ -919,7 +919,23 @@
     "Downloaded": "已下载",
     "No downloaded comics": "没有已下载的漫画",
     "No local comics": "本地还没有漫画",
-    "Delete @c local comics and files?": "删除 @c 本本地漫画及文件？"
+    "Delete @c local comics and files?": "删除 @c 本本地漫画及文件？",
+    "Missing chapters": "缺失章节",
+    "Check missing chapters": "检测缺失章节",
+    "Scanning...": "扫描中…",
+    "Checking @a / @b": "正在检查 @a / @b",
+    "Scan cancelled": "已取消扫描",
+    "No missing chapters": "没有缺失章节",
+    "Rescan": "重新扫描",
+    "@a chapters could not be checked": "有 @a 话没能核对（源站没响应）",
+    "@a of @b chapters need attention": "@b 话里有 @a 话需要处理",
+    "@a not downloaded": "未下载 @a 话",
+    "@a incomplete": "@a 话不完整",
+    "@a/@b pages": "@a/@b 页",
+    "@a pages on device": "本地 @a 页",
+    "Download @c chapters": "下载 @c 话",
+    "Not downloaded": "未下载",
+    "Already in the download queue": "这本已经在下载队列里了"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1841,6 +1857,22 @@
     "Downloaded": "已下載",
     "No downloaded comics": "沒有已下載的漫畫",
     "No local comics": "本機還沒有漫畫",
-    "Delete @c local comics and files?": "刪除 @c 本本機漫畫及檔案？"
+    "Delete @c local comics and files?": "刪除 @c 本本機漫畫及檔案？",
+    "Missing chapters": "缺失章節",
+    "Check missing chapters": "檢測缺失章節",
+    "Scanning...": "掃描中…",
+    "Checking @a / @b": "正在檢查 @a / @b",
+    "Scan cancelled": "已取消掃描",
+    "No missing chapters": "沒有缺失章節",
+    "Rescan": "重新掃描",
+    "@a chapters could not be checked": "有 @a 話沒能核對（來源沒回應）",
+    "@a of @b chapters need attention": "@b 話裡有 @a 話需要處理",
+    "@a not downloaded": "未下載 @a 話",
+    "@a incomplete": "@a 話不完整",
+    "@a/@b pages": "@a/@b 頁",
+    "@a pages on device": "本機 @a 頁",
+    "Download @c chapters": "下載 @c 話",
+    "Not downloaded": "未下載",
+    "Already in the download queue": "這本已經在下載佇列裡了"
   }
 }

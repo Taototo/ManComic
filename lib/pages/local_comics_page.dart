@@ -13,6 +13,7 @@ import 'package:venera/network/download.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 import 'package:venera/pages/local_comic_page.dart';
+import 'package:venera/pages/missing_chapters_page.dart';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/epub.dart';
 import 'package:venera/utils/haptics.dart';
@@ -417,6 +418,14 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                         openComicFolder(comic);
                       },
                     ),
+                    if (comic.comicType.comicSource?.loadComicPages != null)
+                      MenuEntry(
+                        icon: Icons.fact_check_outlined,
+                        text: "Check missing chapters".tl,
+                        onClick: () {
+                          MissingChaptersPage.show(context, comic);
+                        },
+                      ),
                     MenuEntry(
                       icon: Icons.delete,
                       text: "Delete".tl,

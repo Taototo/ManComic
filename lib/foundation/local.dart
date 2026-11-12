@@ -333,7 +333,9 @@ class LocalManager with ChangeNotifier {
         comic.cover,
         comic.comicType.value,
         jsonEncode(downloaded.toList()),
-        comic.createdAt.millisecondsSinceEpoch,
+        // 已经在库里的书保留原来的「加入时间」。补下载/重新下载传进来的是
+        // `DateTime.now()`，照抄会把一本早就下好的书顶到「最近加入」第一位。
+        (old?.createdAt ?? comic.createdAt).millisecondsSinceEpoch,
       ],
     );
     notifyListeners();
@@ -559,15 +561,23 @@ class LocalManager with ChangeNotifier {
 
   Future<List<File>> _pageFiles(String id, ComicType type, Object ep) async {
     var directory = await _pageDirectory(id, type, ep);
-    var files = <File>[];
     if (!await directory.exists()) {
       // 记录说这一章下好了，目录却不在：取消下载、手工删了文件夹、或者旧
       // 版本的脏记录都会这样。以前这里直接 `list()`，PathNotFoundException
       // 一路抛到阅读器，整章变成红字错误页（「取消后重新下载的漫画打不开」
       // 就是这个）。现在返回空让调用方退回网络，顺手把这条记录清掉。
       _forgetMissingChapter(id, type, ep);
-      return files;
+      return <File>[];
     }
+    return _listPageFiles(directory);
+  }
+
+  /// 目录里真正能当漫画页用的文件。
+  ///
+  /// 过滤规则只此一份：阅读、导出、体检都走这里。少排一个 `cover.*` 封面
+  /// 就会被当成第一页，少排一个 `details.json` 就会把 JSON 喂给解码器。
+  Future<List<File>> _listPageFiles(Directory directory) async {
+    var files = <File>[];
     await for (var entity in directory.list()) {
       if (entity is File) {
         // Do not exclude comic.cover, since it may be the first page of the chapter.
@@ -588,6 +598,34 @@ class LocalManager with ChangeNotifier {
       }
     }
     return files;
+  }
+
+  /// 这一话在磁盘上有几页。
+  ///
+  /// 给「缺失章节体检」用：只数文件，**不碰数据库记录**——[_pageFiles] 在
+  /// 目录缺失时会顺手摘掉「已下载」记录并通知全库，成百上千话扫一遍会让
+  /// 本地列表一直重建刷新。0 字节的页不算：那是上次写到一半被打断留下的，
+  /// 下载对账也不认它。
+  Future<int> countChapterPages(String id, ComicType type, Object ep) async {
+    try {
+      var directory = await _pageDirectory(id, type, ep);
+      if (!await directory.exists()) {
+        return 0;
+      }
+      var count = 0;
+      for (var file in await _listPageFiles(directory)) {
+        try {
+          if (file.lengthSync() > 0) {
+            count++;
+          }
+        } catch (_) {
+          // 读不到大小的文件当没有
+        }
+      }
+      return count;
+    } catch (_) {
+      return 0;
+    }
   }
 
   /// 把「记录里有、磁盘上没有」的这一章从 [LocalComic.downloadedChapters]

@@ -17,6 +17,7 @@ import 'package:venera/foundation/local.dart';
 import 'package:venera/pages/favorites/favorites_page.dart' show addFavorite;
 import 'package:venera/pages/local_comics_page.dart'
     show exportLocalComics, openComicFolder;
+import 'package:venera/pages/missing_chapters_page.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/epub.dart';
@@ -320,6 +321,15 @@ class _LocalComicPageState extends State<LocalComicPage> {
           openComicFolder(comic);
         },
       ),
+      // 只有下载来的书才有源站可以核对页数；手工导入的书没有「本来该有几页」。
+      if (widget.comicType.comicSource?.loadComicPages != null)
+        MenuEntry(
+          icon: Icons.fact_check_outlined,
+          text: "Check missing chapters".tl,
+          onClick: () {
+            MissingChaptersPage.show(context, comic);
+          },
+        ),
       MenuEntry(
         icon: Icons.outbox_outlined,
         text: "Export as cbz".tl,

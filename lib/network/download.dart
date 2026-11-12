@@ -697,6 +697,26 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
       await LocalManager().saveCurrentDownloadingTasks(full: true);
     }
 
+    // 已经在库里的书（补缺失、重新下载）直接沿用现有封面，不再拉一次。
+    //
+    // 重拉会先写新的 `cover.<ext>` 再删旧的：格式一变文件名就变，而库里那
+    // 条记录还指着老名字——这次要是没下完，列表上就是一块空封面，而且再也
+    // 修不回来（记录说封面已下载，实际那个文件已经没了）。
+    if (_cover == null) {
+      try {
+        final existing = LocalManager().find(comicId, comicType);
+        if (existing != null && existing.cover.isNotEmpty) {
+          final file = File(FilePath.join(existing.baseDir, existing.cover));
+          if (file.existsSync() &&
+              await _coverFileIsUsable("file://${file.path}")) {
+            _cover = "file://${file.path}";
+          }
+        }
+      } catch (e) {
+        Log.info("Download", "Failed to reuse existing cover: $e");
+      }
+    }
+
     if (_cover == null) {
       _message = "Downloading cover...";
       notifyListeners();
@@ -766,11 +786,17 @@ class ImagesDownloadTask extends DownloadTask with _TransferSpeedMixin {
         _images = {};
         _totalCount = 0;
         var pending = <String>[];
-        for (var i in comic!.chapters!.allChapters.keys) {
-          if (chapters != null && !chapters!.contains(i)) {
-            continue;
+        if (chapters != null) {
+          // 明确指定了章节就按指定的下，不再拿详情里的目录过滤。
+          //
+          // 「补缺失章节」走的就是这条路：补的那一话可能正好是详情快照里
+          // 还没有的（源站刚加的），被过滤掉就等于点了下载什么也没发生。
+          // 章节列表是从详情目录里来的，这里信得过。
+          pending.addAll(chapters!.where((e) => e.isNotEmpty));
+        } else {
+          for (var i in comic!.chapters!.allChapters.keys) {
+            pending.add(i);
           }
-          pending.add(i);
         }
         var totalCpCount = pending.length;
         var done = 0;
