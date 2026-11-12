@@ -26,7 +26,7 @@ if (flutterVersionName == null) {
 }
 
 // App display version. Bump the last segment (001 -> 002 ...) for every new build.
-def appVersionName = "1.4.58"
+def appVersionName = "1.4.59"
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
@@ -91,9 +91,7 @@ android {
             minifyEnabled true
             shrinkResources true
             ndk {
-                // 正式包不带 x86_64：它只服务模拟器和极少数 Intel 平板，
-                // 却独占 15.5 MB（整包 30%）。debug 保留，方便本地跑模拟器。
-                abiFilters "armeabi-v7a", "arm64-v8a"
+                abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
             }
             signingConfig signingConfigs.release
         }
@@ -130,6 +128,18 @@ android {
         includeInApk = false
         // Disables dependency metadata when building Android App Bundles.
         includeInBundle = false
+    }
+}
+
+// 正式包里剔掉 x86_64 的原生库。
+//
+// 只改 buildTypes.ndk.abiFilters 是没用的：Flutter 的 gradle 插件会把
+// defaultConfig.ndk.abiFilters 覆盖成全平台，而第三方插件的 AAR 里仍然带着
+// x86_64 的 .so（9 MB 左右），并集之后照旧打进去。这里按 variant 剔除，
+// debug 不动——本地模拟器还得靠它跑。
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.packaging.jniLibs.excludes.add("lib/x86_64/**")
     }
 }
 

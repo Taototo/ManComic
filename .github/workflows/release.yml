@@ -76,7 +76,11 @@ jobs:
           ANDROID_NDK_HOME: ${{ env.ANDROID_SDK_ROOT }}/ndk/28.0.13004108
         run: |
           flutter pub get
-          flutter build apk --release
+          # 只出 arm 两个 ABI：x86_64 只服务模拟器，却占整包 30%（约 15.5 MB）。
+          # 注意 Flutter 的 gradle 插件会强制把 defaultConfig.ndk.abiFilters
+          # 覆盖成全平台，所以只能在命令行用 --target-platform 收窄，
+          # 在 build.gradle 的 buildTypes 里改 abiFilters 是无效的（会被并集）。
+          flutter build apk --release --target-platform android-arm,android-arm64
 
       - name: Verify APK
         run: |
