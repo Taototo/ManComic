@@ -8,7 +8,7 @@ import 'package:venera/utils/title_sort.dart';
 ///
 /// 背景：
 /// - 「失效」分类整体移除（连带「一键清理 / 重新检测」两个按钮和源体检联动）；
-/// - 收藏页「本地」分类直接读本地库（1.4.56 起不再靠挪收藏）；
+/// - 收藏页「本地」分类不再自己实现列表（1.4.60 起直接打开本地库页面）；
 /// - 本地列表补一个 A-Z 排序（按拼音首字母，不是 SQLite 的码位序）；
 /// - 首页顶栏去掉与标题重复的「文件夹」图标；
 /// - 存储管理回到 1.4.51（不再有「下载残留」那一项）。
@@ -66,38 +66,31 @@ void main() {
       );
     });
 
-    test('列表内容来自本地库，不是收藏夹', () {
+    test('收藏页不再自己摊一套本地列表', () {
       var page = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(page.contains('comics = localLibraryItems();'), isTrue);
-      // 只取展示需要的列：整本章节 JSON 在列表里用不上，解析它会让
-      // 每次下载完成后的刷新都卡一下。
-      expect(page.contains('getComicSummaries(LocalSortType.timeDesc)'), isTrue);
-      expect(page.contains('LocalManager().getComics('), isFalse);
-      // 封面直接指向磁盘文件：本地书不该为了封面再发一次网络请求
-      expect(page.contains('file://\${comic.coverFile.path}'), isTrue);
-      // 下载完一本、删掉一本都要跟着刷新
-      expect(page.contains('LocalManager().addListener(updateComics)'), isTrue);
+      // 1.4.60 起「本地漫画」指向本地库自己的整页（章节进度、体积、更新
+      // 角标、导出、检查更新都在那边）。收藏里再实现一套网格，就会出现
+      // 两套交互规则：长按是菜单还是多选、有没有导出、排序入口在哪。
+      expect(page.contains('localLibraryItems'), isFalse);
+      expect(page.contains('isDownloadedFolder'), isFalse);
+      expect(page.contains('getComicSummaries'), isFalse);
+      // 本地库自己的操作留在独立页
+      var localPage = read('lib/pages/local_comics_page.dart');
+      expect(localPage.contains('batchDeleteComics'), isTrue);
+      expect(localPage.contains('openComicFolder'), isTrue);
     });
 
-    test('点封面进本地详情页，删除删的是本地文件', () {
-      var page = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(
-        page.contains('LocalComicPage.open(ctx, local, heroID: heroID)'),
-        isTrue,
-      );
-      // 删除要分清两种书：
-      // - 下载自网络源：只清磁盘副本（removeFavoriteAndHistory: false），
-      //   收藏和阅读历史留着，删完还能重新下；
-      // - 手工导入：只在本地存在，连库记录一起删。
-      // 以前统一用默认参数，会顺手抹掉下载书的收藏记录，而确认框只写
-      // 「删除本地漫画和文件」。
-      expect(
-        page.contains('batchDeleteComics(downloaded, true, false)'),
-        isTrue,
-      );
-      expect(page.contains('batchDeleteComics(imported)'), isTrue);
-      // 已经在磁盘上的书，「下载」「移动到分类」都只会落空
-      expect(page.contains("favoriteOption('moveFromDownloaded')"), isFalse);
+    test('侧栏「本地漫画」直接打开本地库页面', () {
+      var sideBar = read('lib/pages/favorites/side_bar.dart');
+      expect(sideBar.contains('() => const LocalComicsPage()'), isTrue);
+      // 它不再是「当前分类」：不能走 setFolder，否则右侧会渲染空面板
+      var start = sideBar.indexOf('if (isDownloaded) {');
+      var end = sideBar.indexOf('if (isSelected) {', start);
+      expect(start, greaterThan(0));
+      expect(end, greaterThan(start));
+      var block = sideBar.substring(start, end);
+      expect(block.contains('setFolder'), isFalse);
+      expect(block.contains('LocalComicsPage'), isTrue);
     });
 
     test('侧栏数量问本地库，名字叫「本地漫画」', () {

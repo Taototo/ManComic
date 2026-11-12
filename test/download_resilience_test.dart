@@ -93,12 +93,15 @@ void main() {
   });
 
   group('收藏页「本地」分类', () {
-    test('内容来自本地库，跟收藏夹无关', () {
+    test('收藏里的「本地漫画」指向本地库页面，不再自己投影一份', () {
       var page = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(page.contains('comics = localLibraryItems();'), isTrue);
+      expect(page.contains('localLibraryItems'), isFalse);
       // 以前靠「把收藏挪进 __downloaded__」实现，既动分类又漏掉没收藏的下载
       var favorites = read('lib/foundation/favorites.dart');
       expect(favorites.contains('moveDownloadedToLocalFolder'), isFalse);
+      // 入口在侧栏，直接打开那一页
+      var sideBar = read('lib/pages/favorites/side_bar.dart');
+      expect(sideBar.contains('() => const LocalComicsPage()'), isTrue);
     });
 
     test('「失效」分类连同判定一起移除了', () {

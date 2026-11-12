@@ -20,9 +20,7 @@ import 'package:venera/foundation/res.dart';
 import 'package:venera/network/download.dart';
 import 'package:venera/network/cache.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
-import 'package:venera/pages/local_comic_page.dart' show LocalComicPage;
-// openComicFolder 定义在本地列表页里（它管着 Android 的 FileProvider 回退链）
-import 'package:venera/pages/local_comics_page.dart' show openComicFolder;
+import 'package:venera/pages/local_comics_page.dart' show LocalComicsPage;
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/pages/smart_shelf_page.dart';
@@ -230,10 +228,13 @@ class FavoritesPage extends StatefulWidget {
   if (isNetwork) {
     return (name, true);
   }
-  if (name == _localAllFolderLabel ||
-      name == _localReadFolderLabel ||
-      name == _localDownloadedFolderLabel) {
+  if (name == _localAllFolderLabel || name == _localReadFolderLabel) {
     return (name, false);
+  }
+  // 「本地漫画」不再是收藏页里的一个列表，侧栏那一项直接打开本地库页面。
+  // 上次停在这里的老用户回落到「全部」，免得进来看到空面板。
+  if (name == _localDownloadedFolderLabel) {
+    return (_localAllFolderLabel, false);
   }
   return (existsFolder(name) ? name : null, false);
 }

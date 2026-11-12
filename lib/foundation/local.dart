@@ -78,27 +78,6 @@ class LocalComic with HistoryMixin implements Comic {
       downloadedChapters = List.from(jsonDecode(row[8] as String)),
       createdAt = DateTime.fromMillisecondsSinceEpoch(row[9] as int);
 
-  /// 列表投影专用：只读展示需要的列，**不解析章节表**。
-  ///
-  /// `comics` 每一行都带着整本章节 JSON（几百章的书是几十 KB），
-  /// [LocalComic.fromRow] 会把它反序列化成 `ComicChapters`。收藏页的
-  /// 「本地」分类只用到标题、封面、时间，却因为这条路径要在每次刷新时
-  /// 解析 N 本 × M 章 —— 而 `LocalManager` 每完成一次下载就通知一次。
-  ///
-  /// 得到的对象 `chapters` 为 null、`downloadedChapters` 为空，
-  /// **只能用于列表展示**；要阅读、看详情、算进度，一律走 [LocalManager.find]。
-  LocalComic.fromSummaryRow(Row row)
-    : id = row[0] as String,
-      title = row[1] as String,
-      subtitle = row[2] as String,
-      tags = List.from(jsonDecode(row[3] as String)),
-      directory = row[4] as String,
-      chapters = null,
-      cover = row[5] as String,
-      comicType = ComicType(row[6] as int),
-      downloadedChapters = const [],
-      createdAt = DateTime.fromMillisecondsSinceEpoch(row[7] as int);
-
   File get coverFile => File(FilePath.join(baseDir, cover));
 
   String get baseDir => (directory.contains('/') || directory.contains('\\'))
@@ -399,28 +378,6 @@ class LocalManager with ChangeNotifier {
       ;
     ''');
     return res.map((row) => LocalComic.fromRow(row)).toList();
-  }
-
-  /// 列表投影用：只读展示列，跳过整本章节 JSON 的解析。
-  ///
-  /// 与 [getComics] 同一套排序规则，但每行少反序列化两个 JSON 数组。
-  /// 返回的对象没有章节表，见 [LocalComic.fromSummaryRow] 的说明。
-  List<LocalComic> getComicSummaries(LocalSortType sortType) {
-    const columns =
-        'SELECT id, title, subtitle, tags, directory, cover, comic_type, '
-        'created_at FROM comics';
-    if (sortType == LocalSortType.titleAZ) {
-      var all = _db.select('$columns;').map(LocalComic.fromSummaryRow).toList();
-      return sortByTitleAZ(all, (e) => e.title);
-    }
-    var res = _db.select('''
-      $columns
-      ORDER BY
-        ${sortType.value == 'name' ? 'title' : 'created_at'}
-        ${sortType.value == 'time_asc' || sortType.value == 'name' ? 'ASC' : 'DESC'}
-      ;
-    ''');
-    return res.map(LocalComic.fromSummaryRow).toList();
   }
 
   LocalComic? find(String id, ComicType comicType) {

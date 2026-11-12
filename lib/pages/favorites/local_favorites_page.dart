@@ -41,8 +41,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   var selectedLocalFolders = <String>{};
 
-  late List<String> added = [];
-
   String keyword = "";
   bool searchHasUpper = false;
 
@@ -56,15 +54,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
 
   bool get isReadFolder => widget.folder == _localReadFolderLabel;
 
-  bool get isDownloadedFolder => widget.folder == _localDownloadedFolderLabel;
-
   /// 自建分类才有的操作（重命名 / 排序 / 导出 / 删除分类）。
-  bool get isNormalFolder =>
-      !isAllFolder && !isReadFolder && !isDownloadedFolder;
+  bool get isNormalFolder => !isAllFolder && !isReadFolder;
 
   /// 当前页面对应的真实表名。「已阅」用的是内置表，不能拿 widget.folder
-  /// （那是 UI 哨兵名）去当表名查。「本地」没有表，它读的是本地库，凡是
-  /// 需要表名的收藏操作都得先判 [isDownloadedFolder] 绕开。
+  /// （那是 UI 哨兵名）去当表名查。
   String get localTable {
     if (isReadFolder) return LocalFavoritesManager.readFolderName;
     return widget.folder;
@@ -129,8 +123,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     }
     if (isReadFolder) {
       comics = manager.getFolderComics(LocalFavoritesManager.readFolderName);
-    } else if (isDownloadedFolder) {
-      comics = localLibraryItems();
     } else if (isAllFolder) {
       var totalComics = manager.totalComics;
       if (totalComics < _asyncDataFetchLimit) {
@@ -192,37 +184,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       }
     }
     setState(() {});
-  }
-
-  /// 本地库的投影：把 [LocalComic] 包成 [FavoriteItem]，好让这页现成的
-  /// 网格、搜索、筛选、多选原样复用。
-  ///
-  /// 封面直接给 `file://` 绝对路径——[comic.coverFile] 就在磁盘上，走这条路
-  /// 不用发网络请求（CachedImageProvider 对 file:// 是直接读文件）。
-  List<FavoriteItem> localLibraryItems() {
-    List<LocalComic> all;
-    try {
-      // 只要标题、封面、时间，走轻量查询：整本章节 JSON 在这里用不上，
-      // 而每次下载完成都会触发一次刷新（LocalManager 通知）。
-      all = LocalManager().getComicSummaries(LocalSortType.timeDesc);
-    } catch (e, s) {
-      // 本地库还没初始化好（启动早期 / 测试环境）时当空库处理。
-      Log.error("Favorites", "Failed to read local library: $e\n$s");
-      return [];
-    }
-    return all
-        .map(
-          (comic) => FavoriteItem(
-            id: comic.id,
-            name: comic.title,
-            author: comic.subtitle,
-            type: comic.comicType,
-            tags: comic.tags,
-            coverPath: "file://${comic.coverFile.path}",
-            favoriteTime: comic.createdAt,
-          ),
-        )
-        .toList();
   }
 
   List<FavoriteItem> filterComics(List<FavoriteItem> curComics) {
@@ -321,10 +282,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     comics = [];
     updateComics();
     LocalFavoritesManager().addListener(updateComics);
-    if (isDownloadedFolder) {
-      // 「本地」分类读的是本地库，下完一本 / 删掉一本都得跟着刷新。
-      LocalManager().addListener(updateComics);
-    }
     super.initState();
   }
 
@@ -333,9 +290,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
     // 控制器要释放：切分类会重建这个 State，不释放就每次漏一个。
     scrollController.dispose();
     LocalFavoritesManager().removeListener(updateComics);
-    if (isDownloadedFolder) {
-      LocalManager().removeListener(updateComics);
-    }
     super.dispose();
   }
 
@@ -648,8 +602,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
       title = "All".tl;
     } else if (title == _localReadFolderLabel) {
       title = "Finished Reading".tl;
-    } else if (title == _localDownloadedFolderLabel) {
-      title = "Local comics".tl;
     }
 
     Widget body = SmoothCustomScrollView(
@@ -780,13 +732,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     text: "Invert Selection".tl,
                     onClick: invertSelection,
                   ),
-                  // 「本地」里的书已经在磁盘上了，再点「下载」只会全部落空。
-                  if (!isDownloadedFolder)
-                    MenuEntry(
-                      icon: Icons.download,
-                      text: "Download".tl,
-                      onClick: downloadSelected,
-                    ),
+                  MenuEntry(
+                    icon: Icons.download,
+                    text: "Download".tl,
+                    onClick: downloadSelected,
+                  ),
                   // 删除是危险操作，固定放在菜单最后。
                   // 内置分类里也要能删：失效里全是打不开的书，删掉才是主要
                   // 出路；已阅同理。
@@ -800,13 +750,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                         showConfirmDialog(
                           context: context,
                           title: "Delete".tl,
-                          content: isDownloadedFolder
-                              ? "Delete @c local comics and files?".tlParams({
-                                  "c": selectedComics.length,
-                                })
-                              : "Delete @c comics?".tlParams({
-                                  "c": selectedComics.length,
-                                }),
+                          content: "Delete @c comics?".tlParams({
+                            "c": selectedComics.length,
+                          }),
                           btnColor: context.colorScheme.error,
                           onConfirm: () {
                             _deleteComicWithId();
@@ -855,31 +801,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
           SliverPadding(
             padding: EdgeInsets.only(top: context.padding.top),
           ),
-        if (!isLoading &&
-            !searchMode &&
-            isDownloadedFolder &&
-            comics.isEmpty)
-          SliverToBoxAdapter(
-            child: Padding(
-              padding: const EdgeInsets.fromLTRB(24, 72, 24, 0),
-              child: Column(
-                children: [
-                  Icon(
-                    Icons.download_done,
-                    size: 44,
-                    color: context.colorScheme.onSurfaceVariant.toOpacity(0.4),
-                  ),
-                  const SizedBox(height: 12),
-                  Text(
-                    "No local comics".tl,
-                    style: ts.s14.withColor(
-                      context.colorScheme.onSurfaceVariant,
-                    ),
-                  ),
-                ],
-              ),
-            ),
-          ),
         if (isLoading)
           SliverToBoxAdapter(
             child: SizedBox(
@@ -910,18 +831,16 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       );
                     },
                   ),
-                if (!isDownloadedFolder)
-                  MenuEntry(
-                    icon: Icons.download,
-                    text: "Download".tl,
-                    onClick: () {
-                      var started = downloadComic(c as FavoriteItem);
-                      context.showMessage(
-                        message:
-                            started ? "Download started".tl : "Downloaded".tl,
-                      );
-                    },
-                  ),
+                MenuEntry(
+                  icon: Icons.download,
+                  text: "Download".tl,
+                  onClick: () {
+                    var started = downloadComic(c as FavoriteItem);
+                    context.showMessage(
+                      message: started ? "Download started".tl : "Downloaded".tl,
+                    );
+                  },
+                ),
                 MenuEntry(
                   icon: Icons.check,
                   text: "Select".tl,
@@ -971,18 +890,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                       );
                     },
                   ),
-                if (isDownloadedFolder)
-                  MenuEntry(
-                    icon: Icons.folder_open,
-                    text: "Open Folder".tl,
-                    onClick: () {
-                      var comic = c as FavoriteItem;
-                      var local = LocalManager().find(comic.id, comic.type);
-                      if (local != null) {
-                        openComicFolder(local);
-                      }
-                    },
-                  ),
                 if (!isAllFolder)
                   MenuEntry(
                     icon: Icons.delete_outline,
@@ -991,24 +898,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                     isDanger: true,
                     onClick: () {
                       var comic = c as FavoriteItem;
-                      if (isDownloadedFolder) {
-                        var local = LocalManager().find(comic.id, comic.type);
-                        if (local == null) {
-                          return;
-                        }
-                        showConfirmDialog(
-                          context: context,
-                          title: "Delete".tl,
-                          content: "Delete @c local comics and files?"
-                              .tlParams({"c": 1}),
-                          btnColor: context.colorScheme.error,
-                          onConfirm: () {
-                            LocalManager().batchDeleteComics([local]);
-                            updateComics();
-                          },
-                        );
-                        return;
-                      }
                       LocalFavoritesManager().deleteComicWithId(
                         localTable,
                         comic.id,
@@ -1030,23 +919,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                   lastSelectedIndex = comics.indexOf(c);
                 });
               } else if (appdata.settings["onClickFavorite"] == "viewDetail") {
-                // 「本地」分类里的书进本地详情页：章节就是磁盘上的文件，能
-                // 直接读、能打开文件夹、能导出。在线详情页那一套（下载 /
-                // 点赞 / 评论 / 换源）对手机里的书不成立。
-                //
-                // 其余分类维持原样：收藏的是「源站上的那本书」，详情仍然去
-                // 源上看（新章节、评论都在那边）。只有确实下到本地的，才有
-                // 资格走本地页。
-                final local = isDownloadedFolder
-                    ? LocalManager().find(c.id, (c as FavoriteItem).type)
-                    : null;
-                if (local != null) {
-                  final ctx = App.mainNavigatorKey?.currentContext;
-                  if (ctx != null) {
-                    LocalComicPage.open(ctx, local, heroID: heroID);
-                  }
-                  return;
-                }
+                // 收藏的是「源站上的那本书」，详情去源上看（新章节、评论、
+                // 换源都在那边）。本地库现在有自己的入口和页面，不再从收藏
+                // 里分叉进 LocalComicPage。
                 App.mainNavigatorKey?.currentContext?.to(
                   () => ComicPage(
                     id: c.id,
@@ -1182,16 +1057,6 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                             );
                           }
                           var folder = targetFolders[index];
-                          var disabled = false;
-                          if (selectedLocalFolders.isNotEmpty) {
-                            if (added.contains(folder) &&
-                                !added.contains(selectedLocalFolders.first)) {
-                              disabled = true;
-                            } else if (!added.contains(folder) &&
-                                added.contains(selectedLocalFolders.first)) {
-                              disabled = true;
-                            }
-                          }
                           return CheckboxListTile(
                             title: Row(
                               children: [
@@ -1200,18 +1065,15 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
                               ],
                             ),
                             value: selectedLocalFolders.contains(folder),
-                            onChanged: disabled
-                                ? null
-                                : (v) {
-                                    setState(() {
-                                      // 一本漫画只能属于一个分类，
-                                      // 移动目标只能选一个。
-                                      selectedLocalFolders.clear();
-                                      if (v!) {
-                                        selectedLocalFolders.add(folder);
-                                      }
-                                    });
-                                  },
+                            onChanged: (v) {
+                              setState(() {
+                                // 一本漫画只能属于一个分类，移动目标只能选一个。
+                                selectedLocalFolders.clear();
+                                if (v!) {
+                                  selectedLocalFolders.add(folder);
+                                }
+                              });
+                            },
                           );
                         },
                       ),
@@ -1273,48 +1135,11 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   }
 
   void _deleteComicWithId() {
-    if (isDownloadedFolder) {
-      _deleteLocalComics();
-      return;
-    }
     var toBeDeleted = selectedComics.keys
         .map((e) => e as FavoriteItem)
         .toList();
     LocalFavoritesManager().batchDeleteComics(localTable, toBeDeleted);
     _cancel();
-  }
-
-  /// 「本地」分类里的删除 = 删本地库（连磁盘文件一起）。
-  ///
-  /// 这个分类就是本地库本身，把条目藏起来却留着文件，只会变成用户看不见的
-  /// 占用。真要保留文件可以去存储管理里清。
-  ///
-  /// 但要区分两种书：**从网络源下载的**清掉磁盘副本后书还在源站，收藏和
-  /// 历史都该留着（可以重新下）；**手工导入的**只在本地存在，连库记录一起
-  /// 删。以前这里统一用默认参数，把下载书的收藏记录和阅读历史顺手删了，
-  /// 而确认框只写「删除本地漫画和文件」——用户没预期丢这些东西。
-  void _deleteLocalComics() {
-    var localComics = selectedComics.keys
-        .map((e) => e as FavoriteItem)
-        .map((e) => LocalManager().find(e.id, e.type))
-        .whereType<LocalComic>()
-        .toList();
-    _cancel();
-    if (localComics.isEmpty) {
-      return;
-    }
-    var imported =
-        localComics.where((c) => c.comicType == ComicType.local).toList();
-    var downloaded =
-        localComics.where((c) => c.comicType != ComicType.local).toList();
-    if (imported.isNotEmpty) {
-      LocalManager().batchDeleteComics(imported);
-    }
-    if (downloaded.isNotEmpty) {
-      // removeFileOnDisk: true, removeFavoriteAndHistory: false
-      LocalManager().batchDeleteComics(downloaded, true, false);
-    }
-    updateComics();
   }
 }
 

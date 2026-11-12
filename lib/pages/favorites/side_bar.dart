@@ -295,6 +295,16 @@ class _LeftBarState extends State<_LeftBar> implements FolderList {
       padding: EdgeInsets.only(top: withTopGap ? 4 : 0),
       child: InkWell(
         onTap: () {
+          // 「本地漫画」指向本地库自己的整页：章节进度、体积、更新角标、
+          // 导出、检查更新都在那边。收藏里再摊一套列表，只会出现两套
+          // 交互规则（长按是菜单还是多选、有没有导出、排序入口在哪）。
+          if (isDownloaded) {
+            widget.onSelected?.call();
+            App.mainNavigatorKey?.currentContext?.to(
+              () => const LocalComicsPage(),
+            );
+            return;
+          }
           if (isSelected) {
             return;
           }

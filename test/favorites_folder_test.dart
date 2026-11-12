@@ -26,12 +26,14 @@ void main() {
     expect(r.$1, readLabel);
   });
 
-  test('「已下载」同样保留', () {
+  test('「已下载」回落到「全部」', () {
     final r = resolveFavoriteFolder(
       {'name': downloadedLabel, 'isNetwork': false},
       existsFolder: exists,
     );
-    expect(r.$1, downloadedLabel);
+    // 1.4.60 起「本地漫画」不在收藏页里渲染列表，侧栏那一项直接打开
+    // 本地库页面。上次停在这里的用户落到「全部」，不会看到空面板。
+    expect(r.$1, allLabel);
     expect(r.$2, isFalse);
   });
 

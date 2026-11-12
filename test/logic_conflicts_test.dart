@@ -109,10 +109,20 @@ void main() {
       expect(src.contains('ComicType(comic.sourceKey.hashCode)'), isFalse);
     });
 
-    test('从「本地」删除：下载书只清文件，导入书连库记录一起删', () {
-      var src = read('lib/pages/favorites/local_favorites_page.dart');
-      expect(src.contains('batchDeleteComics(downloaded, true, false)'), isTrue);
-      expect(src.contains('batchDeleteComics(imported)'), isTrue);
+    test('本地书删除：删文件与删收藏/历史能分开选，且真的传下去', () {
+      // 本地列表现在只有独立页一套，危险操作在那里做勾选。
+      var src = read('lib/pages/local_comics_page.dart');
+      expect(src.contains('Remove local favorite and history'), isTrue);
+      expect(src.contains('Also remove files on disk'), isTrue);
+      // 两个开关必须进到 batchDeleteComics 的参数里，否则勾了不生效
+      expect(
+        'removeComicFile'.allMatches(src).length,
+        greaterThanOrEqualTo(3),
+      );
+      expect(
+        'removeFavoriteAndHistory'.allMatches(src).length,
+        greaterThanOrEqualTo(4),
+      );
     });
 
     test('单本「标为已读」也会刷新 hash 表（否则「全部」角标不减）', () {
@@ -133,19 +143,16 @@ void main() {
       expect(src.contains('if (count == _lastLocalCount || !mounted)'), isTrue);
     });
 
-    test('「本地」列表走轻量查询，不解析整本章节 JSON', () {
-      var src = read('lib/foundation/local.dart');
-      expect(src.contains('LocalComic.fromSummaryRow(Row row)'), isTrue);
-      expect(src.contains('List<LocalComic> getComicSummaries('), isTrue);
-      // 摘要对象没有章节表：它只服务列表展示，阅读/详情必须另走 find
-      expect(src.contains('chapters = null,'), isTrue);
-      expect(src.contains('downloadedChapters = const [],'), isTrue);
-      // 只 select 展示列，不能回退成 SELECT *
-      var start = src.indexOf('List<LocalComic> getComicSummaries(');
-      var end = src.indexOf('LocalComic? find(', start);
-      expect(end, greaterThan(start));
-      var body = src.substring(start, end);
-      expect(body.contains('SELECT *'), isFalse);
+    test('「本地漫画」只有一套界面：收藏里点它去本地库页面', () {
+      var sideBar = read('lib/pages/favorites/side_bar.dart');
+      expect(sideBar.contains('() => const LocalComicsPage()'), isTrue);
+      // 收藏页不该再自己投影一份本地库列表
+      var page = read('lib/pages/favorites/local_favorites_page.dart');
+      expect(page.contains('localLibraryItems'), isFalse);
+      expect(page.contains('isDownloadedFolder'), isFalse);
+      // 上次停在这个分类的老用户回落到「全部」，不能显示空面板
+      var fav = read('lib/pages/favorites/favorites_page.dart');
+      expect(fav.contains('return (_localAllFolderLabel, false);'), isTrue);
     });
   });
 
