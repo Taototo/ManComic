@@ -91,7 +91,9 @@ android {
             minifyEnabled true
             shrinkResources true
             ndk {
-                abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
+                // 正式包不带 x86_64：它只服务模拟器和极少数 Intel 平板，
+                // 却独占 15.5 MB（整包 30%）。debug 保留，方便本地跑模拟器。
+                abiFilters "armeabi-v7a", "arm64-v8a"
             }
             signingConfig signingConfigs.release
         }

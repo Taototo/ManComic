@@ -5,7 +5,10 @@ import 'package:flutter_test/flutter_test.dart';
 /// 这批修复的共同点：都不是「崩一下」就完事，而是会静默改掉用户数据
 /// （章节记成已下载、收藏被顺手删、进度串书）。测试环境加载不了 sqlite /
 /// rhttp，所以按项目既有做法做源码守卫，锁住那几个关键不变量。
-String read(String path) => File(path).readAsStringSync();
+/// Windows 上 git 按 autocrlf 把源码换成 CRLF，而断言里写的是 `\n`。
+/// 统一成 LF，免得同一份代码在另一台机器上莫名其妙失败。
+String read(String path) =>
+    File(path).readAsStringSync().replaceAll('\r\n', '\n');
 
 void main() {
   group('下载完成判定', () {
@@ -128,6 +131,21 @@ void main() {
       expect(src.contains('LocalManager().removeListener(_onLocalLibraryChanged)'),
           isTrue);
       expect(src.contains('if (count == _lastLocalCount || !mounted)'), isTrue);
+    });
+
+    test('「本地」列表走轻量查询，不解析整本章节 JSON', () {
+      var src = read('lib/foundation/local.dart');
+      expect(src.contains('LocalComic.fromSummaryRow(Row row)'), isTrue);
+      expect(src.contains('List<LocalComic> getComicSummaries('), isTrue);
+      // 摘要对象没有章节表：它只服务列表展示，阅读/详情必须另走 find
+      expect(src.contains('chapters = null,'), isTrue);
+      expect(src.contains('downloadedChapters = const [],'), isTrue);
+      // 只 select 展示列，不能回退成 SELECT *
+      var start = src.indexOf('List<LocalComic> getComicSummaries(');
+      var end = src.indexOf('LocalComic? find(', start);
+      expect(end, greaterThan(start));
+      var body = src.substring(start, end);
+      expect(body.contains('SELECT *'), isFalse);
     });
   });
 

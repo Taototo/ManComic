@@ -202,7 +202,9 @@ class _LocalFavoritesPageState extends State<_LocalFavoritesPage> {
   List<FavoriteItem> localLibraryItems() {
     List<LocalComic> all;
     try {
-      all = LocalManager().getComics(LocalSortType.timeDesc);
+      // 只要标题、封面、时间，走轻量查询：整本章节 JSON 在这里用不上，
+      // 而每次下载完成都会触发一次刷新（LocalManager 通知）。
+      all = LocalManager().getComicSummaries(LocalSortType.timeDesc);
     } catch (e, s) {
       // 本地库还没初始化好（启动早期 / 测试环境）时当空库处理。
       Log.error("Favorites", "Failed to read local library: $e\n$s");

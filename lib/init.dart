@@ -110,21 +110,12 @@ Future<void> init() async {
   CacheManager().setLimitSize(appdata.settings['cacheSize']);
   _checkOldConfigs();
   if (App.isAndroid) {
+    // 这两件必须赶在首帧之前：深链和分享要在 UI 起来时就能落地。
     handleLinks();
     handleTextShare();
-    // 保证桌面 launcher 入口存在（防止升级后组件状态残留导致无图标）
-    await AppIcon.ensureApplied();
-    await NotificationService.init();
-    await BackgroundTasks.initialize();
-    await BackgroundTasks.syncSchedule();
-    try {
-      // 先读一次屏幕信息（档位、最高刷新率），再按用户选择申请。
-      // 申请失败不影响使用，Flutter 仍会跟随系统 vsync。
-      await DisplayRefresh.refreshInfo();
-      await DisplayRefresh.apply(appdata.settings['refreshRate'] ?? 'auto');
-    } catch (e) {
-      Log.error("Display Mode", "Failed to set high refresh rate: $e");
-    }
+    // 下面这些都不参与首帧绘制，却各自要走一次 methodChannel / 磁盘 IO，
+    // 全部 await 在 runApp 之前的话，用户看到的就是一段白屏。
+    _afterFirstFrame(_initDeferredAndroidServices);
   }
   WidgetsBinding.instance.addObserver(_LifecycleObserver());
   FlutterError.onError = (details) {
@@ -140,7 +131,43 @@ Future<void> init() async {
   }
 }
 
-void _checkOldConfigs() {  if (appdata.settings['searchSources'] == null) {
+/// 把一段初始化推到首帧之后执行。
+///
+/// `init()` 是在 `runApp` 之前 await 的，任何放在里面的 await 都会变成白屏时间。
+/// 这几件事（写桌面图标、建通知通道、WorkManager、刷新率）都不参与首帧绘制，
+/// 晚一帧没有副作用，但能实打实缩短冷启动。
+void _afterFirstFrame(Future<void> Function() task) {
+  WidgetsBinding.instance.addPostFrameCallback((_) {
+    unawaited(task());
+  });
+}
+
+/// 首帧之后依次补齐的 Android 服务。每一步独立兜错：一个失败不该连坐后面几个。
+Future<void> _initDeferredAndroidServices() async {
+  await _runSafely("App Icon", AppIcon.ensureApplied);
+  await _runSafely("Notification Service", NotificationService.init);
+  await _runSafely("Background Tasks", () async {
+    await BackgroundTasks.initialize();
+    await BackgroundTasks.syncSchedule();
+  });
+  await _runSafely("Display Mode", () async {
+    // 先读一次屏幕信息（档位、最高刷新率），再按用户选择申请。
+    // 申请失败不影响使用，Flutter 仍会跟随系统 vsync。
+    await DisplayRefresh.refreshInfo();
+    await DisplayRefresh.apply(appdata.settings['refreshRate'] ?? 'auto');
+  });
+}
+
+Future<void> _runSafely(String tag, Future<void> Function() body) async {
+  try {
+    await body();
+  } catch (e, s) {
+    Log.error(tag, "$e\n$s");
+  }
+}
+
+void _checkOldConfigs() {
+  if (appdata.settings['searchSources'] == null) {
     appdata.settings['searchSources'] = ComicSource.all()
         .where((e) => e.searchPageData != null)
         .map((e) => e.key)

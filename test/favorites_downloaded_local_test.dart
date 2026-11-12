@@ -69,7 +69,10 @@ void main() {
     test('列表内容来自本地库，不是收藏夹', () {
       var page = read('lib/pages/favorites/local_favorites_page.dart');
       expect(page.contains('comics = localLibraryItems();'), isTrue);
-      expect(page.contains('LocalManager().getComics('), isTrue);
+      // 只取展示需要的列：整本章节 JSON 在列表里用不上，解析它会让
+      // 每次下载完成后的刷新都卡一下。
+      expect(page.contains('getComicSummaries(LocalSortType.timeDesc)'), isTrue);
+      expect(page.contains('LocalManager().getComics('), isFalse);
       // 封面直接指向磁盘文件：本地书不该为了封面再发一次网络请求
       expect(page.contains('file://\${comic.coverFile.path}'), isTrue);
       // 下载完一本、删掉一本都要跟着刷新
