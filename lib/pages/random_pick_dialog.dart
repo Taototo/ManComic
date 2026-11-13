@@ -2,7 +2,6 @@ import 'dart:math' as math;
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
-import 'package:liquid_glass_widgets/liquid_glass_widgets.dart' as lg;
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/context.dart';
@@ -20,8 +19,12 @@ const _scopeSettingKey = 'randomPickScope';
 /// 返回抽中的那本（用户点「读这本」时），由调用方负责打开详情页——这个
 /// 弹窗不应该知道详情页怎么跳，否则它会被绑死在导航上。
 Future<FavoriteItem?> showRandomPickDialog(BuildContext context) {
+  final isDark = Theme.of(context).brightness == Brightness.dark;
   return showDialog<FavoriteItem>(
     context: context,
+    // 遮罩必须调淡：玻璃的底色是从背后的页面里采出来的，默认的 black54
+    // 会把整页压成一片黑，玻璃就只剩一块灰板。
+    barrierColor: Colors.black.withValues(alpha: isDark ? 0.42 : 0.22),
     builder: (_) => const RandomPickDialog(),
   );
 }
@@ -238,6 +241,10 @@ class _RandomPickDialogState extends State<RandomPickDialog>
         _picked != null && !_preparing && _reveal.value == 1;
     return ContentDialog(
       title: "Draw a comic".tl,
+      // 玻璃放在弹窗底板上（整块面板透出背后的收藏页），卡片本身做实体：
+      // 两层玻璃叠在一起，上面那层既没有自己的折射素材，还会把底板的质感
+      // 盖掉，看起来像一块磨砂塑料。
+      glass: true,
       content: Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
         child: Column(
@@ -404,17 +411,19 @@ class _RandomPickDialogState extends State<RandomPickDialog>
             alignment: Alignment.center,
             clipBehavior: Clip.none,
             children: [
-              // 牌背后的常驻光晕：玻璃只有在**有东西可折射**时才看得出来。
-              // 翻牌光效（下面那层 CustomPaint）只在中途亮，静止时这里要是
-              // 空的，透明玻璃压在弹窗白底上就约等于没有。
+              // 牌背后的光晕只在翻牌时当舞台光用。
+              //
+              // 它原来还兼职「给玻璃卡片提供折射素材」，现在玻璃挪到了弹窗
+              // 底板上（背后是真正的收藏页封面），这层彩色就不需要那么浓了：
+              // 玻璃下垫一大片渐变会糊成一层脏雾，反而把底板的通透盖住。
               Positioned.fill(
                 child: IgnorePointer(
                   child: DecoratedBox(
                     decoration: BoxDecoration(
                       gradient: RadialGradient(
                         colors: [
-                          colors.primary.withValues(alpha: 0.18),
-                          colors.tertiary.withValues(alpha: 0.06),
+                          colors.primary.withValues(alpha: 0.12),
+                          colors.tertiary.withValues(alpha: 0.04),
                           Colors.transparent,
                         ],
                         stops: const [0, 0.55, 1],
@@ -463,94 +472,98 @@ class _RandomPickDialogState extends State<RandomPickDialog>
     final radius = BorderRadius.circular(16);
     return Semantics(
       label: (_picked == null ? "Tap to draw" : "Comic card back").tl,
-      // 牌背是液态玻璃。这里有两个必须守住的点：
+      // 牌背是**实体牌**，玻璃在弹窗底板上（见 ContentDialog.glass）。
       //
-      // 1. 档位只能到 standard。牌背包在 rotateY 的 Transform 里、还在弹窗
-      //    的对话框底板上，premium 那套 toImageSync 采样在这种情况下拿不到
-      //    背景，玻璃会整个消失——之前「抽一本没有玻璃效果」就是这个原因。
-      // 2. 底下必须**有东西可折射**。弹窗底板是纯 surface，透明白玻璃压上去
-      //    和白底上一块白色没有区别，所以卡片后面垫了一层彩色光晕（见
-      //    _buildAnimatedCard），玻璃边缘才有东西可以弯。
-      child: LiquidGlassPanel(
-        borderRadius: radius,
-        quality: lg.GlassQuality.standard,
-        // 底色比默认实一档：牌背要有「一块牌」的体积感，
-        // 上面的图标和文字也得压得住背后的光晕。
-        tintAlpha: isDark ? 0.5 : 0.42,
-        child: SizedBox(
-          width: _cardWidth,
-          height: _cardHeight,
-          child: Stack(
-            alignment: Alignment.center,
-            children: [
-              // 斜向高光：白底上全靠这两道光把「玻璃」和「白纸」区分开。
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: radius,
-                    gradient: LinearGradient(
-                      begin: Alignment.topLeft,
-                      end: Alignment.bottomRight,
-                      colors: [
-                        Colors.white.withValues(alpha: isDark ? 0.16 : 0.62),
-                        Colors.white.withValues(alpha: 0.02),
-                        Colors.white.withValues(alpha: isDark ? 0.10 : 0.34),
-                      ],
-                      stops: const [0, 0.46, 1],
-                    ),
-                  ),
-                ),
-              ),
-              // 边缘描边：一圈比底色亮一线、比背景暗一线的细边，
-              // 是玻璃「有厚度」最省事也最有效的暗示。
-              Positioned.fill(
-                child: DecoratedBox(
-                  decoration: BoxDecoration(
-                    borderRadius: radius,
-                    border: Border.all(
-                      color: colors.onSurface.withValues(alpha: 0.14),
-                    ),
-                  ),
-                ),
-              ),
-              Positioned(
-                top: 14,
-                left: 14,
-                child: Icon(
-                  Icons.auto_awesome,
-                  size: 18,
-                  color: colors.primary.withValues(alpha: 0.6),
-                ),
-              ),
-              Positioned(
-                right: 14,
-                bottom: 14,
-                child: Icon(
-                  Icons.auto_awesome,
-                  size: 18,
-                  color: colors.tertiary.withValues(alpha: 0.6),
-                ),
-              ),
-              Container(
-                width: 104,
-                height: 156,
-                decoration: BoxDecoration(
-                  borderRadius: BorderRadius.circular(52),
-                  border: Border.all(
-                    color: colors.onSurface.withValues(alpha: 0.28),
-                    width: 2,
-                  ),
-                ),
-                child: Icon(
-                  _preparing
-                      ? Icons.hourglass_top_rounded
-                      : Icons.style_rounded,
-                  size: 50,
-                  color: colors.onSurface.withValues(alpha: 0.75),
-                ),
-              ),
+      // 以前把玻璃做在这一层，方向是反的：弹窗底板是不透明的 surface，
+      // 玻璃压在一块纯色上没有任何东西可折射，调参数只会得到一块发白的
+      // 磨砂片。现在底板透出后面的收藏页，牌就必须是实的——两层玻璃叠着，
+      // 上面那层会盖掉底板的质感，整体反而更糊。
+      child: Container(
+        width: _cardWidth,
+        height: _cardHeight,
+        decoration: BoxDecoration(
+          borderRadius: radius,
+          gradient: LinearGradient(
+            begin: Alignment.topLeft,
+            end: Alignment.bottomRight,
+            colors: [
+              colors.primaryContainer.withValues(alpha: isDark ? 0.55 : 0.9),
+              colors.surfaceContainerHigh,
+              colors.tertiaryContainer.withValues(alpha: isDark ? 0.38 : 0.62),
             ],
+            stops: const [0, 0.55, 1],
           ),
+          border: Border.all(
+            color: colors.onSurface.withValues(alpha: 0.14),
+          ),
+          // 牌要「浮」在玻璃底板上，靠一层低对比的投影，不能太黑，
+          // 否则在透出封面的底板上会像一块污渍。
+          boxShadow: [
+            BoxShadow(
+              color: colors.shadow.withValues(alpha: isDark ? 0.45 : 0.16),
+              blurRadius: 20,
+              offset: const Offset(0, 10),
+            ),
+          ],
+        ),
+        child: Stack(
+          alignment: Alignment.center,
+          children: [
+            // 斜向高光：让牌面有反光，和底板的玻璃是两种材质。
+            Positioned.fill(
+              child: DecoratedBox(
+                decoration: BoxDecoration(
+                  borderRadius: radius,
+                  gradient: LinearGradient(
+                    begin: Alignment.topLeft,
+                    end: Alignment.bottomRight,
+                    colors: [
+                      Colors.white.withValues(alpha: isDark ? 0.14 : 0.55),
+                      Colors.white.withValues(alpha: 0.02),
+                      Colors.white.withValues(alpha: isDark ? 0.08 : 0.28),
+                    ],
+                    stops: const [0, 0.46, 1],
+                  ),
+                ),
+              ),
+            ),
+            Positioned(
+              top: 14,
+              left: 14,
+              child: Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: colors.primary.withValues(alpha: 0.7),
+              ),
+            ),
+            Positioned(
+              right: 14,
+              bottom: 14,
+              child: Icon(
+                Icons.auto_awesome,
+                size: 18,
+                color: colors.tertiary.withValues(alpha: 0.7),
+              ),
+            ),
+            Container(
+              width: 104,
+              height: 156,
+              decoration: BoxDecoration(
+                borderRadius: BorderRadius.circular(52),
+                border: Border.all(
+                  color: colors.onSurface.withValues(alpha: 0.28),
+                  width: 2,
+                ),
+              ),
+              child: Icon(
+                _preparing
+                    ? Icons.hourglass_top_rounded
+                    : Icons.style_rounded,
+                size: 50,
+                color: colors.onSurface.withValues(alpha: 0.75),
+              ),
+            ),
+          ],
         ),
       ),
     );
