@@ -285,29 +285,20 @@ class _DoubleLineSelectSettingsState extends State<_DoubleLineSelectSettings> {
         var renderBox = context.findRenderObject() as RenderBox;
         var offset = renderBox.localToGlobal(Offset.zero);
         var size = renderBox.size;
-        var rect = offset & size;
-        showMenu(
-          elevation: 3,
-          color: context.brightness == Brightness.light
-              ? const Color(0xFFF6F6F6)
-              : const Color(0xFF1E1E1E),
+        final keys = widget.optionTranslation.keys.toList();
+        // 与 Select 共用同一套玻璃浮层。原先这里 showMenu 把底色写死成
+        // 一档接近纯白的灰，浅色下就是一块白板。
+        showGlassMenu<String>(
           context: context,
-          position: RelativeRect.fromRect(
-            rect,
-            Offset.zero & MediaQuery.of(context).size,
-          ),
-          items: widget.optionTranslation.keys
-              .map(
-                (key) => PopupMenuItem(
-                  value: key,
-                  height: App.isMobile ? 46 : 40,
-                  child: Text(widget.optionTranslation[key]!),
-                ),
-              )
-              .toList(),
-        ).then((value) {
-          if (value != null) {
-            _apply(value);
+          anchor: offset & size,
+          selectedIndex: keys.indexOf("$value"),
+          entries: [
+            for (final key in keys)
+              GlassMenuEntry(widget.optionTranslation[key]!, key),
+          ],
+        ).then((picked) {
+          if (picked != null) {
+            _apply(picked);
           }
         });
       },

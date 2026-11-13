@@ -29,33 +29,21 @@ class Select extends StatelessWidget {
           var renderBox = context.findRenderObject() as RenderBox;
           var offset = renderBox.localToGlobal(Offset.zero);
           var size = renderBox.size;
-          showMenu(
-            elevation: 3,
-            color: context.brightness == Brightness.light
-                ? const Color(0xFFF6F6F6)
-                : const Color(0xFF1E1E1E),
+          // 走玻璃浮层，不用 Material 的 showMenu：它的底色被写死成一档
+          // 接近纯白的灰，浅色下就是一块白板（分类页「全部 / 完结」那两个
+          // 下拉最显眼）。玻璃菜单与收藏分类抽屉同一档。
+          showGlassMenu<int>(
             context: context,
-            useRootNavigator: true,
-            constraints: BoxConstraints(
-              minWidth: size.width,
-              maxWidth: size.width,
-            ),
-            position: RelativeRect.fromLTRB(
-              offset.dx,
-              offset.dy + size.height + 2,
-              offset.dx + size.height + 2,
-              offset.dy,
-            ),
-            items: values
-                .map((e) => PopupMenuItem(
-                      height: App.isMobile ? 46 : 40,
-                      value: e,
-                      child: Text(e),
-                    ))
-                .toList(),
-          ).then((value) {
-            if (value != null) {
-              onTap?.call(values.indexOf(value));
+            anchor: offset & size,
+            minWidth: size.width,
+            selectedIndex: current == null ? null : values.indexOf(current!),
+            entries: [
+              for (var i = 0; i < values.length; i++)
+                GlassMenuEntry(values[i], i),
+            ],
+          ).then((index) {
+            if (index != null) {
+              onTap?.call(index);
             }
           });
         },

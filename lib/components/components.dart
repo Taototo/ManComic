@@ -55,6 +55,7 @@ part 'comic.dart';
 part 'comic_peek.dart';
 part 'effects.dart';
 part 'liquid_glass_engine.dart';
+part 'glass_menu.dart';
 part 'glass_segment.dart';
 part 'gesture.dart';
 part 'code.dart';
