@@ -22,9 +22,10 @@ Future<FavoriteItem?> showRandomPickDialog(BuildContext context) {
   final isDark = Theme.of(context).brightness == Brightness.dark;
   return showDialog<FavoriteItem>(
     context: context,
-    // 遮罩必须调淡：玻璃的底色是从背后的页面里采出来的，默认的 black54
-    // 会把整页压成一片黑，玻璃就只剩一块灰板。
-    barrierColor: Colors.black.withValues(alpha: isDark ? 0.42 : 0.22),
+    // 遮罩要压得住背后的封面，但也不能压死：玻璃的底色是从背后采出来的，
+    // 默认的 black54 会把整页压成一片黑，玻璃就只剩一块灰板。
+    // 0.36 与收藏页那个分类抽屉同档——那里的磨砂底板就是这么衬出来的。
+    barrierColor: Colors.black.withValues(alpha: isDark ? 0.5 : 0.36),
     builder: (_) => const RandomPickDialog(),
   );
 }

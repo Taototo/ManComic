@@ -497,9 +497,17 @@ class ContentDialog extends StatelessWidget {
                 // standard：弹窗会被反复重挂载，premium 那套 toImageSync
                 // 采样在这种场景下拿不到背景，玻璃会整块消失。
                 quality: lg.GlassQuality.standard,
-                // 底板上有标题、下拉框和按钮，底色要比卡片实一点才压得住；
-                // 但也不能高到看不见背后的封面，0.42 是两者之间的那档。
-                tintAlpha: isDark ? 0.56 : 0.42,
+                // 磨砂靠模糊，不靠加白。
+                //
+                // 上一版只给了底色、没给 blur，取的是全局默认 26（折算成
+                // sigma 7.4）——那点模糊只是把背后的封面揉毛一点点，整块
+                // 板子看起来仍然「透」，像一片有色玻璃而不是毛玻璃。
+                // 收藏页那个分类抽屉用的是 44（sigma 12.6），封面化成一片
+                // 看不出图案的雾；弹窗跟它对齐，两种表面才是同一种质感。
+                blur: 44,
+                // 底板上有标题、下拉框和按钮，底色得压得住；0.42 在放大的
+                // 模糊底下仍显透，跟抽屉的 0.45 对齐再往上收一点。
+                tintAlpha: isDark ? 0.62 : 0.5,
                 child: const SizedBox.expand(),
               ),
             ),

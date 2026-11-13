@@ -91,9 +91,32 @@ void main() {
         isFalse,
         reason: '默认遮罩会把背后页面压成一片黑',
       );
-      // 取值参考 iOS 26 原生弹窗：浅色约 0.21，深色约 0.47。
-      expect(body.contains('0.22'), isTrue);
-      expect(body.contains('0.42'), isTrue);
+      // 与收藏页的分类抽屉同档（0.36 / 深色 0.5）：那里的磨砂底板就是
+      // 靠这个遮罩衬出来的。
+      expect(body.contains('0.36'), isTrue);
+      expect(body.contains('0.5'), isTrue);
+    });
+
+    test('磨砂靠 blur，与收藏页抽屉同档', () {
+      var body = contentDialogBody();
+      // 只给底色不给 blur 时，玻璃看起来是「一片有色玻璃」而不是毛玻璃——
+      // 背后的封面还能看出图案，用户看到的就是「太透了」。
+      expect(
+        body.contains('blur: 44'),
+        isTrue,
+        reason: '没给 blur 会退回全局默认 26，磨砂感不够',
+      );
+      var drawer = read('lib/pages/favorites/favorites_page.dart');
+      expect(
+        drawer.contains('blur: 44'),
+        isTrue,
+        reason: '弹窗与收藏分类抽屉必须是同一个模糊档，否则两种表面两种质感',
+      );
+      expect(
+        body.contains('tintAlpha: isDark ? 0.62 : 0.5'),
+        isTrue,
+        reason: '底板压着标题、下拉框和按钮，底色不能回到 0.42 那种偏透的档',
+      );
     });
 
     test('卡片本身是实体，不能又套一层玻璃', () {
