@@ -15,7 +15,6 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
-import 'package:venera/pages/random_pick_dialog.dart';
 import 'package:venera/foundation/image_provider/history_image_provider.dart';
 import 'package:venera/pages/history_page.dart';
 import 'package:venera/pages/reader/reader.dart';
@@ -52,7 +51,6 @@ class HomePage extends StatelessWidget {
       'follow_updates' => const FollowUpdatesWidget(),
       'local' => const _Local(),
       'image_favorites' => const ImageFavorites(),
-      'random_pick' => const _RandomPick(),
       _ => const SliverToBoxAdapter(child: SizedBox.shrink()),
     };
   }
@@ -942,118 +940,6 @@ class _ImageFavoritesState extends State<ImageFavorites> {
           ),
         ),
       ),
-    );
-  }
-}
-
-/// 首页「抽一本」入口。
-///
-/// 以前这里是直接滚动显示一张随机卡：省一次点击，但也把「抽」这个动作本身
-/// 砍掉了——用户只看到一本书在眼前晃，不知道候选池有多大，也没法挑收藏夹或
-/// 只看没读过的。现在改成入口卡，点开是完整的抽签流程：选范围、选进度、
-/// 翻牌、再抽一次。
-class _RandomPick extends StatelessWidget {
-  const _RandomPick();
-
-  Future<void> _open(BuildContext context) async {
-    final picked = await showRandomPickDialog(context);
-    if (picked == null) return;
-    App.mainNavigatorKey?.currentContext?.to(
-      () => ComicPage(
-        id: picked.id,
-        sourceKey: picked.type.sourceKey,
-        cover: picked.cover,
-        title: picked.title,
-      ),
-    );
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colorScheme;
-    return SliverToBoxAdapter(
-      child: Padding(
-        padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
-        child: Material(
-          color: Colors.transparent,
-          child: InkWell(
-            borderRadius: BorderRadius.circular(12),
-            onTap: () => _open(context),
-            child: Container(
-              padding: const EdgeInsets.fromLTRB(12, 12, 12, 12),
-              decoration: BoxDecoration(
-                border: Border.all(color: colors.outlineVariant, width: 0.6),
-                borderRadius: BorderRadius.circular(12),
-              ),
-              child: Row(
-                children: [
-                  const _MiniCardBack(),
-                  const SizedBox(width: 12),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      mainAxisSize: MainAxisSize.min,
-                      children: [
-                        Text(
-                          "Draw a comic".tl,
-                          style: ts.s16.copyWith(fontWeight: FontWeight.w600),
-                        ),
-                        const SizedBox(height: 3),
-                        Text(
-                          "Pick one at random from your favorites"
-                              .tl,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                          style: ts.s12.withColor(colors.onSurfaceVariant),
-                        ),
-                      ],
-                    ),
-                  ),
-                  const SizedBox(width: 8),
-                  FilledButton.tonal(
-                    onPressed: () => _open(context),
-                    style: FilledButton.styleFrom(
-                      minimumSize: const Size(0, 36),
-                      padding: const EdgeInsets.symmetric(horizontal: 14),
-                      tapTargetSize: MaterialTapTargetSize.shrinkWrap,
-                      visualDensity: VisualDensity.compact,
-                    ),
-                    child: Text("Draw".tl),
-                  ),
-                ],
-              ),
-            ),
-          ),
-        ),
-      ),
-    );
-  }
-}
-
-/// 入口卡左边那张小卡背：和弹窗里的牌同一个配色，点进去有连贯感。
-class _MiniCardBack extends StatelessWidget {
-  const _MiniCardBack();
-
-  @override
-  Widget build(BuildContext context) {
-    final colors = context.colorScheme;
-    return Container(
-      width: 38,
-      height: 52,
-      alignment: Alignment.center,
-      decoration: BoxDecoration(
-        borderRadius: BorderRadius.circular(8),
-        gradient: LinearGradient(
-          begin: Alignment.topLeft,
-          end: Alignment.bottomRight,
-          colors: [colors.primaryContainer, colors.tertiaryContainer],
-        ),
-        border: Border.all(
-          color: colors.primary.withValues(alpha: 0.55),
-          width: 1.2,
-        ),
-      ),
-      child: Icon(Icons.style_rounded, size: 20, color: colors.onPrimaryContainer),
     );
   }
 }

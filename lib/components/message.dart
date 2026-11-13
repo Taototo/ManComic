@@ -421,7 +421,6 @@ class ContentDialog extends StatelessWidget {
     required this.content,
     this.dismissible = true,
     this.actions = const [],
-    this.glass = false,
   });
 
   final String? title;
@@ -431,17 +430,6 @@ class ContentDialog extends StatelessWidget {
   final List<Widget> actions;
 
   final bool dismissible;
-
-  /// 整块底板用液态玻璃，透出弹窗背后的页面。
-  ///
-  /// 玻璃的效果取决于「底下有没有东西可折射」。把玻璃放到**里面的某个
-  /// 小部件**上是没用的：Dialog 底板本身就是不透明的 surface，玻璃压在
-  /// 一块纯色上，只在边缘糊出一点自己的描边，看着像没生效——「抽一本」
-  /// 之前怎么调卡片都调不出玻璃就是这个原因。
-  ///
-  /// 打开这一个开关时要配套调淡 `barrierColor`，否则遮罩把背后的页面压
-  /// 成一片黑，玻璃采到的全是黑色。
-  final bool glass;
 
   @override
   Widget build(BuildContext context) {
@@ -470,7 +458,7 @@ class ContentDialog extends StatelessWidget {
         ],
       ),
     );
-    Widget panel = ConstrainedBox(
+    final panel = ConstrainedBox(
       constraints: BoxConstraints(
         maxWidth: 600,
         minWidth: math.min(400, context.width - 16),
@@ -482,57 +470,19 @@ class ContentDialog extends StatelessWidget {
         child: content,
       ),
     );
-    if (glass) {
-      final isDark = context.brightness == Brightness.dark;
-      // 玻璃作为**背景层**垫在内容下面，而不是把内容整个包起来：
-      // IntrinsicWidth 测量内在宽度时会去问 child，而玻璃内部是
-      // LayoutBuilder / 着色器，遇到 intrinsic 查询会直接抛异常。
-      // 放进 Stack 的 Positioned.fill 就不参与测量，布局仍由内容决定。
-      panel = Stack(
-        children: [
-          Positioned.fill(
-            child: IgnorePointer(
-              child: LiquidGlassPanel(
-                borderRadius: BorderRadius.circular(24),
-                // standard：弹窗会被反复重挂载，premium 那套 toImageSync
-                // 采样在这种场景下拿不到背景，玻璃会整块消失。
-                quality: lg.GlassQuality.standard,
-                // 磨砂靠模糊，不靠加白。
-                //
-                // 上一版只给了底色、没给 blur，取的是全局默认 26（折算成
-                // sigma 7.4）——那点模糊只是把背后的封面揉毛一点点，整块
-                // 板子看起来仍然「透」，像一片有色玻璃而不是毛玻璃。
-                // 收藏页那个分类抽屉用的是 44（sigma 12.6），封面化成一片
-                // 看不出图案的雾；弹窗跟它对齐，两种表面才是同一种质感。
-                blur: 44,
-                // 底板上有标题、下拉框和按钮，底色得压得住；0.42 在放大的
-                // 模糊底下仍显透，跟抽屉的 0.45 对齐再往上收一点。
-                tintAlpha: isDark ? 0.62 : 0.5,
-                child: const SizedBox.expand(),
-              ),
-            ),
-          ),
-          panel,
-        ],
-      );
-    }
     return Dialog(
       shape: RoundedRectangleBorder(
-        borderRadius: BorderRadius.circular(glass ? 24 : 8),
-        // 玻璃自己带菲涅尔高光和细边，Dialog 再描一圈就成双边框了。
-        side: glass
-            ? BorderSide.none
-            : context.brightness == Brightness.dark
-                ? BorderSide(color: context.colorScheme.outlineVariant)
-                : BorderSide.none,
+        borderRadius: BorderRadius.circular(8),
+        side: context.brightness == Brightness.dark
+            ? BorderSide(color: context.colorScheme.outlineVariant)
+            : BorderSide.none,
       ),
       insetPadding: context.width < 400
           ? const EdgeInsets.symmetric(horizontal: 4)
           : const EdgeInsets.symmetric(horizontal: 16),
-      // 玻璃自己带阴影和质感，Dialog 再叠一层实心底色和白板阴影就白做了。
-      elevation: glass ? 0 : 2,
+      elevation: 2,
       shadowColor: context.colorScheme.shadow,
-      backgroundColor: glass ? Colors.transparent : context.colorScheme.surface,
+      backgroundColor: context.colorScheme.surface,
       surfaceTintColor: Colors.transparent,
       child: AnimatedSize(
         duration: const Duration(milliseconds: 200),
