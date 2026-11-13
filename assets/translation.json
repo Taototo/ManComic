@@ -939,7 +939,13 @@
     "Scanning @a / @b": "正在数页 @a / @b",
     "@a chapters were confirmed when downloaded": "有 @a 话在下载时已确认完整，这次没再问源站",
     "Check them again": "全部再核对一遍",
-    "@a pages, gaps inside": "本地 @a 页，中间有缺页"
+    "@a pages, gaps inside": "本地 @a 页，中间有缺页",
+    "History only records what you opened. Clearing it keeps your reading progress and read marks.": "历史只记录你打开过什么。清空列表不会动阅读进度和「已读」标记。",
+    "Clear progress too": "连阅读进度一起清除",
+    "This deletes where you stopped in every comic and the chapters marked as read. It cannot be undone.": "这会删掉每本书读到哪一页、以及哪些章节标了已读，且无法恢复。",
+    "This deletes where you stopped in this comic and the chapters marked as read. It cannot be undone.": "这会删掉这本书读到哪一页、以及哪些章节标了已读，且无法恢复。",
+    "Clear Progress": "清除阅读进度",
+    "History cleared, reading progress kept": "历史已清空，阅读进度保留"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1881,6 +1887,12 @@
     "Scanning @a / @b": "正在數頁 @a / @b",
     "@a chapters were confirmed when downloaded": "有 @a 話在下載時已確認完整，這次沒再問來源",
     "Check them again": "全部再核對一遍",
-    "@a pages, gaps inside": "本機 @a 頁，中間有缺頁"
+    "@a pages, gaps inside": "本機 @a 頁，中間有缺頁",
+    "History only records what you opened. Clearing it keeps your reading progress and read marks.": "歷史只記錄你開啟過什麼。清空列表不會動閱讀進度和「已讀」標記。",
+    "Clear progress too": "連閱讀進度一起清除",
+    "This deletes where you stopped in every comic and the chapters marked as read. It cannot be undone.": "這會刪掉每本書讀到哪一頁、以及哪些章節標了已讀，且無法復原。",
+    "This deletes where you stopped in this comic and the chapters marked as read. It cannot be undone.": "這會刪掉這本書讀到哪一頁、以及哪些章節標了已讀，且無法復原。",
+    "Clear Progress": "清除閱讀進度",
+    "History cleared, reading progress kept": "歷史已清空，閱讀進度保留"
   }
 }

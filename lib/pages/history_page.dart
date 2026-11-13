@@ -69,23 +69,58 @@ class _HistoryPageState extends State<HistoryPage> {
     });
   }
 
-  void _removeHistory(History comic) {
+  /// 这条历史对应的 ComicType。
+  ///
+  /// 源站卸载之后 `sourceKey` 会变成 `Unknown:<type>`，所以不能直接拿
+  /// `sourceKey.hashCode` 当类型——那样删的/清的会是另一个「源」。
+  ComicType _typeOf(History comic) {
     if (comic.sourceKey.startsWith("Unknown")) {
-      HistoryManager().remove(
-        comic.id,
-        ComicType(int.parse(comic.sourceKey.split(':')[1])),
-      );
-    } else if (comic.sourceKey == 'local') {
-      HistoryManager().remove(
-        comic.id,
-        ComicType.local,
-      );
-    } else {
-      HistoryManager().remove(
-        comic.id,
-        ComicType(comic.sourceKey.hashCode),
-      );
+      return ComicType(int.parse(comic.sourceKey.split(':')[1]));
     }
+    if (comic.sourceKey == 'local') {
+      return ComicType.local;
+    }
+    return ComicType(comic.sourceKey.hashCode);
+  }
+
+  /// 从列表里移出这一条，**不动阅读进度**。
+  ///
+  /// 用户删的是「列表里的这一行」，不是「我读过这本书」。想连进度一起清，
+  /// 用 [_forgetHistory]（菜单里的「清除阅读进度」）。
+  void _removeHistory(History comic) {
+    HistoryManager().hide(comic.id, _typeOf(comic));
+  }
+
+  /// 真正忘掉：列表 + 进度 + 已读标记一起删。
+  void _forgetHistory(History comic) {
+    showConfirmDialog(
+      context: context,
+      title: "Clear Progress".tl,
+      content: "This deletes where you stopped in this comic and the chapters marked as read. It cannot be undone."
+          .tl,
+      confirmText: "Clear".tl,
+      btnColor: context.colorScheme.error,
+      onConfirm: () {
+        HistoryManager().forget(comic.id, _typeOf(comic));
+      },
+    );
+  }
+
+  /// 连阅读进度一起清空。清列表本身不再碰进度，所以这条路要单独走、还要
+  /// 再确认一次——它删掉的东西（读到第几页、哪些话读过）没有回收站。
+  void _clearWithProgress() {
+    showConfirmDialog(
+      context: context,
+      title: "Clear progress too".tl,
+      content:
+          "This deletes where you stopped in every comic and the chapters marked as read. It cannot be undone."
+              .tl,
+      confirmText: "Clear".tl,
+      btnColor: context.colorScheme.error,
+      onConfirm: () {
+        HistoryManager().clearHistory(withProgress: true);
+      },
+    );
   }
 
   void _refreshHistory(History comic) async {
@@ -177,9 +212,12 @@ class _HistoryPageState extends State<HistoryPage> {
                   selectedComics.clear();
                 });
 
-                for (final comic in comicsToDelete) {
-                  _removeHistory(comic);
-                }
+                // 一次事务批量隐藏，别逐条 notifyListeners（几百条选中会把
+                // 整页重建几百遍）。
+                HistoryManager().hideAll([
+                  for (final comic in comicsToDelete)
+                    ComicID(_typeOf(comic), comic.id),
+                ]);
               },
       ),
     ];
@@ -206,11 +244,38 @@ class _HistoryPageState extends State<HistoryPage> {
           flyoutBuilder: (context) {
             return FlyoutContent(
               title: 'Clear History'.tl,
-              content: Text('Are you sure you want to clear your history?'.tl),
+              // 宽度写死：这一整段不换行的话 IntrinsicWidth 会把浮层撑到屏幕
+              // 外面去（FlyoutContent 只有 minWidth，没有 maxWidth）。
+              content: SizedBox(
+                width: 260,
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "History only records what you opened. Clearing it keeps your reading progress and read marks."
+                          .tl,
+                    ),
+                    TextButton(
+                      style: TextButton.styleFrom(
+                        padding: EdgeInsets.zero,
+                        foregroundColor: context.colorScheme.error,
+                      ),
+                      onPressed: () {
+                        context.pop();
+                        Future.microtask(_clearWithProgress);
+                      },
+                      child: Text("Clear progress too".tl),
+                    ),
+                  ],
+                ),
+              ),
               actions: [
                 Button.outlined(
                   onPressed: () {
                     HistoryManager().clearUnfavoritedHistory();
+                    App.rootContext.showMessage(
+                      message: "History cleared, reading progress kept".tl,
+                    );
                     context.pop();
                   },
                   child: Text('Clear Unfavorited'.tl),
@@ -220,6 +285,9 @@ class _HistoryPageState extends State<HistoryPage> {
                   color: context.colorScheme.error,
                   onPressed: () {
                     HistoryManager().clearHistory();
+                    App.rootContext.showMessage(
+                      message: "History cleared, reading progress kept".tl,
+                    );
                     context.pop();
                   },
                   child: Text('Clear'.tl),
@@ -328,6 +396,14 @@ class _HistoryPageState extends State<HistoryPage> {
                     color: context.colorScheme.error,
                     onClick: () {
                       _removeHistory(c as History);
+                    },
+                  ),
+                  MenuEntry(
+                    icon: Icons.restart_alt,
+                    text: 'Clear Progress'.tl,
+                    color: context.colorScheme.error,
+                    onClick: () {
+                      _forgetHistory(c as History);
                     },
                   ),
                 ];

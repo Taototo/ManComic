@@ -187,7 +187,9 @@ class HistoryManager with ChangeNotifier {
 
   late Database _db;
 
-  int get length => _db.select("select count(*) from history;").first[0] as int;
+  int get length => _db.select(
+    "select count(*) from history where coalesce(cleared, 0) = 0;",
+  ).first[0] as int;
 
   /// Cache of history ids. Improve the performance of find operation.
   Map<String, bool>? _cachedHistoryIds;
@@ -208,6 +210,14 @@ class HistoryManager with ChangeNotifier {
     var columns = _db.select("PRAGMA table_info(history);");
     if (!columns.any((element) => element["name"] == "chapter_group")) {
       _db.execute("alter table history add column chapter_group int;");
+    }
+    // `cleared` = 「从历史列表里清掉了，但进度还在」。
+    //
+    // 以前「清除历史」是 `delete from history`，而这一张表同时存着读到第几
+    // 话第几页、哪些话读过——用户清个列表，进度、已读标记、「继续阅读」全
+    // 跟着消失。历史是「我看过什么」的流水，进度是进度，两件事得分开。
+    if (!columns.any((element) => element["name"] == "cleared")) {
+      _db.execute("alter table history add column cleared int default 0;");
     }
 
     _migratePrimaryKey();
@@ -241,8 +251,8 @@ class HistoryManager with ChangeNotifier {
     // 显式列名，别用 `select *`：老库的列顺序不保证和当前一致。
     _db.execute("""
         insert or replace into history
-          (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group)
-        select id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group
+          (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group, cleared)
+        select id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group, cleared
         from history_legacy;
       """);
     _db.execute("drop table history_legacy;");
@@ -262,15 +272,18 @@ class HistoryManager with ChangeNotifier {
           readEpisode text,
           max_page int,
           chapter_group int,
+          cleared int default 0,
           primary key (id, type)
         );
       """;
 
   static String _cacheKey(String id, int type) => "$type\u0000$id";
 
+  /// 每次写进度都把 `cleared` 归零：用户又打开这本书了，它就该重新回到
+  /// 历史列表里（进度本来就是从这里恢复的，列表和进度不能各说各话）。
   static const _insertHistorySql = """
-        insert or replace into history (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group)
-        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
+        insert or replace into history (id, title, subtitle, cover, time, type, ep, page, readEpisode, max_page, chapter_group, cleared)
+        values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 0);
       """;
 
   static Future<void> _addHistoryAsync(int dbAddr, History newItem) {
@@ -350,38 +363,99 @@ class HistoryManager with ChangeNotifier {
     notifyListeners();
   }
 
-  void clearHistory() {
-    _db.execute("delete from history;");
+  /// 清空历史列表。
+  ///
+  /// 默认**只清列表**：`cleared = 1` 把记录从列表、最近阅读、计数里藏起来，
+  /// 但读到第几话第几页、哪些话读过都还在。以前直接 `delete from history`，
+  /// 用户点一下「清除历史」，进度、已读标记、「继续阅读」全没了——历史只是
+  /// 「我看过什么」，不是进度本身。
+  ///
+  /// [withProgress] 为真才是真正的「忘掉」：连进度一起删，退回没读过的状态。
+  void clearHistory({bool withProgress = false}) {
+    if (withProgress) {
+      _db.execute("delete from history;");
+    } else {
+      _db.execute("update history set cleared = 1;");
+    }
     updateCache();
     notifyListeners();
   }
 
-void clearUnfavoritedHistory() {
-  _db.execute('BEGIN TRANSACTION;');
-  try {
-    final idAndTypes = _db.select("""
+  /// 清掉「没收藏的那些」的历史列表条目，收藏着的留着。
+  ///
+  /// 和 [clearHistory] 一样，默认保留进度；[withProgress] 为真时连进度一起删。
+  void clearUnfavoritedHistory({bool withProgress = false}) {
+    _db.execute('BEGIN TRANSACTION;');
+    try {
+      final idAndTypes = _db.select("""
       select id, type from history;
     """);
-    for (var element in idAndTypes) {
-      final id = element["id"] as String;
-      final type = ComicType(element["type"] as int);
-      if (!LocalFavoritesManager().isExist(id, type)) {
-        _db.execute("""
+      for (var element in idAndTypes) {
+        final id = element["id"] as String;
+        final type = ComicType(element["type"] as int);
+        if (!LocalFavoritesManager().isExist(id, type)) {
+          if (withProgress) {
+            _db.execute("""
           delete from history
           where id == ? and type == ?;
         """, [id, type.value]);
+          } else {
+            _db.execute("""
+          update history set cleared = 1
+          where id == ? and type == ?;
+        """, [id, type.value]);
+          }
+        }
       }
+      _db.execute('COMMIT;');
+    } catch (e) {
+      _db.execute('ROLLBACK;');
+      rethrow;
     }
-    _db.execute('COMMIT;');
-  } catch (e) {
-    _db.execute('ROLLBACK;');
-    rethrow;
+    updateCache();
+    notifyListeners();
   }
-  updateCache();
-  notifyListeners();
-}
 
-  void remove(String id, ComicType type) async {
+  /// 把一条历史从列表里移出，**保留阅读进度**。
+  ///
+  /// 单条删除和整页清空必须是同一套语义：用户删的是「列表里的这一行」，不
+  /// 是「我读过这本书」。真要连进度一起清，用 [forget]。
+  void hide(String id, ComicType type) {
+    _db.execute("""
+      update history set cleared = 1
+      where id == ? and type == ?;
+    """, [id, type.value]);
+    notifyListeners();
+  }
+
+  void hideAll(List<ComicID> histories) {
+    if (histories.isEmpty) {
+      return;
+    }
+    _db.execute('BEGIN TRANSACTION;');
+    try {
+      for (var history in histories) {
+        _db.execute("""
+          update history set cleared = 1
+          where id == ? and type == ?;
+        """, [history.id, history.type.value]);
+      }
+      _db.execute('COMMIT;');
+    } catch (e) {
+      _db.execute('ROLLBACK;');
+      rethrow;
+    }
+    notifyListeners();
+  }
+
+  /// 真正忘掉这本书：列表、阅读进度、已读章节标记一起删。
+  ///
+  /// 删漫画（本地书连带文件）时用它——书都不在了，留一条进度只会让以后重新
+  /// 下载的那本「一打开就跳到第 40 话」。[forget] 是它的另一个名字，语义
+  /// 比 `remove` 直白，新的调用点用它。
+  void remove(String id, ComicType type) => forget(id, type);
+
+  void forget(String id, ComicType type) {
     _db.execute("""
       delete from history
       where id == ? and type == ?;
@@ -432,9 +506,14 @@ void clearUnfavoritedHistory() {
     return History.fromRow(res.first);
   }
 
+  /// 列表、最近阅读、计数一律只看「没被清掉」的那些；[find] 不看 `cleared`
+  /// ——进度还在，详情页/阅读器当然还要能接着读。
+  static const _visible = "coalesce(cleared, 0) = 0";
+
   List<History> getAll() {
     var res = _db.select("""
       select * from history
+      where $_visible
       order by time DESC;
     """);
     return res.map((element) => History.fromRow(element)).toList();
@@ -444,6 +523,7 @@ void clearUnfavoritedHistory() {
   List<History> getRecent() {
     var res = _db.select("""
       select * from history
+      where $_visible
       order by time DESC
       limit 20;
     """);
@@ -453,7 +533,7 @@ void clearUnfavoritedHistory() {
   /// 获取历史记录的数量
   int count() {
     var res = _db.select("""
-      select count(*) from history;
+      select count(*) from history where $_visible;
     """);
     return res.first[0] as int;
   }
