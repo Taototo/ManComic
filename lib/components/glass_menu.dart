@@ -77,59 +77,87 @@ Future<T?> showGlassMenu<T>({
             width: width,
             child: LiquidGlassPanel(
               borderRadius: BorderRadius.circular(14),
-              // standard：菜单随点随开，premium 的静态采样在这种反复
-              // 重挂载的场景下拿不到背景，玻璃会整块消失。
-              quality: lg.GlassQuality.standard,
+              // minimal = 纯 BackdropFilter 磨砂（ClipPath + 模糊 + 底色），
+              // 不带任何着色器采样。浮层菜单必须走这条：
+              //
+              // standard 那套自己要**抓一张背景纹理**再按面板矩形去采样。
+              // 菜单是独立路由、面板又小又窄，抓到的纹理和面板矩形对不上，
+              // 上半截采到的是弹窗（一块灰玻璃），下半截采到一片纯白——于是
+              // 一块菜单上下两种颜色，中间一道硬接缝（1.4.67 的真机截图）。
+              // BackdropFilter 直接吃「已经画好的东西」，没有坐标可错。
+              //
+              // 菜单弹出后不再移动，也不会每帧变尺寸，正是 minimal 适用的
+              // 静态表面（appbar/bottomBar 同理）。
+              quality: lg.GlassQuality.minimal,
               blur: 44,
               tintAlpha: isDark ? 0.62 : 0.5,
-              child: Material(
-                type: MaterialType.transparency,
-                child: ConstrainedBox(
-                  constraints: BoxConstraints(maxHeight: height),
-                  child: ListView.builder(
-                    shrinkWrap: true,
-                    padding: const EdgeInsets.symmetric(
-                      vertical: verticalPadding,
-                    ),
-                    itemCount: entries.length,
-                    itemBuilder: (context, index) {
-                      final entry = entries[index];
-                      final selected = index == selectedIndex;
-                      return InkWell(
-                        onTap: () => Navigator.of(dialogContext).pop(entry.value),
-                        child: SizedBox(
-                          height: itemHeight,
-                          child: Padding(
-                            padding: const EdgeInsets.symmetric(horizontal: 16),
-                            child: Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    entry.label,
-                                    maxLines: 1,
-                                    overflow: TextOverflow.ellipsis,
-                                    style: selected
-                                        ? TextStyle(
-                                            color:
-                                                Theme.of(context).colorScheme.primary,
-                                            fontWeight: FontWeight.w500,
-                                          )
-                                        : null,
+              child: DecoratedBox(
+                // 玻璃自带的高光只在边缘一条，压在同色弹窗上几乎看不见；
+                // 补一圈 hairline，面板才有「浮在上面」的边界。
+                decoration: BoxDecoration(
+                  borderRadius: BorderRadius.circular(14),
+                  border: Border.all(
+                    color: isDark
+                        ? Colors.white.withValues(alpha: 0.12)
+                        : Theme.of(
+                            context,
+                          ).colorScheme.onSurface.withValues(alpha: 0.08),
+                  ),
+                ),
+                child: Material(
+                  type: MaterialType.transparency,
+                  child: ConstrainedBox(
+                    constraints: BoxConstraints(maxHeight: height),
+                    child: ListView.builder(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.symmetric(
+                        vertical: verticalPadding,
+                      ),
+                      itemCount: entries.length,
+                      itemBuilder: (context, index) {
+                        final entry = entries[index];
+                        final selected = index == selectedIndex;
+                        return InkWell(
+                          onTap: () =>
+                              Navigator.of(dialogContext).pop(entry.value),
+                          child: SizedBox(
+                            height: itemHeight,
+                            child: Padding(
+                              padding: const EdgeInsets.symmetric(
+                                horizontal: 16,
+                              ),
+                              child: Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      entry.label,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                      style: selected
+                                          ? TextStyle(
+                                              color: Theme.of(
+                                                context,
+                                              ).colorScheme.primary,
+                                              fontWeight: FontWeight.w500,
+                                            )
+                                          : null,
+                                    ),
                                   ),
-                                ),
-                                if (selected)
-                                  Icon(
-                                    Icons.check,
-                                    size: 18,
-                                    color:
-                                        Theme.of(context).colorScheme.primary,
-                                  ),
-                              ],
+                                  if (selected)
+                                    Icon(
+                                      Icons.check,
+                                      size: 18,
+                                      color: Theme.of(
+                                        context,
+                                      ).colorScheme.primary,
+                                    ),
+                                ],
+                              ),
                             ),
                           ),
-                        ),
-                      );
-                    },
+                        );
+                      },
+                    ),
                   ),
                 ),
               ),

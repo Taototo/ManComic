@@ -29,7 +29,13 @@ void main() {
     test('浮层用与抽屉同档的磨砂参数', () {
       var src = read('lib/components/glass_menu.dart');
       expect(src.contains('blur: 44'), isTrue, reason: '不给 blur 会退回 26，磨砂不够');
-      expect(src.contains('quality: lg.GlassQuality.standard'), isTrue);
+      // 浮层必须走 minimal（纯 BackdropFilter）：standard 要自己抓背景纹理按
+      // 面板矩形采样，小面板在独立路由里会对不上，上半截灰、下半截纯白，
+      // 中间一道硬接缝。
+      expect(src.contains('quality: lg.GlassQuality.minimal'), isTrue);
+      expect(src.contains('lg.GlassQuality.standard'), isFalse);
+      // 压在同色弹窗上必须有一圈 hairline 才看得出边界。
+      expect(src.contains('Border.all('), isTrue);
       // 菜单压暗背景会把玻璃采成一块灰板，所以遮罩必须是透明的。
       expect(src.contains('barrierColor: Colors.transparent'), isTrue);
       expect(src.contains('showGeneralDialog<T>'), isTrue);
