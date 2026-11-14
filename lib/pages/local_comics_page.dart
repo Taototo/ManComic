@@ -351,6 +351,100 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     );
   }
 
+  /// 顶栏行高。和收藏页顶栏（`NaviPane` 里那个 48）同档。
+  static const _kTopBarHeight = 48.0;
+
+  void onLeadingPressed() {
+    if (multiSelectMode) {
+      setState(() {
+        multiSelectMode = false;
+        selectedComics.clear();
+      });
+    } else if (searchMode) {
+      setState(() {
+        searchMode = false;
+        keyword = "";
+        update();
+      });
+    } else {
+      context.pop();
+    }
+  }
+
+  /// 收藏页同款玻璃。
+  ///
+  /// 参数照抄 `NaviPane.buildTop()`：同一档底色（`barTintAlpha`），同样压低
+  /// 边缘高光——顶栏只有下沿露在屏幕里，高光留着就是沿交界画一条白线。
+  ///
+  /// 用的 `LiquidGlassBar` 默认走 premium 档，和收藏页一致。premium 每帧
+  /// 重新采背景，不依赖「进页面那一刻的快照」，所以 push 进来的独立页面
+  /// 也不会出现整条玻璃采不到背景的情况。
+  Widget _buildTopBar(BuildContext context, List<Widget> actions) {
+    final isDark = context.brightness == Brightness.dark;
+    final topInset = context.padding.top;
+    return LiquidGlassBar(
+      lightIntensity: isDark ? 0.16 : 0.45,
+      fresnelStrength: 0.35,
+      tintAlpha: LiquidGlassEngine.barTintAlpha,
+      child: SizedBox(
+        height: topInset + _kTopBarHeight,
+        width: double.infinity,
+        child: Padding(
+          padding: EdgeInsets.only(top: topInset, left: 4, right: 8),
+          child: Row(
+            children: [
+              Tooltip(
+                message: multiSelectMode || searchMode
+                    ? "Cancel".tl
+                    : "Back".tl,
+                child: IconButton(
+                  onPressed: onLeadingPressed,
+                  icon: Icon(
+                    multiSelectMode || searchMode
+                        ? Icons.close
+                        : Icons.arrow_back,
+                  ),
+                ),
+              ),
+              const SizedBox(width: 8),
+              Expanded(child: _buildTopTitle(context)),
+              ...actions,
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+
+  Widget _buildTopTitle(BuildContext context) {
+    const style = TextStyle(fontSize: 18, fontWeight: FontWeight.bold);
+    if (multiSelectMode) {
+      return Align(
+        alignment: Alignment.centerLeft,
+        child: Text(selectedComics.length.toString(), style: style),
+      );
+    }
+    if (searchMode) {
+      return TextField(
+        autofocus: true,
+        style: const TextStyle(fontSize: 16),
+        decoration: InputDecoration(
+          hintText: "Search".tl,
+          isDense: true,
+          border: InputBorder.none,
+        ),
+        onChanged: (v) {
+          keyword = v;
+          update();
+        },
+      );
+    }
+    return Align(
+      alignment: Alignment.centerLeft,
+      child: Text("Local".tl, style: style),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     List<Widget> selectActions = [
@@ -415,109 +509,69 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
       ),
     ];
 
+    final actions = multiSelectMode
+        ? selectActions
+        : (searchMode ? const <Widget>[] : normalActions);
+
     var body = Scaffold(
-      body: SmoothCustomScrollView(
-        slivers: [
-          if (!searchMode)
-            SliverAppbar(
-              leading: Tooltip(
-                message: multiSelectMode ? "Cancel".tl : "Back".tl,
-                child: IconButton(
-                  onPressed: () {
-                    if (multiSelectMode) {
-                      setState(() {
-                        multiSelectMode = false;
-                        selectedComics.clear();
-                      });
-                    } else {
-                      context.pop();
-                    }
-                  },
-                  icon: multiSelectMode
-                      ? const Icon(Icons.close)
-                      : const Icon(Icons.arrow_back),
-                ),
+      body: Stack(
+        children: [
+          const GlassPageBackdrop(),
+          SmoothCustomScrollView(
+            slivers: [
+              // 顶栏不在滚动视图里：它是叠在内容上的一层，一直贴在状态栏
+              // 下沿，列表滚上来时从玻璃后面经过——收藏页就是这个观感。
+              //
+              // 留白必须付在滚动容器**内部**：付在外面（给 Stack 加 padding）
+              // 等于把整块内容往下推，内容永远滚不到玻璃底下，"穿过去"就
+              // 没了。这里 `padding.top` 只是状态栏高度，顶栏那 48 得自己加。
+              SliverToBoxAdapter(
+                child: SizedBox(height: context.padding.top + _kTopBarHeight),
               ),
-              title: multiSelectMode
-                  ? Text(selectedComics.length.toString())
-                  : Text("Local".tl),
-              actions: multiSelectMode ? selectActions : normalActions,
-            )
-          else if (searchMode)
-            SliverAppbar(
-              leading: Tooltip(
-                message: multiSelectMode ? "Cancel".tl : "Cancel".tl,
-                child: IconButton(
-                  icon: multiSelectMode
-                      ? const Icon(Icons.close)
-                      : const Icon(Icons.close),
-                  onPressed: () {
-                    if (multiSelectMode) {
-                      setState(() {
-                        multiSelectMode = false;
-                        selectedComics.clear();
-                      });
-                    } else {
-                      setState(() {
-                        searchMode = false;
-                        keyword = "";
-                        update();
-                      });
-                    }
-                  },
-                ),
-              ),
-              title: multiSelectMode
-                  ? Text(selectedComics.length.toString())
-                  : TextField(
-                      autofocus: true,
-                      decoration: InputDecoration(
-                        hintText: "Search".tl,
-                        border: InputBorder.none,
-                      ),
-                      onChanged: (v) {
-                        keyword = v;
-                        update();
+              if (!searchMode && LocalManager().downloadingTasks.isNotEmpty)
+                // 不能加 const：任务数变化时父级 setState 会重建这棵树，但如果
+                // widget 实例相同（const），Flutter 会跳过子树更新，横条就会
+                // 停在第一次渲染时的任务数上。
+                SliverToBoxAdapter(child: _DownloadingSection()),
+              if (comics.isEmpty)
+                SliverToBoxAdapter(
+                  child: _LocalEmptyHint(hasKeyword: keyword.isNotEmpty),
+                )
+              else if (gridMode)
+                _buildGrid(context)
+              else
+                SliverList.builder(
+                  itemCount: comics.length,
+                  itemBuilder: (context, index) {
+                    final comic = comics[index];
+                    return _LocalComicTile(
+                      key: ValueKey("${comic.comicType.value}:${comic.id}"),
+                      comic: comic,
+                      heroID: index,
+                      selected: selectedComics.containsKey(comic),
+                      selecting: multiSelectMode,
+                      onTap: () => openOrSelect(comic, index),
+                      onLongPress: () {
+                        setState(() {
+                          multiSelectMode = true;
+                          selectedComics[comic] = true;
+                        });
                       },
-                    ),
-              actions: multiSelectMode ? selectActions : null,
-            ),
-          if (!searchMode && LocalManager().downloadingTasks.isNotEmpty)
-            // 不能加 const：任务数变化时父级 setState 会重建这棵树，但如果
-            // widget 实例相同（const），Flutter 会跳过子树更新，横条就会
-            // 停在第一次渲染时的任务数上。
-            SliverToBoxAdapter(child: _DownloadingSection()),
-          if (comics.isEmpty)
-            SliverToBoxAdapter(
-              child: _LocalEmptyHint(hasKeyword: keyword.isNotEmpty),
-            )
-          else if (gridMode)
-            _buildGrid(context)
-          else
-            SliverList.builder(
-              itemCount: comics.length,
-              itemBuilder: (context, index) {
-                final comic = comics[index];
-                return _LocalComicTile(
-                  key: ValueKey("${comic.comicType.value}:${comic.id}"),
-                  comic: comic,
-                  heroID: index,
-                  selected: selectedComics.containsKey(comic),
-                  selecting: multiSelectMode,
-                  onTap: () => openOrSelect(comic, index),
-                  onLongPress: () {
-                    setState(() {
-                      multiSelectMode = true;
-                      selectedComics[comic] = true;
-                    });
+                      // 点整行就是进详情页，这里不再放「View Detail」。
+                      // 多选菜单里那一条要保留：多选态下点行是切换勾选，
+                      // 没有别的路径能进详情。
+                      menu: buildComicMenu(comic),
+                    );
                   },
-                  // 点整行就是进详情页，这里不再放「View Detail」。
-                  // 多选菜单里那一条要保留：多选态下点行是切换勾选，
-                  // 没有别的路径能进详情。
-                  menu: buildComicMenu(comic),
-                );
-              },
-            ),
+                ),
+            ],
+          ),
+          Positioned(
+            top: 0,
+            left: 0,
+            right: 0,
+            child: _buildTopBar(context, actions),
+          ),
         ],
       ),
     );

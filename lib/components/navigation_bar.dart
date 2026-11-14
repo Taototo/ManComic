@@ -19,10 +19,6 @@ class PaneActionEntry {
 
   IconData icon;
 
-  /// 自定义图标（IconData 表达不出来的形状）。
-  /// 给了它就替换 [icon]，后者仍必填，只作兜底。
-  Widget? iconWidget;
-
   VoidCallback? onTap;
 
   /// 需要「贴着按钮弹菜单」的操作（收藏页的「更多」）。
@@ -41,7 +37,6 @@ class PaneActionEntry {
   PaneActionEntry({
     required this.label,
     required this.icon,
-    this.iconWidget,
     this.onTap,
     this.onTapWithAnchor,
     this.color,
@@ -443,7 +438,6 @@ class NaviPaneState extends State<NaviPane>
                   for (var action in widget.paneActions)
                     _GlassActionButton(
                       icon: action.icon,
-                      iconWidget: action.iconWidget,
                       label: action.label,
                       color: action.color,
                       onTap: action.onTap,
@@ -821,15 +815,12 @@ class _GlassActionButton extends StatefulWidget {
   const _GlassActionButton({
     required this.icon,
     required this.label,
-    this.iconWidget,
     this.color,
     this.onTap,
     this.onTapWithAnchor,
   });
 
   final IconData icon;
-
-  final Widget? iconWidget;
 
   final String label;
 
@@ -898,15 +889,13 @@ class _GlassActionButtonState extends State<_GlassActionButton> {
                     shape: BoxShape.circle,
                     color: colors.onSurface.withValues(alpha: highlight),
                   ),
-                  child:
-                      widget.iconWidget ??
-                      Icon(
-                        widget.icon,
-                        size: 22,
-                        color:
-                            widget.color ??
-                            colors.onSurface.withValues(alpha: 0.86),
-                      ),
+                  child: Icon(
+                    widget.icon,
+                    size: 22,
+                    color:
+                        widget.color ??
+                        colors.onSurface.withValues(alpha: 0.86),
+                  ),
                 ),
               ),
             ),

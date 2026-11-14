@@ -322,17 +322,13 @@ class _MainPageState extends State<MainPage> {
         // 内置代理的一键开关。日常「今天这个节点有点慢，换一下"的动作比进设置
         // 快得多；真正的配置仍然在那一页里。
         //
-        // 图标是自己画的梯子：Material 里没有梯子，`Icons.stairs` 是台阶、
-        // `Icons.swap_vert` 是箭头，都不像「翻过去」的那个东西。
+        // 图标是钥匙：开启时实心、关闭时空心。自己画的梯子（两根竖杆加四根
+        // 横档）在 22px 上一缩小就成了一格栅栏，和旁边几颗 Material 图标
+        // 摆在一起格格不入；钥匙既有的现成字形，又正好表达「开一条通道」。
         if (index == _tabHome && _proxySupported)
           PaneActionEntry(
-            icon: Icons.stairs,
-            iconWidget: LadderIcon(
-              color: XrayTunnel.enabled
-                  ? context.colorScheme.primary
-                  : context.colorScheme.onSurface.withValues(alpha: 0.86),
-              on: XrayTunnel.enabled,
-            ),
+            icon: XrayTunnel.enabled ? Icons.key_rounded : Icons.key_outlined,
+            color: XrayTunnel.enabled ? context.colorScheme.primary : null,
             label: XrayTunnel.enabled ? "Proxy on".tl : "Proxy off".tl,
             onTap: _toggleProxy,
           ),
