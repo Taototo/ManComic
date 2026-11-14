@@ -19,7 +19,14 @@ import 'package:venera/utils/io.dart';
 import 'package:venera/utils/translations.dart';
 
 class ComicSourcePage extends StatelessWidget {
-  const ComicSourcePage({super.key});
+  const ComicSourcePage({super.key, this.embedded = false});
+
+  /// 嵌进「漫画源 / 内置代理」合集页时为 true。
+  ///
+  /// 合集页自己有一层 Scaffold 和顶栏，这里再套一层就是两个标题栏、两块背景，
+  /// 所以嵌入模式只交出内容：不画 Scaffold、不画 SliverAppbar，体检测试的
+  /// 那颗刷新按钮下移到列表头那一行。
+  final bool embedded;
 
   static Future<void> update(
     ComicSource source, [
@@ -108,12 +115,14 @@ class ComicSourcePage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return Scaffold(body: const _Body());
+    return embedded ? _Body(embedded: true) : Scaffold(body: const _Body());
   }
 }
 
 class _Body extends StatefulWidget {
-  const _Body();
+  const _Body({this.embedded = false});
+
+  final bool embedded;
 
   @override
   State<_Body> createState() => _BodyState();
@@ -151,60 +160,66 @@ class _BodyState extends State<_Body> {
   @override
   Widget build(BuildContext context) {
     final sources = ComicSource.all();
-    return Stack(
-      children: [
-        const GlassPageBackdrop(),
-        SmoothCustomScrollView(
-          slivers: [
-            SliverAppbar(
-              title: Text('Comic Source'.tl),
-              actions: [
-                // 体检页已经并进来了，全源重测就放在这颗按钮上。
-                // 单个源还是点那一行（见列表）。
-                IconButton(
-                  tooltip: "Test again".tl,
-                  icon: _health.running
-                      ? const SizedBox(
-                          width: 18,
-                          height: 18,
-                          child: CircularProgressIndicator(strokeWidth: 2),
-                        )
-                      : const Icon(Icons.refresh),
-                  onPressed: _health.running
-                      ? null
-                      : () => _health.testAll(sources, force: true),
-                ),
-              ],
-            ),
-            SliverToBoxAdapter(child: _buildAddCard(context)),
-            if (sources.isEmpty)
-              SliverToBoxAdapter(child: _buildEmpty(context))
-            else ...[
-              SliverToBoxAdapter(child: _buildListHeader(context, sources)),
-              // 所有源收在一张卡里，行与行之间用分隔线切开。
-              //
-              // 原来每个源是一张独立的玻璃卡：八个源就是八层模糊、八个圆角、
-              // 八次阴影，滚动时每帧都在重算；而且卡与卡之间的空隙让「一共
-              // 有几个源、几个挂了」这件事散了。单个源一行读起来就是
-              // 一张表，逐行对比健康状态快得多。
-              SliverToBoxAdapter(child: _buildSourceList(context, sources)),
-            ],
-            SliverPadding(
-              padding: EdgeInsets.only(bottom: context.padding.bottom + 16),
-            ),
-          ],
+    final scroll = SmoothCustomScrollView(
+      slivers: [
+        if (widget.embedded)
+          const SliverPadding(padding: EdgeInsets.only(top: 4))
+        else
+          SliverAppbar(
+            title: Text('Comic Source'.tl),
+            actions: [_buildRetestButton(sources)],
+          ),
+        SliverToBoxAdapter(child: _buildAddCard(context)),
+        if (sources.isEmpty)
+          SliverToBoxAdapter(child: _buildEmpty(context))
+        else ...[
+          SliverToBoxAdapter(child: _buildListHeader(context, sources)),
+          // 所有源收在一张卡里，行与行之间用分隔线切开。
+          //
+          // 原来每个源是一张独立的玻璃卡：八个源就是八层模糊、八个圆角、
+          // 八次阴影，滚动时每帧都在重算；而且卡与卡之间的空隙让「一共
+          // 有几个源、几个挂了」这件事散了。单个源一行读起来就是
+          // 一张表，逐行对比健康状态快得多。
+          SliverToBoxAdapter(child: _buildSourceList(context, sources)),
+        ],
+        SliverPadding(
+          padding: EdgeInsets.only(bottom: context.padding.bottom + 16),
         ),
       ],
+    );
+    // 合集页已经有背景了，这里再来一层 GlassPageBackdrop 就是两层模糊叠着。
+    if (widget.embedded) {
+      return scroll;
+    }
+    return Stack(children: [const GlassPageBackdrop(), scroll]);
+  }
+
+  /// 全源重测。放在列表头那一行（嵌入模式），或者顶栏（独立页面）。
+  Widget _buildRetestButton(List<ComicSource> sources) {
+    return IconButton(
+      tooltip: "Test again".tl,
+      icon: _health.running
+          ? const SizedBox(
+              width: 18,
+              height: 18,
+              child: CircularProgressIndicator(strokeWidth: 2),
+            )
+          : const Icon(Icons.refresh),
+      onPressed: _health.running
+          ? null
+          : () => _health.testAll(sources, force: true),
     );
   }
 
   Widget _buildListHeader(BuildContext context, List<ComicSource> sources) {
     final colors = context.colorScheme;
     final items = sources.map(_health.of).toList();
-    final healthy =
-        items.where((e) => e.status == SourceHealthStatus.ok).length;
-    final failed =
-        items.where((e) => e.status == SourceHealthStatus.error).length;
+    final healthy = items
+        .where((e) => e.status == SourceHealthStatus.ok)
+        .length;
+    final failed = items
+        .where((e) => e.status == SourceHealthStatus.error)
+        .length;
     final tested = items.where((e) => e.tested).length;
     final updating = _health.running;
     final avg = _averageLatency(items);
@@ -235,7 +250,8 @@ class _BodyState extends State<_Body> {
                       TextSpan(text: text),
                       if (failed > 0)
                         TextSpan(
-                          text: " · "
+                          text:
+                              " · "
                               "${"@n failed".tlParams({"n": failed})}",
                           style: TextStyle(color: colors.error),
                         ),
@@ -262,6 +278,24 @@ class _BodyState extends State<_Body> {
                   child: CircularProgressIndicator(
                     strokeWidth: 1.6,
                     color: colors.onSurfaceVariant,
+                  ),
+                ),
+              ] else if (widget.embedded) ...[
+                // 嵌入合集页时头上没有 appbar，全源重测就落在这一行的尾巴上。
+                const SizedBox(width: 6),
+                Tooltip(
+                  message: "Test again".tl,
+                  child: InkWell(
+                    borderRadius: BorderRadius.circular(20),
+                    onTap: () => _health.testAll(sources, force: true),
+                    child: Padding(
+                      padding: const EdgeInsets.all(4),
+                      child: Icon(
+                        Icons.refresh,
+                        size: 14,
+                        color: colors.onSurfaceVariant,
+                      ),
+                    ),
                   ),
                 ),
               ],
@@ -338,7 +372,8 @@ class _BodyState extends State<_Body> {
     return null;
   }
 
-  Widget _buildEmpty(BuildContext context) {    final colors = context.colorScheme;
+  Widget _buildEmpty(BuildContext context) {
+    final colors = context.colorScheme;
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 28, 16, 0),
       child: LiquidGlass(
@@ -623,8 +658,11 @@ class _SubmitButton extends StatelessWidget {
         child: InkWell(
           borderRadius: BorderRadius.circular(14),
           onTap: onTap,
-          child: Icon(Icons.arrow_forward_rounded,
-              size: 20, color: colors.onPrimary),
+          child: Icon(
+            Icons.arrow_forward_rounded,
+            size: 20,
+            color: colors.onPrimary,
+          ),
         ),
       ),
     );
@@ -672,7 +710,6 @@ class _AddAction extends StatelessWidget {
     );
   }
 }
-
 
 /// 健康分环形进度。没测过时画一圈淡底轨并显示「—」，
 /// 而不是画一个 0 分的空环——「没测」和「测出 0 分」得能区分开。
@@ -831,8 +868,10 @@ class _SourceRow extends StatelessWidget {
                 Container(
                   width: 8,
                   height: 8,
-                  decoration:
-                      BoxDecoration(color: statusColor, shape: BoxShape.circle),
+                  decoration: BoxDecoration(
+                    color: statusColor,
+                    shape: BoxShape.circle,
+                  ),
                 ),
                 const SizedBox(width: 12),
                 Expanded(
@@ -1179,12 +1218,18 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
                           crossAxisAlignment: CrossAxisAlignment.start,
                           children: [
                             Padding(
-                              padding: const EdgeInsets.only(left: 2, bottom: 8),
+                              padding: const EdgeInsets.only(
+                                left: 2,
+                                bottom: 8,
+                              ),
                               child: Text(
                                 "Settings".tl,
                                 style: ts.s12
-                                    .merge(const TextStyle(
-                                        fontWeight: FontWeight.w600))
+                                    .merge(
+                                      const TextStyle(
+                                        fontWeight: FontWeight.w600,
+                                      ),
+                                    )
                                     .withColor(colors.onSurfaceVariant),
                               ),
                             ),
@@ -1408,7 +1453,7 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
       if (source.explorePages.isNotEmpty)
         (
           Icons.explore_outlined,
-          "${"Explore".tl} ${source.explorePages.length}"
+          "${"Explore".tl} ${source.explorePages.length}",
         ),
       if (source.categoryData != null) (Icons.category_outlined, "Category".tl),
       if (source.categoryComicsData != null)
@@ -1437,10 +1482,7 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
               children: [
                 Icon(item.$1, size: 12, color: colors.onSurfaceVariant),
                 const SizedBox(width: 5),
-                Text(
-                  item.$2,
-                  style: ts.s10.withColor(colors.onSurfaceVariant),
-                ),
+                Text(item.$2, style: ts.s10.withColor(colors.onSurfaceVariant)),
               ],
             ),
           ),
@@ -1472,7 +1514,8 @@ class _SourceDetailSheetState extends State<_SourceDetailSheet> {
               }
             }
           } else {
-            current = item.value['options'].firstWhere(
+            current =
+                item.value['options'].firstWhere(
                   (e) => e['value'] == current,
                 )['text'] ??
                 current;
@@ -1826,7 +1869,8 @@ class _ComicSourceListState extends State<_ComicSourceList> {
                         .replaceFirst("https://", "")
                         .replaceFirst("http://", "")
                         .contains("/")) {
-                      url = listUrl.substring(0, listUrl.lastIndexOf("/") + 1) +
+                      url =
+                          listUrl.substring(0, listUrl.lastIndexOf("/") + 1) +
                           fileName;
                     } else {
                       url = '$listUrl/$fileName';
@@ -2060,28 +2104,29 @@ class _CheckUpdatesDialogState extends State<_CheckUpdatesDialog> {
                 ),
               )
             : message != null
-                ? Text(message!, style: ts.s14)
-                : Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      Text(
-                        "@a sources has new version"
-                            .tlParams({"a": updates.length}),
-                        style: ts.s14,
-                      ),
-                      const SizedBox(height: 8),
-                      for (final entry in updates.entries)
-                        Padding(
-                          padding: const EdgeInsets.only(bottom: 4),
-                          child: Text(
-                            "${ComicSource.find(entry.key)?.name ?? entry.key}"
-                            "  →  ${entry.value}",
-                            style: ts.s12.withColor(colors.onSurfaceVariant),
-                          ),
-                        ),
-                    ],
+            ? Text(message!, style: ts.s14)
+            : Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                mainAxisSize: MainAxisSize.min,
+                children: [
+                  Text(
+                    "@a sources has new version".tlParams({
+                      "a": updates.length,
+                    }),
+                    style: ts.s14,
                   ),
+                  const SizedBox(height: 8),
+                  for (final entry in updates.entries)
+                    Padding(
+                      padding: const EdgeInsets.only(bottom: 4),
+                      child: Text(
+                        "${ComicSource.find(entry.key)?.name ?? entry.key}"
+                        "  →  ${entry.value}",
+                        style: ts.s12.withColor(colors.onSurfaceVariant),
+                      ),
+                    ),
+                ],
+              ),
       ),
       actions: [
         if (updates.isNotEmpty)
@@ -2290,8 +2335,9 @@ class _LoginPageState extends State<_LoginPage> {
       setState(() {
         loading = true;
       });
-      var cookies =
-          widget.config.cookieFields!.map((e) => _cookies[e] ?? '').toList();
+      var cookies = widget.config.cookieFields!
+          .map((e) => _cookies[e] ?? '')
+          .toList();
       widget.config.validateCookies!(cookies).then((value) {
         if (value) {
           widget.source.data['account'] = 'ok';

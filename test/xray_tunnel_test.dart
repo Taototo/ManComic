@@ -219,4 +219,13 @@ trojan://pass@host:443#节点二
       expect(withoutProxyScheme('127.0.0.1:10809'), '127.0.0.1:10809');
     });
   });
+
+  group('连接测试', () {
+    test('隧道没在跑时直接给结论，不去发请求', () async {
+      final probe = await XrayTunnel.probe();
+      expect(probe.ok, isFalse);
+      expect(probe.message, isNotNull);
+      expect(probe.milliseconds, isNull, reason: '失败时不该有耗时');
+    });
+  });
 }

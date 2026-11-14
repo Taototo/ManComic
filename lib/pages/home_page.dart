@@ -24,8 +24,6 @@ import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/import_comic.dart';
 import 'package:venera/utils/translations.dart';
 
-import 'local_comics_page.dart';
-
 class HomePage extends StatelessWidget {
   const HomePage({super.key});
 
@@ -340,9 +338,7 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
             // 数据到底是不是最新的——尤其自动同步失败时，界面上完全没差别。
             subtitle: Text(
               _syncTimeText(DataSync().lastSyncTime),
-              style: ts.s12.withColor(
-                context.colorScheme.onSurfaceVariant,
-              ),
+              style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
             ),
             trailing: Row(
               mainAxisSize: MainAxisSize.min,
@@ -411,9 +407,8 @@ class _SyncDataWidgetState extends State<_SyncDataWidget>
     final now = DateTime.now();
     String two(int v) => v.toString().padLeft(2, '0');
     final hm = "${two(time.hour)}:${two(time.minute)}";
-    final sameDay = time.year == now.year &&
-        time.month == now.month &&
-        time.day == now.day;
+    final sameDay =
+        time.year == now.year && time.month == now.month && time.day == now.day;
     final value = sameDay ? hm : "${two(time.month)}-${two(time.day)} $hm";
     return "${"Last synced".tl} $value";
   }
@@ -504,20 +499,19 @@ class _Local extends StatefulWidget {
 }
 
 class _LocalState extends State<_Local> {
-  // 这里只留数量。以前还会横滑显示最近 20 本的缩略图，但首页已经有三四块
-  // 内容，本地那排小封面既点不到又占掉小半屏；想看具体是哪几本，进本地页
-  // 一眼就是全部。
-  late int count;
-
+  // 这一块只谈「下载任务」，不再提本地漫画。
+  //
+  // 以前它叫「本地」，点进去是本地漫画列表，而列表里还有一半是"边下边看"的
+  // 半成品——同一件事散在三个地方。现在本地漫画（含导入的）只在收藏页里看，
+  // 这里就专门做下载队列的入口：一眼几个任务、点一下进队列。
   void onLocalComicsChange() {
-    setState(() {
-      count = LocalManager().count;
-    });
+    if (mounted) {
+      setState(() {});
+    }
   }
 
   @override
   void initState() {
-    count = LocalManager().count;
     LocalManager().addListener(onLocalComicsChange);
     super.initState();
   }
@@ -530,6 +524,8 @@ class _LocalState extends State<_Local> {
 
   @override
   Widget build(BuildContext context) {
+    final tasks = LocalManager().downloadingTasks;
+    final paused = tasks.isNotEmpty && LocalManager().allPaused;
     return SliverToBoxAdapter(
       child: Container(
         margin: const EdgeInsets.symmetric(horizontal: 8, vertical: 8),
@@ -543,60 +539,55 @@ class _LocalState extends State<_Local> {
         child: InkWell(
           borderRadius: BorderRadius.circular(8),
           onTap: () {
-            context.to(() => const LocalComicsPage());
+            showPopUpWidget(context, const DownloadingPage());
           },
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              SizedBox(
-                height: 56,
-                child: Row(
-                  children: [
-                    Center(child: Text('Local'.tl, style: ts.s18)),
-                    Container(
-                      margin: const EdgeInsets.symmetric(horizontal: 8),
-                      padding: const EdgeInsets.symmetric(
-                        horizontal: 8,
-                        vertical: 2,
+          child: Padding(
+            padding: const EdgeInsets.fromLTRB(16, 6, 8, 6),
+            child: Row(
+              children: [
+                Expanded(
+                  child: Row(
+                    children: [
+                      if (tasks.isNotEmpty) ...[
+                        if (paused)
+                          const Icon(Icons.pause_circle_outline, size: 18)
+                        else
+                          const _AnimatedDownloadingIcon(),
+                        const SizedBox(width: 10),
+                      ],
+                      // 标题让出宽度：窄屏（360）上「本地下载任务 + 角标 + 导入」
+                      // 挤在一行里，不给 Flexible 就是一条黄黑条纹。
+                      Flexible(
+                        child: Text(
+                          'Local Downloads'.tl,
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: ts.s18,
+                        ),
                       ),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.secondaryContainer,
-                        borderRadius: BorderRadius.circular(8),
-                      ),
-                      child: Text(count.toString(), style: ts.s12),
-                    ),
-                    const Spacer(),
-                    const Icon(Icons.arrow_right),
-                  ],
-                ),
-              ).paddingHorizontal(16),
-              Row(
-                children: [
-                  if (LocalManager().downloadingTasks.isNotEmpty)
-                    Button.outlined(
-                      child: Row(
-                        children: [
-                          if (LocalManager().allPaused)
-                            const Icon(Icons.pause_circle_outline, size: 18)
-                          else
-                            const _AnimatedDownloadingIcon(),
-                          const SizedBox(width: 8),
-                          Text(
-                            "@a Tasks".tlParams({
-                              'a': LocalManager().downloadingTasks.length,
-                            }),
+                      if (tasks.isNotEmpty) ...[
+                        const SizedBox(width: 8),
+                        Container(
+                          padding: const EdgeInsets.symmetric(
+                            horizontal: 8,
+                            vertical: 2,
                           ),
-                        ],
-                      ),
-                      onPressed: () {
-                        showPopUpWidget(context, const DownloadingPage());
-                      },
-                    ),
-                  const Spacer(),
-                  Button.filled(onPressed: import, child: Text("Import".tl)),
-                ],
-              ).paddingHorizontal(16).paddingVertical(8),
-            ],
+                          decoration: BoxDecoration(
+                            color: Theme.of(
+                              context,
+                            ).colorScheme.secondaryContainer,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          child: Text("${tasks.length}", style: ts.s12),
+                        ),
+                      ],
+                    ],
+                  ),
+                ),
+                Button.outlined(onPressed: import, child: Text("Import".tl)),
+                const Icon(Icons.arrow_right),
+              ],
+            ),
           ),
         ),
       ),

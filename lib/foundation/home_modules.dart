@@ -30,7 +30,7 @@ class HomeModules {
     HomeModuleDef('history', 'History', Icons.history),
     HomeModuleDef('follow_updates', 'Follow Updates', Icons.update),
     // 「漫画源」入口已移至 设置 → APP，不再作为首页模块
-    HomeModuleDef('local', 'Local Comics', Icons.folder_outlined),
+    HomeModuleDef('local', 'Local Downloads', Icons.download_outlined),
     HomeModuleDef(
       'image_favorites',
       'Image Favorites',

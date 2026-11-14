@@ -1,13 +1,27 @@
+import 'dart:async';
 import 'dart:convert';
 
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/subscription.dart';
+import 'package:venera/network/app_dio.dart';
 import 'package:venera/network/proxy.dart';
 import 'package:venera/network/xray_core.dart';
 
 enum TunnelState { stopped, starting, running, failed }
+
+/// 一次连通性测试的结果。
+class TunnelProbe {
+  const TunnelProbe({required this.ok, this.milliseconds, this.message});
+
+  final bool ok;
+
+  /// 往返耗时，只在成功时有值。
+  final int? milliseconds;
+
+  final String? message;
+}
 
 class TunnelStatus {
   const TunnelStatus(this.state, {this.message, this.nodeName, this.port});
@@ -45,6 +59,78 @@ class XrayTunnel {
   );
 
   static bool get enabled => appdata.settings[_enabledKey] == true;
+
+  static Future<bool>? _supported;
+
+  /// 这台机器能不能加载核心。UI 用它决定要不要显示入口。
+  static Future<bool> available() => _supported ??= XrayCore.available();
+
+  /// 这个节点能不能真的出网、要多久。
+  ///
+  /// 测的是 `google.com/generate_204`：国内直连基本不通，所以它同时验证了
+  /// "确实走了代理"和"出口到墙外是通的"，而不只是"本地端口有人监听"
+  /// （后者 `Socket.connect` 就能测，却毫无信息量——132 个字节的空响应也能通）。
+  static Future<TunnelProbe> probe() async {
+    if (!status.value.running) {
+      return const TunnelProbe(ok: false, message: '代理未在运行');
+    }
+    final token = CancelToken();
+    final watch = Stopwatch()..start();
+    try {
+      final res =
+          await AppDio(
+                BaseOptions(
+                  // 这里给的值会被 MyLogInterceptor 统一改成 15s，所以真正的时限
+                  // 靠下面的 timeout，超时后自己取消，别让一个死节点挂在那里。
+                  validateStatus: (s) => s != null && s < 400,
+                ),
+              )
+              .get<String>(
+                'https://www.google.com/generate_204',
+                cancelToken: token,
+                options: Options(
+                  headers: {'cache-time': 'no'},
+                  extra: {'redactLog': true},
+                ),
+              )
+              .timeout(const Duration(seconds: 8));
+      watch.stop();
+      final code = res.statusCode;
+      if (code == 204 || code == 200) {
+        return TunnelProbe(ok: true, milliseconds: watch.elapsedMilliseconds);
+      }
+      return TunnelProbe(ok: false, message: 'HTTP $code');
+    } on TimeoutException {
+      token.cancel();
+      return const TunnelProbe(ok: false, message: '超时');
+    } catch (e) {
+      token.cancel();
+      return TunnelProbe(ok: false, message: _friendlyProbeError(e));
+    }
+  }
+
+  /// 只留用户能理解的那半句，完整异常进日志。
+  static String _friendlyProbeError(Object error) {
+    Log.error('Xray', '连通性测试失败: $error');
+    if (error is DioException) {
+      final text = error.toString();
+      if (text.contains('Connection refused')) {
+        return '端口没人监听';
+      }
+      if (text.contains('handshake') || text.contains('certificate')) {
+        return 'TLS 握手失败';
+      }
+      if (text.contains('Timeout') || text.contains('timeout')) {
+        return '超时';
+      }
+      final code = error.response?.statusCode;
+      if (code != null) {
+        return 'HTTP $code';
+      }
+      return '连接失败';
+    }
+    return '连接失败';
+  }
 
   static String? get selectedNode {
     final tag = appdata.settings[_nodeKey];

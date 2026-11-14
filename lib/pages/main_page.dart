@@ -1,6 +1,7 @@
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/appdata.dart';
-import 'package:venera/pages/comic_source_page.dart';
+import 'package:venera/network/xray_tunnel.dart';
+import 'package:venera/pages/connection_page.dart';
 import 'package:venera/pages/reading_report_page.dart';
 import 'package:venera/pages/search_page.dart';
 import 'package:venera/pages/settings/settings_page.dart';
@@ -78,10 +79,7 @@ class _MainPageState extends State<MainPage> {
     App.mainNavigatorKey = _navigatorKey;
     index = resolveInitialPage();
     _pages = [
-      ExplorePage(
-        key: const PageStorageKey('explore'),
-        group: _exploreGroup,
-      ),
+      ExplorePage(key: const PageStorageKey('explore'), group: _exploreGroup),
       const HomePage(),
       FavoritesPage(
         key: const PageStorageKey('favorites'),
@@ -90,7 +88,45 @@ class _MainPageState extends State<MainPage> {
       ),
     ];
     _favoritesTopBar.addListener(onFavoritesTopBarChanged);
+    // 顶栏那颗代理图标的开关状态跟着隧道走：从设置页改、或者启动恢复失败，
+    // 回到首页时图标必须已经是对的。
+    XrayTunnel.status.addListener(onTunnelStatusChanged);
+    XrayTunnel.available().then((ok) {
+      if (mounted && ok != _proxySupported) {
+        setState(() {
+          _proxySupported = ok;
+        });
+      }
+    });
     super.initState();
+  }
+
+  /// 这台机器能不能加载代理核心。加载不了就不显示那颗按钮，别让人点了一路报错。
+  var _proxySupported = false;
+
+  void onTunnelStatusChanged() {
+    if (mounted) {
+      setState(() {});
+    }
+  }
+
+  /// 顶栏那个代理开关。
+  ///
+  /// 只看 `enabled` 不看 `running`：点了就写设置，隧道失败的报错在状态里，
+  /// 图标显示「开」但连不上时用户会自己去设置页看，比图标自己悄悄弹回去好懂。
+  Future<void> _toggleProxy() async {
+    final next = !XrayTunnel.enabled;
+    await XrayTunnel.setEnabled(next);
+    if (!mounted) return;
+    final status = XrayTunnel.status.value;
+    if (next && !status.running) {
+      App.rootContext.showMessage(message: status.message ?? "Failed".tl);
+    } else {
+      App.rootContext.showMessage(
+        message: next ? "Proxy enabled".tl : "Proxy disabled".tl,
+      );
+    }
+    setState(() {});
   }
 
   /// 「推荐 / 分类」分组。切换控件在顶栏标题位上，状态放在这里，
@@ -116,6 +152,7 @@ class _MainPageState extends State<MainPage> {
 
   @override
   void dispose() {
+    XrayTunnel.status.removeListener(onTunnelStatusChanged);
     _favoritesTopBar.removeListener(onFavoritesTopBarChanged);
     _favoritesTopBar.dispose();
     _exploreGroup.dispose();
@@ -149,10 +186,7 @@ class _MainPageState extends State<MainPage> {
               title,
               maxLines: 1,
               overflow: TextOverflow.ellipsis,
-              style: const TextStyle(
-                fontSize: 17,
-                fontWeight: FontWeight.w600,
-              ),
+              style: const TextStyle(fontSize: 17, fontWeight: FontWeight.w600),
             ),
           );
         }
@@ -184,7 +218,8 @@ class _MainPageState extends State<MainPage> {
               const SizedBox.shrink(),
         );
       },
-      headerHeight: (page) => page == _tabExplore ? ExplorePage.tabBarHeight : 0,
+      headerHeight: (page) =>
+          page == _tabExplore ? ExplorePage.tabBarHeight : 0,
       paneItems: [
         PaneItemEntry(
           label: 'Explore'.tl,
@@ -231,11 +266,13 @@ class _MainPageState extends State<MainPage> {
         // 设置 - 界面 里。
         if (index == _tabExplore)
           PaneActionEntry(
-            icon: (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
+            icon:
+                (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
                     'detailed'
                 ? Icons.view_agenda_outlined
                 : Icons.grid_view_rounded,
-            label: (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
+            label:
+                (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
                     'detailed'
                 ? "Brief".tl
                 : "Detailed".tl,
@@ -271,13 +308,26 @@ class _MainPageState extends State<MainPage> {
           ),
         // 源设置放在首页顶栏：源挂了是「打开首页发现什么都刷不出来」的第一
         // 嫌疑人，而原先进源管理要绕三层（设置 → 内容 → 漫画源）。
+        //
+        // 现在它和「内置代理」是同一页的两屏（左滑切换）：两者都是「外部连接
+        // 的配置」，顶栏也就那么多位置，合成一页比再加一颗按钮划算。
         if (index == _tabHome)
           PaneActionEntry(
             icon: Icons.dns_outlined,
             label: "Comic Sources".tl,
             onTap: () {
-              to(() => const ComicSourcePage(), preventDuplicate: true);
+              to(() => const ConnectionPage(), preventDuplicate: true);
             },
+          ),
+        // 内置代理的一键开关。日常「今天这个节点有点慢，换一下"的动作比进设置
+        // 快得多；真正的配置仍然在那一页里。
+        if (index == _tabHome && _proxySupported)
+          PaneActionEntry(
+            icon: XrayTunnel.enabled
+                ? Icons.shield_rounded
+                : Icons.shield_outlined,
+            label: XrayTunnel.enabled ? "Proxy on".tl : "Proxy off".tl,
+            onTap: _toggleProxy,
           ),
         PaneActionEntry(
           icon: Icons.settings,
@@ -285,7 +335,7 @@ class _MainPageState extends State<MainPage> {
           onTap: () {
             to(() => const SettingsPage(), preventDuplicate: true);
           },
-        )
+        ),
       ],
       pageBuilder: (index) {
         return _pages[index];
