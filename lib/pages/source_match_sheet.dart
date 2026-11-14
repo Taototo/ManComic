@@ -64,7 +64,10 @@ class _SourceMatchSheet extends StatefulWidget {
 }
 
 class _SourceMatchSheetState extends State<_SourceMatchSheet> {
-  late final String _keyword;
+  /// 搜索词可以现场改：不同源给同一本书起的名千差万别（加汉化组、完本、
+  /// DL版，或者干脆是另一个译名），拿原书名一把搜不到是常态。与其上模糊
+  /// 匹配那一套，不如把搜索框交回用户手里——他知道这本书在别的站叫什么。
+  late final TextEditingController _controller;
 
   late final List<ComicSource> _sources;
 
@@ -74,17 +77,43 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
 
   var _running = true;
 
+  /// 每发起一次新搜索 +1。旧搜索的回包靠它作废，否则改完标题后上一次的
+  /// 结果会一条条补进来，看着像「改了也没效果」。
+  var _generation = 0;
+
   @override
   void initState() {
     super.initState();
-    _keyword = _cleanKeyword(widget.keyword);
+    _controller = TextEditingController(text: widget.keyword);
     _sources = ComicSource.all()
         .where((e) => e.searchPageData != null)
         .toList(growable: false);
-    _searchAll();
+    _searchAll(_cleanKeyword(widget.keyword));
   }
 
-  Future<void> _searchAll() async {
+  @override
+  void dispose() {
+    _controller.dispose();
+    super.dispose();
+  }
+
+  void _searchAgain([String? value]) {
+    final keyword = _cleanKeyword((value ?? _controller.text).trim());
+    if (keyword.isEmpty) {
+      return;
+    }
+    FocusScope.of(context).unfocus();
+    setState(() {
+      _matches.clear();
+      _finished = 0;
+      _running = true;
+      _generation++;
+    });
+    _searchAll(keyword);
+  }
+
+  Future<void> _searchAll(String keyword) async {
+    final generation = _generation;
     if (_sources.isEmpty) {
       setState(() {
         _running = false;
@@ -94,18 +123,21 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
     var next = 0;
     Future<void> worker() async {
       while (next < _sources.length) {
+        if (generation != _generation) return;
         final source = _sources[next++];
         try {
-          final comics = await _searchSource(source, _keyword)
-              .timeout(const Duration(seconds: 25), onTimeout: () => const []);
+          final comics = await _searchSource(
+            source,
+            keyword,
+          ).timeout(const Duration(seconds: 25), onTimeout: () => const []);
           final found = <_SourceMatch>[];
           for (var comic in comics) {
-            final score = _score(comic.title, _keyword);
+            final score = _score(comic.title, keyword);
             if (score > 0) {
               found.add(_SourceMatch(comic, source, score));
             }
           }
-          if (!mounted) return;
+          if (!mounted || generation != _generation) return;
           if (found.isNotEmpty) {
             setState(() {
               _matches.addAll(found);
@@ -114,7 +146,7 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
         } catch (_) {
           // 单个源失败不影响其它源
         }
-        if (!mounted) return;
+        if (!mounted || generation != _generation) return;
         setState(() {
           _finished++;
         });
@@ -125,7 +157,7 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
     await Future.wait(
       List.generate(_sources.length < 3 ? _sources.length : 3, (_) => worker()),
     );
-    if (mounted) {
+    if (mounted && generation == _generation) {
       setState(() {
         _running = false;
       });
@@ -134,8 +166,9 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
 
   Future<List<Comic>> _searchSource(ComicSource source, String keyword) async {
     final data = source.searchPageData!;
-    final options =
-        (data.searchOptions ?? []).map((e) => e.defaultValue).toList();
+    final options = (data.searchOptions ?? [])
+        .map((e) => e.defaultValue)
+        .toList();
     Res<List<Comic>>? res;
     if (data.loadPage != null) {
       res = await data.loadPage!(keyword, 1, options);
@@ -151,10 +184,7 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
   /// 去掉常见的汉化组/作者标注与分隔符，提高搜索命中率。
   static String _cleanKeyword(String raw) {
     var text = raw;
-    text = text.replaceAll(
-      RegExp(r'[\[【(（][^\]】)）]*[\]】)）]'),
-      ' ',
-    );
+    text = text.replaceAll(RegExp(r'[\[【(（][^\]】)）]*[\]】)）]'), ' ');
     text = text.replaceAll(RegExp(r'[\s\-_|/\\·,，。.]+'), ' ').trim();
     if (text.isEmpty) {
       text = raw.trim();
@@ -163,9 +193,10 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
   }
 
   static String _normalize(String text) {
-    return text
-        .toLowerCase()
-        .replaceAll(RegExp(r'[\s\p{P}\p{S}]', unicode: true), '');
+    return text.toLowerCase().replaceAll(
+      RegExp(r'[\s\p{P}\p{S}]', unicode: true),
+      '',
+    );
   }
 
   static int _score(String title, String keyword) {
@@ -254,133 +285,162 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
   @override
   Widget build(BuildContext context) {
     final matches = _sorted;
-    return Container(
-      height: MediaQuery.of(context).size.height * 0.72,
-      decoration: BoxDecoration(
-        color: context.colorScheme.surface,
-        borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
-      ),
-      child: Column(
-        children: [
-          const SizedBox(height: 8),
-          Container(
-            width: 36,
-            height: 4,
-            decoration: BoxDecoration(
-              color: context.colorScheme.outlineVariant,
-              borderRadius: BorderRadius.circular(2),
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
-            child: Row(
-              children: [
-                Icon(
-                  Icons.travel_explore,
-                  size: 20,
-                  color: context.colorScheme.primary,
+    final viewInsets = MediaQuery.viewInsetsOf(context);
+    final available = MediaQuery.of(context).size.height - viewInsets.bottom;
+    return AnimatedPadding(
+      duration: const Duration(milliseconds: 150),
+      curve: Curves.easeOut,
+      padding: EdgeInsets.only(bottom: viewInsets.bottom),
+      child: SizedBox(
+        height: available * 0.72,
+        // 底板必须是 Material：ListTile 把底色和水波纹画在最近的 Material 上，
+        // 用带颜色的 Container 垫着会把这层效果盖掉（debug 里还会直接断言）。
+        child: Material(
+          color: context.colorScheme.surface,
+          borderRadius: const BorderRadius.vertical(top: Radius.circular(20)),
+          clipBehavior: Clip.antiAlias,
+          child: Column(
+            children: [
+              const SizedBox(height: 8),
+              Container(
+                width: 36,
+                height: 4,
+                decoration: BoxDecoration(
+                  color: context.colorScheme.outlineVariant,
+                  borderRadius: BorderRadius.circular(2),
                 ),
-                const SizedBox(width: 8),
-                Expanded(
-                  child: Text(
-                    "Search in other sources".tl,
-                    style: ts.s16.bold,
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(16, 12, 16, 4),
+                child: Row(
+                  children: [
+                    Icon(
+                      Icons.travel_explore,
+                      size: 20,
+                      color: context.colorScheme.primary,
+                    ),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Search in other sources".tl,
+                        style: ts.s16.bold,
+                      ),
+                    ),
+                    Text(
+                      _running
+                          ? "$_finished/${_sources.length}"
+                          : "${matches.length}",
+                      style: ts.s12,
+                    ),
+                  ],
+                ),
+              ),
+              Padding(
+                padding: const EdgeInsets.fromLTRB(12, 0, 12, 8),
+                child: TextField(
+                  controller: _controller,
+                  textInputAction: TextInputAction.search,
+                  onSubmitted: _searchAgain,
+                  style: ts.s14,
+                  decoration: InputDecoration(
+                    isDense: true,
+                    hintText: "Search".tl,
+                    prefixIcon: const Icon(Icons.search, size: 18),
+                    prefixIconConstraints: const BoxConstraints(
+                      minWidth: 38,
+                      minHeight: 38,
+                    ),
+                    suffixIcon: IconButton(
+                      icon: const Icon(Icons.arrow_forward, size: 18),
+                      tooltip: "Search".tl,
+                      visualDensity: VisualDensity.compact,
+                      onPressed: _searchAgain,
+                    ),
+                    suffixIconConstraints: const BoxConstraints(
+                      minWidth: 38,
+                      minHeight: 38,
+                    ),
+                    contentPadding: const EdgeInsets.symmetric(vertical: 10),
+                    border: OutlineInputBorder(
+                      borderRadius: BorderRadius.circular(10),
+                    ),
                   ),
                 ),
-                Text(
-                  _running
-                      ? "$_finished/${_sources.length}"
-                      : "${matches.length}",
-                  style: ts.s12,
-                ),
-              ],
-            ),
-          ),
-          Padding(
-            padding: const EdgeInsets.fromLTRB(16, 0, 16, 8),
-            child: Align(
-              alignment: Alignment.centerLeft,
-              child: Text(
-                widget.keyword,
-                style: ts.s12,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
               ),
-            ),
-          ),
-          if (_running)
-            const LinearProgressIndicator(minHeight: 2)
-          else
-            const SizedBox(height: 2),
-          Expanded(
-            child: matches.isEmpty
-                ? _buildEmpty()
-                : ListView.separated(
-                    padding: const EdgeInsets.symmetric(vertical: 4),
-                    itemCount: matches.length,
-                    separatorBuilder: (_, __) => Divider(
-                      height: 1,
-                      color: context.colorScheme.outlineVariant
-                          .withValues(alpha: 0.4),
-                    ),
-                    itemBuilder: (context, index) {
-                      final match = matches[index];
-                      final isCurrent =
-                          match.source.key == widget.currentSourceKey;
-                      return ListTile(
-                        dense: true,
-                        title: Text(
-                          match.comic.title,
-                          maxLines: 2,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle: Padding(
-                          padding: const EdgeInsets.only(top: 2),
-                          child: Row(
-                            children: [
-                              Container(
-                                padding: const EdgeInsets.symmetric(
-                                  horizontal: 6,
-                                  vertical: 1,
-                                ),
-                                decoration: BoxDecoration(
-                                  color: context
-                                      .colorScheme.secondaryContainer
-                                      .withValues(alpha: 0.7),
-                                  borderRadius: BorderRadius.circular(4),
-                                ),
-                                child: Text(
-                                  match.source.name,
-                                  style: ts.s10,
-                                  maxLines: 1,
-                                  overflow: TextOverflow.ellipsis,
-                                ),
-                              ),
-                              if (isCurrent) ...[
-                                const SizedBox(width: 6),
-                                Text(
-                                  "Current source".tl,
-                                  style: ts.s10,
-                                ),
-                              ],
-                            ],
+              if (_running)
+                const LinearProgressIndicator(minHeight: 2)
+              else
+                const SizedBox(height: 2),
+              Expanded(
+                child: matches.isEmpty
+                    ? _buildEmpty()
+                    : ListView.separated(
+                        padding: const EdgeInsets.symmetric(vertical: 4),
+                        itemCount: matches.length,
+                        separatorBuilder: (_, __) => Divider(
+                          height: 1,
+                          color: context.colorScheme.outlineVariant.withValues(
+                            alpha: 0.4,
                           ),
                         ),
-                        trailing: Row(
-                          mainAxisSize: MainAxisSize.min,
-                          children: [
-                            if (widget.ownerSourceKey != null &&
-                                widget.ownerId != null)
-                              _buildBindButton(match),
-                            const Icon(Icons.chevron_right, size: 20),
-                          ],
-                        ),
-                        onTap: () => _openComic(match),
-                      );
-                    },
-                  ),
+                        itemBuilder: (context, index) {
+                          final match = matches[index];
+                          final isCurrent =
+                              match.source.key == widget.currentSourceKey;
+                          return ListTile(
+                            dense: true,
+                            title: Text(
+                              match.comic.title,
+                              maxLines: 2,
+                              overflow: TextOverflow.ellipsis,
+                            ),
+                            subtitle: Padding(
+                              padding: const EdgeInsets.only(top: 2),
+                              child: Row(
+                                children: [
+                                  Container(
+                                    padding: const EdgeInsets.symmetric(
+                                      horizontal: 6,
+                                      vertical: 1,
+                                    ),
+                                    decoration: BoxDecoration(
+                                      color: context
+                                          .colorScheme
+                                          .secondaryContainer
+                                          .withValues(alpha: 0.7),
+                                      borderRadius: BorderRadius.circular(4),
+                                    ),
+                                    child: Text(
+                                      match.source.name,
+                                      style: ts.s10,
+                                      maxLines: 1,
+                                      overflow: TextOverflow.ellipsis,
+                                    ),
+                                  ),
+                                  if (isCurrent) ...[
+                                    const SizedBox(width: 6),
+                                    Text("Current source".tl, style: ts.s10),
+                                  ],
+                                ],
+                              ),
+                            ),
+                            trailing: Row(
+                              mainAxisSize: MainAxisSize.min,
+                              children: [
+                                if (widget.ownerSourceKey != null &&
+                                    widget.ownerId != null)
+                                  _buildBindButton(match),
+                                const Icon(Icons.chevron_right, size: 20),
+                              ],
+                            ),
+                            onTap: () => _openComic(match),
+                          );
+                        },
+                      ),
+              ),
+            ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -393,10 +453,7 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
           children: [
             const FiveDotLoadingAnimation(),
             const SizedBox(height: 12),
-            Text(
-              "Searching all comic sources...".tl,
-              style: ts.s12,
-            ),
+            Text("Searching all comic sources...".tl, style: ts.s12),
           ],
         ),
       );
@@ -405,16 +462,18 @@ class _SourceMatchSheetState extends State<_SourceMatchSheet> {
       child: Column(
         mainAxisSize: MainAxisSize.min,
         children: [
-          Icon(
-            Icons.search_off,
-            size: 36,
-            color: context.colorScheme.outline,
-          ),
+          Icon(Icons.search_off, size: 36, color: context.colorScheme.outline),
           const SizedBox(height: 8),
           Text(
             "No matching comics found in other sources".tl,
             textAlign: TextAlign.center,
             style: ts.s12,
+          ),
+          const SizedBox(height: 4),
+          Text(
+            "Can't find it? Edit the title above and search again".tl,
+            textAlign: TextAlign.center,
+            style: ts.s12.withColor(context.colorScheme.onSurfaceVariant),
           ),
         ],
       ),
