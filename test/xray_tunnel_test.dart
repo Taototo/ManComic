@@ -89,6 +89,30 @@ trojan://pass@host:443#节点二
       expect(SubscriptionService.isInfoNode('香港 01'), isFalse);
       expect(SubscriptionService.isInfoNode(''), isFalse);
     });
+
+    test('日志里的"形态"不能带出节点凭据', () {
+      final shapes = [
+        SubscriptionService.describe('<html>token 无效</html>'),
+        SubscriptionService.describe('dmxlc3M6Ly8xMjM0NTY3OA=='),
+        SubscriptionService.describe(plain),
+        SubscriptionService.describe(''),
+      ];
+      for (final shape in shapes) {
+        expect(shape.contains('://'), isFalse, reason: '不能回显链接: $shape');
+        expect(
+          shape.toLowerCase().contains('38f85244'),
+          isFalse,
+          reason: '不能回显 UUID: $shape',
+        );
+        expect(
+          shape.contains('example.com'),
+          isFalse,
+          reason: '不能回显服务器: $shape',
+        );
+      }
+      expect(SubscriptionService.describe('<html>x</html>'), contains('html'));
+      expect(SubscriptionService.describe(''), contains('空'));
+    });
   });
 
   group('老式 vmess:// 转 outbound', () {

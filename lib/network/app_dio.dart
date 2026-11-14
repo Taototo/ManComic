@@ -148,32 +148,52 @@ class SafeTransformer extends Transformer {
 class MyLogInterceptor implements Interceptor {
   @override
   void onError(DioException err, ErrorInterceptorHandler handler) {
-    Log.error("Network",
-        "${err.requestOptions.method} ${err.requestOptions.path}\n$err\n${err.response?.data.toString()}");
+    if (err.requestOptions.extra["redactLog"] == true) {
+      // `$err` 里带整个 RequestOptions，会顺着 uri 把 token 打出来。
+      Log.error(
+        "Network",
+        "${err.requestOptions.method} "
+            "${_redactUri(err.requestOptions.uri)}\n"
+            "${err.type}: ${err.message}",
+      );
+    } else {
+      Log.error(
+        "Network",
+        "${err.requestOptions.method} ${err.requestOptions.path}\n$err\n${err.response?.data.toString()}",
+      );
+    }
     switch (err.type) {
       case DioExceptionType.badResponse:
         var statusCode = err.response?.statusCode;
         if (statusCode != null) {
           err = err.copyWith(
-              message: "Invalid Status Code: $statusCode. "
-                  "${_getStatusCodeInfo(statusCode)}");
+            message:
+                "Invalid Status Code: $statusCode. "
+                "${_getStatusCodeInfo(statusCode)}",
+          );
         }
       case DioExceptionType.connectionTimeout:
         err = err.copyWith(message: "Connection Timeout");
       case DioExceptionType.receiveTimeout:
         err = err.copyWith(
-            message: "Receive Timeout: "
-                "This indicates that the server is too busy to respond");
+          message:
+              "Receive Timeout: "
+              "This indicates that the server is too busy to respond",
+        );
       case DioExceptionType.unknown:
         if (err.toString().contains("Connection terminated during handshake")) {
           err = err.copyWith(
-              message: "Connection terminated during handshake: "
-                  "This may be caused by the firewall blocking the connection "
-                  "or your requests are too frequent.");
+            message:
+                "Connection terminated during handshake: "
+                "This may be caused by the firewall blocking the connection "
+                "or your requests are too frequent.",
+          );
         } else if (err.toString().contains("Connection reset by peer")) {
           err = err.copyWith(
-              message: "Connection reset by peer: "
-                  "The error is unrelated to app, please check your network.");
+            message:
+                "Connection reset by peer: "
+                "The error is unrelated to app, please check your network.",
+          );
         }
       default:
         {}
@@ -200,9 +220,15 @@ class MyLogInterceptor implements Interceptor {
 
   @override
   void onResponse(
-      Response<dynamic> response, ResponseInterceptorHandler handler) {
-    var headers = response.headers.map.map((key, value) => MapEntry(
-        key.toLowerCase(), value.length == 1 ? value.first : value.toString()));
+    Response<dynamic> response,
+    ResponseInterceptorHandler handler,
+  ) {
+    var headers = response.headers.map.map(
+      (key, value) => MapEntry(
+        key.toLowerCase(),
+        value.length == 1 ? value.first : value.toString(),
+      ),
+    );
     headers.remove("cookie");
     String content;
     if (response.data is List<int>) {
@@ -214,13 +240,27 @@ class MyLogInterceptor implements Interceptor {
     } else {
       content = response.data.toString();
     }
-    Log.addLog(
+    // 订阅的响应体整篇都是节点凭据（UUID、服务器地址、密码），只记长度。
+    if (response.requestOptions.extra["redactLog"] == true) {
+      Log.addLog(
         (response.statusCode != null && response.statusCode! < 400)
             ? LogLevel.info
             : LogLevel.error,
         "Network",
-        "Response ${response.realUri.toString()} ${response.statusCode}\n"
-            "headers:\n$headers\n$content");
+        "Response ${_redactUri(response.requestOptions.uri)} "
+            "${response.statusCode}\n<${content.length} chars redacted>",
+      );
+      handler.next(response);
+      return;
+    }
+    Log.addLog(
+      (response.statusCode != null && response.statusCode! < 400)
+          ? LogLevel.info
+          : LogLevel.error,
+      "Network",
+      "Response ${response.realUri.toString()} ${response.statusCode}\n"
+          "headers:\n$headers\n$content",
+    );
     handler.next(response);
   }
 
@@ -228,30 +268,33 @@ class MyLogInterceptor implements Interceptor {
   void onRequest(RequestOptions options, RequestInterceptorHandler handler) {
     const String headerMask = "********";
     const String dataMask = "****** DATA_PROTECTED ******";
+    // 有些 URL 本身就是凭据（订阅链接带 token），连 query 都不能进日志。
+    // 调用点传 extra['redactLog'] = true 就只剩 `scheme://host`。
+    final redact = options.extra["redactLog"] == true;
     Log.info(
-        "Network",
-        "${options.method} ${options.uri}\n"
-            "headers:\n${
-              options.extra.containsKey("maskHeadersInLog")
-                ? options.headers.map((key, value) =>
-                  MapEntry(
-                    key,
-                    options.extra["maskHeadersInLog"].contains(key)
-                      ? headerMask
-                      : value
-                  ))
-                : options.headers
-            }\n"
-            "data:\n${
-              options.extra["maskDataInLog"] == true
-                ? dataMask
-                : options.data
-            }"
+      "Network",
+      "${options.method} ${redact ? _redactUri(options.uri) : options.uri}\n"
+          "headers:\n${redact
+              ? headerMask
+              : options.extra.containsKey("maskHeadersInLog")
+              ? options.headers.map((key, value) => MapEntry(key, options.extra["maskHeadersInLog"].contains(key) ? headerMask : value))
+              : options.headers}\n"
+          "data:\n${redact || options.extra["maskDataInLog"] == true ? dataMask : options.data}",
     );
     options.connectTimeout = const Duration(seconds: 15);
     options.receiveTimeout = const Duration(seconds: 15);
     options.sendTimeout = const Duration(seconds: 15);
     handler.next(options);
+  }
+
+  /// 只留 `scheme://host`，path 和 query 全抹掉。
+  ///
+  /// 排查时知道"打在哪个站"通常够了，而订阅链接的 token 就在拿不到的那部分里。
+  static String _redactUri(Uri uri) {
+    if (uri.host.isEmpty) {
+      return "<redacted>";
+    }
+    return "${uri.scheme}://${uri.host}/<redacted>";
   }
 }
 
@@ -346,10 +389,7 @@ class RHttpAdapter implements HttpClientAdapter {
       ),
       throwOnStatusCode: false,
       dnsSettings: rhttp.DnsSettings.static(overrides: overrides),
-      tlsSettings: rhttp.TlsSettings(
-        sni: sni,
-        verifyCertificates: verify,
-      ),
+      tlsSettings: rhttp.TlsSettings(sni: sni, verifyCertificates: verify),
     );
     return (settings, key);
   }

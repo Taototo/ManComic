@@ -87,8 +87,8 @@ class SubscriptionService {
     final plain = plainSubscriptionText(await _decrypt(text));
     final links = splitShareLinks(plain);
     if (links.isEmpty) {
-      // 原文只进日志：里面可能带 token。
-      Log.error('Xray', '订阅解析不出节点，开头是: ${_preview(plain)}');
+      // 只记形态，不记内容：每条链接都带 UUID 和服务器地址。
+      Log.error('Xray', '订阅解析不出节点（${describe(plain)}）');
       throw XrayException('订阅里没有节点');
     }
     // 核心能吃的那部分直接交给它（vmess-aead / vless / ss / trojan / hysteria2），
@@ -187,18 +187,24 @@ class SubscriptionService {
     if (uri == null || !uri.hasScheme) {
       throw XrayException('订阅链接不完整');
     }
-    final res = await AppDio(
-      BaseOptions(
-        connectTimeout: const Duration(seconds: 20),
-        receiveTimeout: const Duration(seconds: 40),
-        responseType: ResponseType.plain,
-        validateStatus: (s) => s != null && s < 400,
-        headers: {
-          // 不少机场按 UA 分发格式，认不出来就不给节点列表。
-          'User-Agent': 'v2rayNG/1.9.16',
-        },
-      ),
-    ).get<String>(uri.toString());
+    final res =
+        await AppDio(
+          BaseOptions(
+            connectTimeout: const Duration(seconds: 20),
+            receiveTimeout: const Duration(seconds: 40),
+            responseType: ResponseType.plain,
+            validateStatus: (s) => s != null && s < 400,
+            headers: {
+              // 不少机场按 UA 分发格式，认不出来就不给节点列表。
+              'User-Agent': 'v2rayNG/1.9.16',
+            },
+          ),
+        ).get<String>(
+          uri.toString(),
+          // 订阅链接本身就是凭据（token 在 query 里），响应体整篇是节点凭据。
+          // 不标记的话两者都会原样进日志文件，用户一导日志就是明文泄露。
+          options: Options(extra: {'redactLog': true}),
+        );
     final body = res.data;
     if (body == null || body.trim().isEmpty) {
       throw XrayException('订阅内容为空');
@@ -256,10 +262,28 @@ class SubscriptionService {
     }
   }
 
-  /// 日志用，截断到 80 字（订阅里带 token，不能整段进日志文件）。
-  static String _preview(String text) {
-    final flat = text.replaceAll(RegExp(r'\s+'), ' ').trim();
-    return flat.length <= 80 ? flat : '${flat.substring(0, 80)}…';
+  /// 日志用：只说「收到了什么东西」，不说内容。
+  ///
+  /// 订阅正文里每条链接都是 `vless://<uuid>@<服务器>:<端口>`，一旦原样写进日志
+  /// 文件，用户导出日志求助时就把整个账号送出去了。所以这里只给长度和形态，
+  /// 足够判断"是 html 错误页 / 是 base64 没解开 / 是格式不认识"。
+  static String describe(String text) {
+    final flat = text.trim();
+    if (flat.isEmpty) {
+      return '空响应';
+    }
+    final tags = <String>['${flat.length} 字符'];
+    if (flat.startsWith('<')) {
+      tags.add('像 html');
+    }
+    if (flat.contains('://')) {
+      tags.add('含链接但一行都认不出');
+    } else if (_tryBase64(flat) != null) {
+      tags.add('是 base64，但内容不是链接');
+    } else {
+      tags.add('既不是链接也不是 base64');
+    }
+    return tags.join('，');
   }
 
   /// 把订阅明文拆成一条条分享链接。
