@@ -39,20 +39,29 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
 
   VpnSubscription? _subscription;
 
+  /// 刷新订阅中。
   var _busy = false;
 
   var _supported = true;
 
-  var _probing = false;
+  /// 批量测速中。
+  var _testingAll = false;
 
-  TunnelProbe? _probe;
+  /// 节点名 → 上一次测出来的结果。只活在这次打开页面期间：节点会挂、线路会变，
+  /// 十分钟前的成绩拿来看只会误导人。
+  Map<String, TunnelProbe> _results = {};
+
+  var _hiddenCount = 0;
 
   String? _error;
+
+  List<VpnNode> get _nodes => XrayTunnel.visibleNodes(_subscription);
 
   @override
   void initState() {
     super.initState();
     _subscription = SubscriptionService.load();
+    _hiddenCount = SubscriptionService.hiddenNodes().length;
     _url = TextEditingController(text: _subscription?.url ?? '');
     XrayTunnel.available().then((ok) {
       if (mounted) {
@@ -80,6 +89,7 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
     setState(() {
       _busy = true;
       _error = null;
+      _results = {};
     });
     try {
       final subscription = await SubscriptionService.refresh(url);
@@ -87,8 +97,7 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
       if (!mounted) return;
       setState(() {
         _subscription = subscription;
-        // 换了节点列表，上一次的延迟就不作数了。
-        _probe = null;
+        _hiddenCount = SubscriptionService.hiddenNodes().length;
       });
       // 订阅换了节点列表，正在跑的隧道要按新列表重开。
       if (XrayTunnel.status.value.running) {
@@ -114,7 +123,8 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
     setState(() {
       _busy = true;
       _error = null;
-      _probe = null;
+      // 换了出口，之前那批延迟就不再对应当前这条路。
+      _results = {};
     });
     await XrayTunnel.setEnabled(value);
     if (!mounted) return;
@@ -125,16 +135,89 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
     });
   }
 
-  Future<void> _test() async {
+  /// 「测试连接」：把所有节点都过一遍，结果贴在各自行的末尾。
+  Future<void> _testAll() async {
+    // 一个进程只能跑一个 Xray 实例，测全部就得先把当前隧道停掉再换成
+    // "N 个入站"的那份配置，测完再拉回来。正在用的人会感觉断一下，
+    // 所以先说一声，别让人以为是崩了。
+    if (XrayTunnel.status.value.running) {
+      showCenterHint(App.rootContext, "The proxy pauses while testing".tl);
+    }
     setState(() {
-      _probing = true;
-      _probe = null;
+      _testingAll = true;
+      _results = {};
+      _error = null;
     });
-    final result = await XrayTunnel.probe();
+    try {
+      final results = await XrayTunnel.probeAll();
+      if (!mounted) return;
+      setState(() {
+        _results = results;
+      });
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _error = e is XrayException ? e.message : e.toString();
+      });
+    } finally {
+      if (mounted) {
+        setState(() {
+          _testingAll = false;
+        });
+      }
+    }
+  }
+
+  /// 点一行节点 = 换过去连上，然后立刻告诉你这条路通不通。
+  ///
+  /// 结果用 [showCenterHint]：就是「再按一次退出」的那种屏幕中间一行字。
+  /// 这里不需要按钮也不需要遮罩——用户点节点是为了接着用，不是为了读报告。
+  Future<void> _selectNode(VpnNode node) async {
+    setState(() {
+      _results = {};
+      _error = null;
+    });
+    // 换节点要重启核心（一两百毫秒），测速又可能等上几秒。中间先给一句，
+    // 免得用户以为点空了又点一次。
+    showCenterHint(App.rootContext, "Connecting...".tl);
+    await XrayTunnel.selectNode(node.name);
+    if (!XrayTunnel.status.value.running) {
+      // 没开代理时点节点也算「连这一台」。
+      await XrayTunnel.setEnabled(true);
+    }
+    if (!mounted) return;
+    final status = XrayTunnel.status.value;
+    if (!status.running) {
+      showCenterHint(App.rootContext, status.message ?? "Failed".tl);
+      return;
+    }
+    setState(() {}); // 让状态卡立刻显示新节点
+    final probe = await XrayTunnel.probe();
+    if (!mounted) return;
+    showCenterHint(
+      App.rootContext,
+      probe.ok
+          ? "${node.name} · ${probe.milliseconds} ms"
+          : "${node.name} · ${probe.message ?? "Failed".tl}",
+      duration: const Duration(seconds: 3),
+    );
+  }
+
+  Future<void> _hideNode(VpnNode node) async {
+    await SubscriptionService.hideNode(node.name);
     if (!mounted) return;
     setState(() {
-      _probing = false;
-      _probe = result;
+      _hiddenCount = SubscriptionService.hiddenNodes().length;
+      _results.remove(node.name);
+    });
+    showCenterHint(App.rootContext, "Hidden".tl);
+  }
+
+  Future<void> _restoreHidden() async {
+    await SubscriptionService.restoreHiddenNodes();
+    if (!mounted) return;
+    setState(() {
+      _hiddenCount = 0;
     });
   }
 
@@ -144,6 +227,7 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
     return ValueListenableBuilder<TunnelStatus>(
       valueListenable: XrayTunnel.status,
       builder: (context, status, _) {
+        final nodes = _nodes;
         return ListView(
           padding: const EdgeInsets.only(bottom: 24),
           children: [
@@ -164,7 +248,7 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
                 ),
               ),
             _buildStatusCard(status),
-            _buildProbeRow(colors),
+            _buildTestRow(colors),
             SwitchListTile(
               title: Text("Enable".tl),
               subtitle: status.state == TunnelState.failed
@@ -216,7 +300,7 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
                 padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
                 child: Text(
                   "@count nodes · @time".tlParams({
-                    "count": "${_subscription!.nodes.length}",
+                    "count": "${nodes.length}",
                     "time": _formatTime(_subscription!.updatedAt),
                   }),
                   style: ts.s12.withColor(colors.onSurfaceVariant),
@@ -227,31 +311,25 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
                 padding: const EdgeInsets.fromLTRB(16, 10, 16, 0),
                 child: Text(_error!, style: ts.s12.withColor(colors.error)),
               ),
-            if (_subscription != null && _subscription!.nodes.isNotEmpty) ...[
+            if (nodes.isNotEmpty) ...[
               Padding(
                 padding: const EdgeInsets.fromLTRB(16, 16, 16, 4),
                 child: Text("Nodes".tl, style: ts.s14.bold),
               ),
-              for (final node in _subscription!.nodes)
-                RadioListTile<String>(
-                  dense: true,
-                  value: node.name,
-                  groupValue:
-                      XrayTunnel.selectedNode ??
-                      _subscription!.nodes.first.name,
-                  onChanged: (value) {
-                    if (value == null) return;
-                    setState(() {
-                      // 换了节点，之前测的延迟不再对应当前出口。
-                      _probe = null;
-                    });
-                    XrayTunnel.selectNode(value);
-                  },
-                  title: Text(
-                    node.name,
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    style: ts.s14,
+              for (final node in nodes) _buildNodeRow(context, node, status),
+              if (_hiddenCount > 0)
+                Padding(
+                  padding: const EdgeInsets.fromLTRB(8, 4, 16, 0),
+                  child: Align(
+                    alignment: Alignment.centerLeft,
+                    child: TextButton.icon(
+                      onPressed: _restoreHidden,
+                      icon: const Icon(Icons.undo, size: 16),
+                      label: Text(
+                        "@n hidden · Restore".tlParams({"n": _hiddenCount}),
+                        style: ts.s12,
+                      ),
+                    ),
                   ),
                 ),
             ],
@@ -261,30 +339,74 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
     );
   }
 
-  /// 「测试连接」+ 结果。
-  ///
-  /// 延迟这种东西只有当场测才有意义：节点随时会挂，所以结果不落盘、换节点
-  /// 也清掉，避免用户看着一个十分钟前的好成绩去怀疑为什么打不开网页。
-  Widget _buildProbeRow(ColorScheme colors) {
-    final probe = _probe;
-    final text = probe == null
-        ? null
-        : probe.ok
-        ? "${probe.milliseconds} ms"
-        : (probe.message ?? "Failed".tl);
+  Widget _buildNodeRow(
+    BuildContext context,
+    VpnNode node,
+    TunnelStatus status,
+  ) {
+    final colors = context.colorScheme;
+    final result = _results[node.name];
+    final current =
+        XrayTunnel.selectedNode ?? (status.running ? status.nodeName : null);
+    // 只有真的在跑的时候才勾上：写了设置但隧道没起来，勾着会让人以为已经连了。
+    final selected = current == node.name && status.running;
+    return RadioListTile<String>(
+      dense: true,
+      value: node.name,
+      groupValue: selected ? node.name : null,
+      onChanged: (value) {
+        if (value != null) {
+          _selectNode(node);
+        }
+      },
+      secondary: IconButton(
+        tooltip: "Delete".tl,
+        icon: const Icon(Icons.delete_outline, size: 18),
+        color: colors.onSurfaceVariant,
+        onPressed: () => _hideNode(node),
+      ),
+      title: Row(
+        children: [
+          Expanded(
+            child: Text(
+              node.name,
+              maxLines: 1,
+              overflow: TextOverflow.ellipsis,
+              style: ts.s14,
+            ),
+          ),
+          if (result != null)
+            Padding(
+              padding: const EdgeInsets.only(left: 8),
+              child: Text(
+                result.ok
+                    ? "${result.milliseconds} ms"
+                    : (result.message ?? ""),
+                style: ts.s10.withColor(
+                  result.ok ? colors.primary : colors.error,
+                ),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
+  /// 「测试连接」+ 已测数量。
+  Widget _buildTestRow(ColorScheme colors) {
     return Padding(
       padding: const EdgeInsets.fromLTRB(16, 0, 16, 4),
       child: Row(
         children: [
           Button.outlined(
             onPressed: () {
-              if (_busy || _probing) return;
-              _test();
+              if (_busy || _testingAll) return;
+              _testAll();
             },
             child: Row(
               mainAxisSize: MainAxisSize.min,
               children: [
-                if (_probing)
+                if (_testingAll)
                   const SizedBox(
                     width: 14,
                     height: 14,
@@ -294,25 +416,23 @@ class _XrayProxyBodyState extends State<XrayProxyBody> {
                   const Icon(Icons.speed_rounded, size: 16),
                 const SizedBox(width: 6),
                 Text(
-                  _probing ? "Testing...".tl : "Test connection".tl,
+                  _testingAll ? "Testing...".tl : "Test all".tl,
                   style: ts.s12,
                 ),
               ],
             ),
           ),
-          if (text != null) ...[
-            const SizedBox(width: 12),
-            Expanded(
-              child: Text(
-                text,
-                maxLines: 1,
-                overflow: TextOverflow.ellipsis,
-                style: ts.s12.withColor(
-                  probe!.ok ? colors.primary : colors.error,
-                ),
-              ),
-            ),
-          ],
+          const SizedBox(width: 12),
+          Expanded(
+            child: _results.isEmpty
+                ? const SizedBox.shrink()
+                : Text(
+                    "@n tested".tlParams({"n": _results.length}),
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: ts.s10.withColor(colors.onSurfaceVariant),
+                  ),
+          ),
         ],
       ),
     );

@@ -1,11 +1,11 @@
 import 'dart:async';
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/subscription.dart';
-import 'package:venera/network/app_dio.dart';
 import 'package:venera/network/proxy.dart';
 import 'package:venera/network/xray_core.dart';
 
@@ -65,70 +65,129 @@ class XrayTunnel {
   /// 这台机器能不能加载核心。UI 用它决定要不要显示入口。
   static Future<bool> available() => _supported ??= XrayCore.available();
 
-  /// 这个节点能不能真的出网、要多久。
+  /// 测速用的目标。
   ///
-  /// 测的是 `google.com/generate_204`：国内直连基本不通，所以它同时验证了
-  /// "确实走了代理"和"出口到墙外是通的"，而不只是"本地端口有人监听"
-  /// （后者 `Socket.connect` 就能测，却毫无信息量——132 个字节的空响应也能通）。
-  static Future<TunnelProbe> probe() async {
-    if (!status.value.running) {
-      return const TunnelProbe(ok: false, message: '代理未在运行');
-    }
-    final token = CancelToken();
+  /// 用 http（不是 https）有两个理由：一是要走 N 个节点时每个都省掉一次 TLS
+  /// 握手，二十多个节点的总耗时才压得住；二是它是 Clash / v2rayNG 的默认测速
+  /// 点，数字和别的工具能对上。走的是我们自己的 HTTP 入站，所以「能通」本身
+  /// 就证明代理在转发——直连这条路在 app 里根本不存在。
+  static const _probeUrl = 'http://www.gstatic.com/generate_204';
+
+  /// 单个端口的往返耗时。
+  ///
+  /// 这里刻意用 Dart 自带的 `HttpClient` 而不是 `AppDio`：后者身上挂着 Cookie
+  /// 的 SQLite 查询、缓存键计算、请求日志和 FFI 边界，测出来的是"app 发一个
+  /// 请求有多慢"，不是"这条路有多快"。
+  static Future<int> _pingPort(int port, Duration timeout) async {
+    final client = HttpClient()
+      ..findProxy = ((_) => 'PROXY 127.0.0.1:$port')
+      ..connectionTimeout = timeout;
     final watch = Stopwatch()..start();
     try {
-      final res =
-          await AppDio(
-                BaseOptions(
-                  // 这里给的值会被 MyLogInterceptor 统一改成 15s，所以真正的时限
-                  // 靠下面的 timeout，超时后自己取消，别让一个死节点挂在那里。
-                  validateStatus: (s) => s != null && s < 400,
-                ),
-              )
-              .get<String>(
-                'https://www.google.com/generate_204',
-                cancelToken: token,
-                options: Options(
-                  headers: {'cache-time': 'no'},
-                  extra: {'redactLog': true},
-                ),
-              )
-              .timeout(const Duration(seconds: 8));
+      final request = await client.getUrl(Uri.parse(_probeUrl));
+      final response = await request.close().timeout(timeout);
+      await response.drain<void>().timeout(timeout);
       watch.stop();
-      final code = res.statusCode;
-      if (code == 204 || code == 200) {
-        return TunnelProbe(ok: true, milliseconds: watch.elapsedMilliseconds);
+      if (response.statusCode != 204 && response.statusCode != 200) {
+        throw HttpException('HTTP ${response.statusCode}');
       }
-      return TunnelProbe(ok: false, message: 'HTTP $code');
+      return watch.elapsedMilliseconds;
+    } finally {
+      client.close(force: true);
+    }
+  }
+
+  static Future<TunnelProbe> _probePort(int port) async {
+    try {
+      final ms = await _pingPort(port, const Duration(seconds: 6));
+      return TunnelProbe(ok: true, milliseconds: ms);
     } on TimeoutException {
-      token.cancel();
       return const TunnelProbe(ok: false, message: '超时');
     } catch (e) {
-      token.cancel();
       return TunnelProbe(ok: false, message: _friendlyProbeError(e));
+    }
+  }
+
+  /// 当前节点能不能出网、要多久。
+  static Future<TunnelProbe> probe() async {
+    final port = status.value.port;
+    if (!status.value.running || port == null) {
+      return const TunnelProbe(ok: false, message: '代理未在运行');
+    }
+    return _probePort(port);
+  }
+
+  /// 一次把所有节点都测一遍。
+  ///
+  /// 关键在配置：**一个进程只能跑一个 Xray 实例**，所以不是"每个节点起一次"，
+  /// 而是一条配置里放 N 个 http 入站 + N 个出口，再用 routing 把「第 i 个入站」
+  /// 钉到「第 i 个出口」上。起一次、并发打 N 个回环端口，二十多个节点几秒就完。
+  ///
+  /// 代价是测试期间要停掉正在跑的隧道（同一个实例），结束再按原样拉起来。
+  static Future<Map<String, TunnelProbe>> probeAll() async {
+    final subscription = SubscriptionService.load();
+    final nodes = visibleNodes(subscription);
+    if (nodes.isEmpty) {
+      return {};
+    }
+    final wasRunning = status.value.running;
+    final previous = selectedNode;
+    final results = <String, TunnelProbe>{};
+    try {
+      if (wasRunning) {
+        await stop();
+      }
+      final ports = await XrayCore.freePorts(nodes.length);
+      if (ports.length < nodes.length) {
+        throw XrayException('拿不到足够的空闲端口');
+      }
+      await XrayCore.runXray(buildProbeConfig(ports: ports, nodes: nodes));
+      // 并发 4：再多也只会在同一个出口 IP 上互相排队，还容易触发对端的限速。
+      var next = 0;
+      Future<void> worker() async {
+        while (next < nodes.length) {
+          final i = next++;
+          results[nodes[i].name] = await _probePort(ports[i]);
+        }
+      }
+
+      await Future.wait(
+        List.generate(nodes.length < 4 ? nodes.length : 4, (_) => worker()),
+      );
+      return results;
+    } finally {
+      try {
+        await XrayCore.stopXray();
+      } catch (_) {
+        // 没跑起来就停会报错，无所谓。
+      }
+      if (wasRunning) {
+        if (previous != null) {
+          appdata.settings[_nodeKey] = previous;
+        }
+        status.value = const TunnelStatus(TunnelState.stopped);
+        setRuntimeProxy(null);
+        await start();
+      }
     }
   }
 
   /// 只留用户能理解的那半句，完整异常进日志。
   static String _friendlyProbeError(Object error) {
-    Log.error('Xray', '连通性测试失败: $error');
-    if (error is DioException) {
-      final text = error.toString();
-      if (text.contains('Connection refused')) {
-        return '端口没人监听';
-      }
-      if (text.contains('handshake') || text.contains('certificate')) {
-        return 'TLS 握手失败';
-      }
-      if (text.contains('Timeout') || text.contains('timeout')) {
-        return '超时';
-      }
-      final code = error.response?.statusCode;
-      if (code != null) {
-        return 'HTTP $code';
-      }
-      return '连接失败';
+    final text = error.toString();
+    if (text.contains('Connection refused')) {
+      return '端口没人监听';
     }
+    if (text.contains('handshake') || text.contains('certificate')) {
+      return 'TLS 握手失败';
+    }
+    if (text.contains('Timeout') || text.contains('timeout')) {
+      return '超时';
+    }
+    if (text.contains('HTTP ')) {
+      return text.replaceAll('HttpException: ', '');
+    }
+    Log.error('Xray', '连通性测试失败: $error');
     return '连接失败';
   }
 
@@ -179,7 +238,7 @@ class XrayTunnel {
       return;
     }
     final subscription = SubscriptionService.load();
-    if (subscription == null || subscription.nodes.isEmpty) {
+    if (visibleNodes(subscription).isEmpty) {
       await _fail('还没有可用的订阅节点');
       return;
     }
@@ -226,16 +285,65 @@ class XrayTunnel {
     setRuntimeProxy(null);
   }
 
-  static VpnNode? _pickNode(VpnSubscription subscription) {
+  /// 订阅里用户没划掉的节点。
+  static List<VpnNode> visibleNodes(VpnSubscription? subscription) {
+    if (subscription == null) {
+      return const [];
+    }
+    final hidden = SubscriptionService.hiddenNodes();
+    return [
+      for (final node in subscription.nodes)
+        if (!hidden.contains(node.name)) node,
+    ];
+  }
+
+  /// 批量测速用的配置：N 个 http 入站、N 个出口，routing 把第 i 个入站
+  /// 钉到第 i 个出口上。
+  ///
+  /// 入站 tag 用 `probe-i` 而不是节点名：节点名是用户可改的中英文混排，
+  /// Xray 虽然接受任意字符串作 tag，但拿它当 routing 的键太脆。
+  static String buildProbeConfig({
+    required List<int> ports,
+    required List<VpnNode> nodes,
+  }) {
+    final count = nodes.length < ports.length ? nodes.length : ports.length;
+    return jsonEncode({
+      'log': {'loglevel': 'warning'},
+      'inbounds': [
+        for (var i = 0; i < count; i++)
+          {
+            'tag': 'probe-$i',
+            'protocol': 'http',
+            'listen': '127.0.0.1',
+            'port': ports[i],
+            'settings': {'timeout': 30},
+          },
+      ],
+      'outbounds': [for (var i = 0; i < count; i++) nodes[i].outbound],
+      'routing': {
+        'rules': [
+          for (var i = 0; i < count; i++)
+            {
+              'type': 'field',
+              'inboundTag': ['probe-$i'],
+              'outboundTag': nodes[i].outbound['tag'],
+            },
+        ],
+      },
+    });
+  }
+
+  static VpnNode? _pickNode(VpnSubscription? subscription) {
+    final nodes = visibleNodes(subscription);
     final tag = selectedNode;
     if (tag != null) {
-      for (final node in subscription.nodes) {
+      for (final node in nodes) {
         if (node.name == tag) {
           return node;
         }
       }
     }
-    return subscription.nodes.isEmpty ? null : subscription.nodes.first;
+    return nodes.isEmpty ? null : nodes.first;
   }
 
   /// 生成的配置只有一条 http 入站 + 一个出口。

@@ -81,6 +81,35 @@ class SubscriptionService {
     await appdata.writeImplicitData();
   }
 
+  /// 用户手动划掉的节点名。
+  ///
+  /// 存名字而不是从订阅里删：订阅一刷新节点列表就整份换新，真删了下次又回来，
+  /// 用户会以为删除没生效。放 implicitData 是因为这是本机的口味，不该跟着
+  /// 设置同步到另一台设备（那边可能是另一份订阅）。
+  static const String _hiddenKey = 'xrayHiddenNodes';
+
+  static Set<String> hiddenNodes() {
+    final raw = appdata.implicitData[_hiddenKey];
+    if (raw is List) {
+      return {
+        for (final e in raw)
+          if (e is String) e,
+      };
+    }
+    return {};
+  }
+
+  static Future<void> hideNode(String name) async {
+    final hidden = hiddenNodes()..add(name);
+    appdata.implicitData[_hiddenKey] = hidden.toList();
+    await appdata.writeImplicitData();
+  }
+
+  static Future<void> restoreHiddenNodes() async {
+    appdata.implicitData.remove(_hiddenKey);
+    await appdata.writeImplicitData();
+  }
+
   /// 拉取并解析。失败抛异常，由调用方显示原因。
   static Future<VpnSubscription> refresh(String url) async {
     final text = await _fetch(url);

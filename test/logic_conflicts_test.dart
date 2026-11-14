@@ -328,7 +328,8 @@ void main() {
 
     test('本地漫画页：单本菜单不再重复「View Detail」', () {
       var src = read('lib/pages/local_comics_page.dart');
-      var start = src.indexOf('menu: [');
+      // 菜单被抽成 buildComicMenu 了（列表和网格共用一份），锚点跟着挪。
+      var start = src.indexOf('List<MenuEntry> buildComicMenu(');
       var single = src.substring(
         start,
         src.indexOf('...exportActions([comic])', start),

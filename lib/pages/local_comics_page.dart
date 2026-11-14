@@ -83,50 +83,52 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     showDialog(
       context: context,
       builder: (context) {
-        return StatefulBuilder(builder: (context, setState) {
-          return ContentDialog(
-            title: "Sort".tl,
-            content: RadioGroup<LocalSortType>(
-              groupValue: sortType,
-              onChanged: (v) {
-                setState(() {
-                  sortType = v ?? sortType;
-                });
-              },
-              child: Column(
-                children: [
-                  RadioListTile<LocalSortType>(
-                    title: Text("Name".tl),
-                    value: LocalSortType.name,
-                  ),
-                  RadioListTile<LocalSortType>(
-                    title: Text("Name A-Z".tl),
-                    value: LocalSortType.titleAZ,
-                  ),
-                  RadioListTile<LocalSortType>(
-                    title: Text("Date".tl),
-                    value: LocalSortType.timeAsc,
-                  ),
-                  RadioListTile<LocalSortType>(
-                    title: Text("Date Desc".tl),
-                    value: LocalSortType.timeDesc,
-                  ),
-                ],
-              ),
-            ),
-            actions: [
-              FilledButton(
-                onPressed: () {
-                  appdata.implicitData["local_sort"] = sortType.value;
-                  appdata.writeImplicitData();
-                  Navigator.pop(context);
-                  update();
+        return StatefulBuilder(
+          builder: (context, setState) {
+            return ContentDialog(
+              title: "Sort".tl,
+              content: RadioGroup<LocalSortType>(
+                groupValue: sortType,
+                onChanged: (v) {
+                  setState(() {
+                    sortType = v ?? sortType;
+                  });
                 },
-                child: Text("Confirm".tl),
+                child: Column(
+                  children: [
+                    RadioListTile<LocalSortType>(
+                      title: Text("Name".tl),
+                      value: LocalSortType.name,
+                    ),
+                    RadioListTile<LocalSortType>(
+                      title: Text("Name A-Z".tl),
+                      value: LocalSortType.titleAZ,
+                    ),
+                    RadioListTile<LocalSortType>(
+                      title: Text("Date".tl),
+                      value: LocalSortType.timeAsc,
+                    ),
+                    RadioListTile<LocalSortType>(
+                      title: Text("Date Desc".tl),
+                      value: LocalSortType.timeDesc,
+                    ),
+                  ],
+                ),
               ),
-            ],
-          );
-        });
+              actions: [
+                FilledButton(
+                  onPressed: () {
+                    appdata.implicitData["local_sort"] = sortType.value;
+                    appdata.writeImplicitData();
+                    Navigator.pop(context);
+                    update();
+                  },
+                  child: Text("Confirm".tl),
+                ),
+              ],
+            );
+          },
+        );
       },
     );
   }
@@ -136,7 +138,9 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   /// 进页面时已经自动查过一批（带 TTL、每轮上限），这颗按钮是「我现在就想
   /// 知道」——所以忽略 TTL，把整页都查一遍。
   Future<void> _checkUpdates() async {
-    final targets = comics.where((c) => LocalInsights().isCheckable(c)).toList();
+    final targets = comics
+        .where((c) => LocalInsights().isCheckable(c))
+        .toList();
     if (targets.isEmpty) {
       context.showMessage(message: "No comics to check".tl);
       return;
@@ -175,47 +179,49 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   }
 
   Widget buildMultiSelectMenu() {
-    return MenuButton(entries: [
-      MenuEntry(
-        icon: Icons.delete_outline,
-        text: "Delete".tl,
-        onClick: () {
-          deleteComics(selectedComics.keys.toList()).then((value) {
-            if (value) {
-              setState(() {
-                multiSelectMode = false;
-                selectedComics.clear();
-              });
-            }
-          });
-        },
-      ),
-      MenuEntry(
-        icon: Icons.favorite_border,
-        text: "Add to favorites".tl,
-        onClick: () {
-          addFavorite(selectedComics.keys.toList());
-        },
-      ),
-      if (selectedComics.length == 1)
+    return MenuButton(
+      entries: [
         MenuEntry(
-          icon: Icons.folder_open,
-          text: "Open Folder".tl,
+          icon: Icons.delete_outline,
+          text: "Delete".tl,
           onClick: () {
-            openComicFolder(selectedComics.keys.first);
+            deleteComics(selectedComics.keys.toList()).then((value) {
+              if (value) {
+                setState(() {
+                  multiSelectMode = false;
+                  selectedComics.clear();
+                });
+              }
+            });
           },
         ),
-      if (selectedComics.length == 1)
         MenuEntry(
-          icon: Icons.chrome_reader_mode_outlined,
-          text: "View Detail".tl,
+          icon: Icons.favorite_border,
+          text: "Add to favorites".tl,
           onClick: () {
-            LocalComicPage.open(context, selectedComics.keys.first);
+            addFavorite(selectedComics.keys.toList());
           },
         ),
-      if (selectedComics.isNotEmpty)
-        ...exportActions(selectedComics.keys.toList()),
-    ]);
+        if (selectedComics.length == 1)
+          MenuEntry(
+            icon: Icons.folder_open,
+            text: "Open Folder".tl,
+            onClick: () {
+              openComicFolder(selectedComics.keys.first);
+            },
+          ),
+        if (selectedComics.length == 1)
+          MenuEntry(
+            icon: Icons.chrome_reader_mode_outlined,
+            text: "View Detail".tl,
+            onClick: () {
+              LocalComicPage.open(context, selectedComics.keys.first);
+            },
+          ),
+        if (selectedComics.isNotEmpty)
+          ...exportActions(selectedComics.keys.toList()),
+      ],
+    );
   }
 
   void selectAll() {
@@ -239,21 +245,130 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
     });
   }
 
+  /// 网格展示还是详情行。
+  ///
+  /// 本地漫画的信息（体积、进度、更新角标）在行里排得下，但一眼扫"我下了哪些
+  /// 本"还是封面墙更快——收藏页能切，这里凭什么不能。默认保持原来的详情行，
+  /// 老用户升级上来观感不变。
+  bool get gridMode => appdata.settings['localComicsLayout'] == 'grid';
+
+  void toggleLayout() {
+    appdata.settings['localComicsLayout'] = gridMode ? 'list' : 'grid';
+    appdata.saveData();
+    setState(() {});
+  }
+
+  void openOrSelect(LocalComic comic, int index) {
+    if (multiSelectMode) {
+      setState(() {
+        if (selectedComics.containsKey(comic)) {
+          selectedComics.remove(comic);
+        } else {
+          selectedComics[comic] = true;
+        }
+        if (selectedComics.isEmpty) {
+          multiSelectMode = false;
+        }
+      });
+    } else {
+      // 点封面进详情页，不再一步跳进阅读器：简介、章节、来源都在详情页上，
+      // 想直接读点「开始阅读」也只多一下。
+      LocalComicPage.open(context, comic, heroID: index);
+    }
+  }
+
+  /// 一本书的长按菜单。列表和网格共用同一份，不然两处会慢慢长歪。
+  List<MenuEntry> buildComicMenu(LocalComic comic) {
+    return [
+      MenuEntry(
+        icon: Icons.folder_open,
+        text: "Open Folder".tl,
+        onClick: () {
+          openComicFolder(comic);
+        },
+      ),
+      if (comic.comicType.comicSource?.loadComicPages != null)
+        MenuEntry(
+          icon: Icons.fact_check_outlined,
+          text: "Check missing chapters".tl,
+          onClick: () {
+            MissingChaptersPage.show(context, comic);
+          },
+        ),
+      MenuEntry(
+        icon: Icons.delete,
+        text: "Delete".tl,
+        onClick: () {
+          deleteComics([comic]).then((value) {
+            if (value && multiSelectMode) {
+              setState(() {
+                multiSelectMode = false;
+                selectedComics.clear();
+              });
+            }
+          });
+        },
+      ),
+      ...exportActions([comic]),
+    ];
+  }
+
+  /// 封面墙。列数按屏宽算：132 是「每列至少这么宽」的下限。
+  ///
+  /// 用 round 而不是 floor：390/132 = 2.95，floor 会砍成 2 列，手机上一排
+  /// 只有两张封面。平板自然落到 5~6 列，不用另开一档。
+  Widget _buildGrid(BuildContext context) {
+    final width = MediaQuery.sizeOf(context).width;
+    final cols = (width / 132).round().clamp(2, 6);
+    return SliverPadding(
+      padding: const EdgeInsets.fromLTRB(12, 4, 12, 16),
+      sliver: SliverGrid(
+        gridDelegate: SliverGridDelegateWithFixedCrossAxisCount(
+          crossAxisCount: cols,
+          mainAxisSpacing: 14,
+          crossAxisSpacing: 10,
+          childAspectRatio: 0.58,
+        ),
+        delegate: SliverChildBuilderDelegate((context, index) {
+          final comic = comics[index];
+          return _LocalComicGridTile(
+            key: ValueKey("grid:${comic.comicType.value}:${comic.id}"),
+            comic: comic,
+            heroID: index,
+            selected: selectedComics.containsKey(comic),
+            selecting: multiSelectMode,
+            onTap: () => openOrSelect(comic, index),
+            onLongPress: () {
+              setState(() {
+                multiSelectMode = true;
+                selectedComics[comic] = true;
+              });
+            },
+            menu: buildComicMenu(comic),
+          );
+        }, childCount: comics.length),
+      ),
+    );
+  }
+
   @override
   Widget build(BuildContext context) {
     List<Widget> selectActions = [
       IconButton(
-          icon: const Icon(Icons.select_all),
-          tooltip: "Select All".tl,
-          onPressed: selectAll),
+        icon: const Icon(Icons.select_all),
+        tooltip: "Select All".tl,
+        onPressed: selectAll,
+      ),
       IconButton(
-          icon: const Icon(Icons.deselect),
-          tooltip: "Deselect".tl,
-          onPressed: deSelect),
+        icon: const Icon(Icons.deselect),
+        tooltip: "Deselect".tl,
+        onPressed: deSelect,
+      ),
       IconButton(
-          icon: const Icon(Icons.flip),
-          tooltip: "Invert Selection".tl,
-          onPressed: invertSelection),
+        icon: const Icon(Icons.flip),
+        tooltip: "Invert Selection".tl,
+        onPressed: invertSelection,
+      ),
       buildMultiSelectMenu(),
     ];
 
@@ -278,10 +393,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
       ),
       Tooltip(
         message: "Sort".tl,
-        child: IconButton(
-          icon: const Icon(Icons.sort),
-          onPressed: sort,
-        ),
+        child: IconButton(icon: const Icon(Icons.sort), onPressed: sort),
       ),
       Tooltip(
         message: "Downloading".tl,
@@ -290,6 +402,15 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
           onPressed: () {
             showPopUpWidget(context, const DownloadingPage());
           },
+        ),
+      ),
+      Tooltip(
+        message: gridMode ? "List view".tl : "Grid view".tl,
+        child: IconButton(
+          icon: Icon(
+            gridMode ? Icons.view_agenda_outlined : Icons.grid_view_rounded,
+          ),
+          onPressed: toggleLayout,
         ),
       ),
     ];
@@ -368,10 +489,10 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
             SliverToBoxAdapter(child: _DownloadingSection()),
           if (comics.isEmpty)
             SliverToBoxAdapter(
-              child: _LocalEmptyHint(
-                hasKeyword: keyword.isNotEmpty,
-              ),
+              child: _LocalEmptyHint(hasKeyword: keyword.isNotEmpty),
             )
+          else if (gridMode)
+            _buildGrid(context)
           else
             SliverList.builder(
               itemCount: comics.length,
@@ -383,24 +504,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   heroID: index,
                   selected: selectedComics.containsKey(comic),
                   selecting: multiSelectMode,
-                  onTap: () {
-                    if (multiSelectMode) {
-                      setState(() {
-                        if (selectedComics.containsKey(comic)) {
-                          selectedComics.remove(comic);
-                        } else {
-                          selectedComics[comic] = true;
-                        }
-                        if (selectedComics.isEmpty) {
-                          multiSelectMode = false;
-                        }
-                      });
-                    } else {
-                      // 点封面进详情页，不再一步跳进阅读器：简介、章节、来源
-                      // 都在详情页上，想直接读点「开始阅读」也只多一下。
-                      LocalComicPage.open(context, comic, heroID: index);
-                    }
-                  },
+                  onTap: () => openOrSelect(comic, index),
                   onLongPress: () {
                     setState(() {
                       multiSelectMode = true;
@@ -410,38 +514,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
                   // 点整行就是进详情页，这里不再放「View Detail」。
                   // 多选菜单里那一条要保留：多选态下点行是切换勾选，
                   // 没有别的路径能进详情。
-                  menu: [
-                    MenuEntry(
-                      icon: Icons.folder_open,
-                      text: "Open Folder".tl,
-                      onClick: () {
-                        openComicFolder(comic);
-                      },
-                    ),
-                    if (comic.comicType.comicSource?.loadComicPages != null)
-                      MenuEntry(
-                        icon: Icons.fact_check_outlined,
-                        text: "Check missing chapters".tl,
-                        onClick: () {
-                          MissingChaptersPage.show(context, comic);
-                        },
-                      ),
-                    MenuEntry(
-                      icon: Icons.delete,
-                      text: "Delete".tl,
-                      onClick: () {
-                        deleteComics([comic]).then((value) {
-                          if (value && multiSelectMode) {
-                            setState(() {
-                              multiSelectMode = false;
-                              selectedComics.clear();
-                            });
-                          }
-                        });
-                      },
-                    ),
-                    ...exportActions([comic]),
-                  ],
+                  menu: buildComicMenu(comic),
                 );
               },
             ),
@@ -477,60 +550,62 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
       builder: (context) {
         bool removeComicFile = true;
         bool removeFavoriteAndHistory = true;
-        return StatefulBuilder(builder: (context, state) {
-          return ContentDialog(
-            title: "Delete".tl,
-            content: Column(
-              children: [
-                CheckboxListTile(
-                  title: Text("Remove local favorite and history".tl),
-                  value: removeFavoriteAndHistory,
-                  onChanged: (v) {
-                    state(() {
-                      removeFavoriteAndHistory = !removeFavoriteAndHistory;
-                    });
-                  },
-                ),
-                CheckboxListTile(
-                  title: Text("Also remove files on disk".tl),
-                  value: removeComicFile,
-                  onChanged: (v) {
-                    state(() {
-                      removeComicFile = !removeComicFile;
-                    });
-                  },
-                )
-              ],
-            ),
-            actions: [
-              if (comics.length == 1 && comics.first.hasChapters)
-                TextButton(
-                  child: Text("Delete Chapters".tl),
+        return StatefulBuilder(
+          builder: (context, state) {
+            return ContentDialog(
+              title: "Delete".tl,
+              content: Column(
+                children: [
+                  CheckboxListTile(
+                    title: Text("Remove local favorite and history".tl),
+                    value: removeFavoriteAndHistory,
+                    onChanged: (v) {
+                      state(() {
+                        removeFavoriteAndHistory = !removeFavoriteAndHistory;
+                      });
+                    },
+                  ),
+                  CheckboxListTile(
+                    title: Text("Also remove files on disk".tl),
+                    value: removeComicFile,
+                    onChanged: (v) {
+                      state(() {
+                        removeComicFile = !removeComicFile;
+                      });
+                    },
+                  ),
+                ],
+              ),
+              actions: [
+                if (comics.length == 1 && comics.first.hasChapters)
+                  TextButton(
+                    child: Text("Delete Chapters".tl),
+                    onPressed: () {
+                      context.pop();
+                      showDeleteChaptersPopWindow(context, comics.first);
+                    },
+                  ),
+                FilledButton(
                   onPressed: () {
                     context.pop();
-                    showDeleteChaptersPopWindow(context, comics.first);
+                    LocalManager().batchDeleteComics(
+                      comics,
+                      removeComicFile,
+                      removeFavoriteAndHistory,
+                    );
+                    // 删掉的书不该继续在隐式缓存里留着体积和更新记录。
+                    for (final comic in comics) {
+                      LocalInsights().forgetSize(comic);
+                      LocalInsights().forgetUpdates(comic);
+                    }
+                    isDeleted = true;
                   },
+                  child: Text("Confirm".tl),
                 ),
-              FilledButton(
-                onPressed: () {
-                  context.pop();
-                  LocalManager().batchDeleteComics(
-                    comics,
-                    removeComicFile,
-                    removeFavoriteAndHistory,
-                  );
-                  // 删掉的书不该继续在隐式缓存里留着体积和更新记录。
-                  for (final comic in comics) {
-                    LocalInsights().forgetSize(comic);
-                    LocalInsights().forgetUpdates(comic);
-                  }
-                  isDeleted = true;
-                },
-                child: Text("Confirm".tl),
-              ),
-            ],
-          );
-        });
+              ],
+            );
+          },
+        );
       },
     );
     return isDeleted;
@@ -558,7 +633,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
         onClick: () async {
           exportLocalComics(context, comics, createEpubWithLocalComic, ".epub");
         },
-      )
+      ),
     ];
   }
 }
@@ -602,8 +677,9 @@ Future<void> exportLocalComics(
       await export(comic, fileName);
       current++;
       if (comics.length > 1) {
-        loadingController
-            .setMessage("${"Exporting".tl} $current/${comics.length}");
+        loadingController.setMessage(
+          "${"Exporting".tl} $current/${comics.length}",
+        );
         loadingController.setProgress(current / comics.length);
       }
       if (canceled) {
@@ -612,10 +688,7 @@ Future<void> exportLocalComics(
     }
     // For single comic, just save the file
     if (comics.length == 1) {
-      await saveFile(
-        file: File(fileName),
-        filename: File(fileName).name,
-      );
+      await saveFile(file: File(fileName), filename: File(fileName).name);
       Directory(cacheDir).deleteSync(recursive: true);
       loadingController.close();
       return;
@@ -636,16 +709,13 @@ Future<void> exportLocalComics(
   } finally {
     Directory(cacheDir).deleteIgnoreError(recursive: true);
   }
-  await saveFile(
-    file: File(outFile),
-    filename: "comics_export.zip",
-  );
+  await saveFile(file: File(outFile), filename: "comics_export.zip");
   loadingController.close();
   File(outFile).deleteIgnoreError();
 }
 
-typedef ExportComicFunc = Future<File> Function(
-    LocalComic comic, String outFilePath);
+typedef ExportComicFunc =
+    Future<File> Function(LocalComic comic, String outFilePath);
 
 /// Opens the folder containing the comic in the system file explorer
 Future<void> openComicFolder(LocalComic comic) async {
@@ -656,10 +726,10 @@ Future<void> openComicFolder(LocalComic comic) async {
     // FileUriExposedException（用户看到的那条 Failed to open folder）。
     bool opened = false;
     try {
-      opened = await _folderChannel.invokeMethod<bool>(
-            'openFolder',
-            {'path': folderPath},
-          ) ??
+      opened =
+          await _folderChannel.invokeMethod<bool>('openFolder', {
+            'path': folderPath,
+          }) ??
           false;
     } catch (e, s) {
       Log.error("Open Folder", "native openFolder failed: $e", s);
@@ -767,51 +837,53 @@ void showDeleteChaptersPopWindow(BuildContext context, LocalComic comic) {
     context,
     PopUpWidgetScaffold(
       title: "Delete Chapters".tl,
-      body: StatefulBuilder(builder: (context, setState) {
-        return Column(
-          children: [
-            Expanded(
-              child: ListView.builder(
-                itemCount: comic.downloadedChapters.length,
-                itemBuilder: (context, index) {
-                  var id = comic.downloadedChapters[index];
-                  var chapter = comic.chapters![id] ?? "Unknown Chapter";
-                  return CheckboxListTile(
-                    title: Text(chapter),
-                    value: chapters.contains(id),
-                    onChanged: (v) {
-                      setState(() {
-                        if (v == true) {
-                          chapters.add(id);
-                        } else {
-                          chapters.remove(id);
-                        }
-                      });
-                    },
-                  );
-                },
+      body: StatefulBuilder(
+        builder: (context, setState) {
+          return Column(
+            children: [
+              Expanded(
+                child: ListView.builder(
+                  itemCount: comic.downloadedChapters.length,
+                  itemBuilder: (context, index) {
+                    var id = comic.downloadedChapters[index];
+                    var chapter = comic.chapters![id] ?? "Unknown Chapter";
+                    return CheckboxListTile(
+                      title: Text(chapter),
+                      value: chapters.contains(id),
+                      onChanged: (v) {
+                        setState(() {
+                          if (v == true) {
+                            chapters.add(id);
+                          } else {
+                            chapters.remove(id);
+                          }
+                        });
+                      },
+                    );
+                  },
+                ),
               ),
-            ),
-            Padding(
-              padding: const EdgeInsets.all(8.0),
-              child: Row(
-                mainAxisAlignment: MainAxisAlignment.end,
-                children: [
-                  FilledButton(
-                    onPressed: () {
-                      Future.delayed(const Duration(milliseconds: 200), () {
-                        LocalManager().deleteComicChapters(comic, chapters);
-                      });
-                      App.rootContext.pop();
-                    },
-                    child: Text("Submit".tl),
-                  )
-                ],
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  mainAxisAlignment: MainAxisAlignment.end,
+                  children: [
+                    FilledButton(
+                      onPressed: () {
+                        Future.delayed(const Duration(milliseconds: 200), () {
+                          LocalManager().deleteComicChapters(comic, chapters);
+                        });
+                        App.rootContext.pop();
+                      },
+                      child: Text("Submit".tl),
+                    ),
+                  ],
+                ),
               ),
-            )
-          ],
-        );
-      }),
+            ],
+          );
+        },
+      ),
     ),
   );
 }
@@ -854,10 +926,7 @@ class _DownloadingSection extends StatelessWidget {
         children: [
           Row(
             children: [
-              Text(
-                "Downloading".tl,
-                style: ts.s14.bold,
-              ),
+              Text("Downloading".tl, style: ts.s14.bold),
               const SizedBox(width: 6),
               Text(
                 "${tasks.length}",
@@ -902,6 +971,182 @@ class _DownloadingSection extends StatelessWidget {
 ///
 /// 原来是封面网格，一眼只能看到标题。改成横排之后一行能说清三件事：占了多少
 /// 空间、读到哪了、网源那边有没有新章节——这三个都是「要不要点进去」的判断
+/// 网格模式下的一本书。
+///
+/// 详情行那套东西（进度条、体积、阅读位置）在 110 宽的格子里塞不下，只留
+/// 最要紧的两项：封面上的阅读进度、标题下面一行「3/20」。体积仍在详情页里。
+class _LocalComicGridTile extends StatefulWidget {
+  const _LocalComicGridTile({
+    super.key,
+    required this.comic,
+    required this.heroID,
+    required this.selected,
+    required this.selecting,
+    required this.onTap,
+    required this.onLongPress,
+    required this.menu,
+  });
+
+  final LocalComic comic;
+
+  final int heroID;
+
+  final bool selected;
+
+  final bool selecting;
+
+  final VoidCallback onTap;
+
+  final VoidCallback onLongPress;
+
+  final List<MenuEntry> menu;
+
+  @override
+  State<_LocalComicGridTile> createState() => _LocalComicGridTileState();
+}
+
+class _LocalComicGridTileState extends State<_LocalComicGridTile> {
+  late final Listenable _listenable = Listenable.merge([
+    LocalInsights(),
+    HistoryManager(),
+  ]);
+
+  @override
+  Widget build(BuildContext context) {
+    final colors = context.colorScheme;
+    return ListenableBuilder(
+      listenable: _listenable,
+      builder: (context, _) {
+        final insights = LocalInsights();
+        final progress = insights.progressOf(widget.comic);
+        final update = insights.updateOf(widget.comic);
+        return GestureDetector(
+          onTap: widget.onTap,
+          onLongPress: widget.onLongPress,
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Expanded(
+                child: Stack(
+                  children: [
+                    Positioned.fill(child: _buildCover(colors)),
+                    if (widget.selected)
+                      Positioned.fill(
+                        child: IgnorePointer(
+                          child: DecoratedBox(
+                            decoration: BoxDecoration(
+                              color: colors.primary.withValues(alpha: 0.18),
+                              borderRadius: BorderRadius.circular(10),
+                              border: Border.all(
+                                color: colors.primary,
+                                width: 2,
+                              ),
+                            ),
+                          ),
+                        ),
+                      ),
+                    if (update?.hasUpdate == true)
+                      Positioned(
+                        right: 6,
+                        top: 6,
+                        child: _UpdateBadge(count: update!.newChapters),
+                      ),
+                    if (!widget.selecting)
+                      Positioned(
+                        right: 2,
+                        bottom: 2,
+                        child: _buildMenuButton(colors),
+                      ),
+                    Positioned(
+                      left: 6,
+                      bottom: 6,
+                      child: _buildProgressPill(colors, progress),
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 6),
+              Text(
+                widget.comic.title,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: ts.s12.bold,
+              ),
+              const SizedBox(height: 2),
+              Text(
+                progress.totalChapters > 0
+                    ? "${progress.readChapters}/${progress.totalChapters}"
+                    : "Unread".tl,
+                maxLines: 1,
+                overflow: TextOverflow.ellipsis,
+                style: ts.s10.copyWith(color: colors.onSurfaceVariant),
+              ),
+            ],
+          ),
+        );
+      },
+    );
+  }
+
+  Widget _buildCover(ColorScheme colors) {
+    return Hero(
+      tag: "cover${widget.heroID}",
+      child: Container(
+        clipBehavior: Clip.antiAlias,
+        decoration: BoxDecoration(
+          color: colors.primaryContainer,
+          borderRadius: BorderRadius.circular(10),
+        ),
+        child: AnimatedImage(
+          image: CachedImageProvider("file://${widget.comic.coverFile.path}"),
+          cacheWidth: kCoverDecodeWidth,
+          width: double.infinity,
+          height: double.infinity,
+        ),
+      ),
+    );
+  }
+
+  /// 封面左下角那一小块「3/20」，压在图上所以得自带底色。
+  Widget _buildProgressPill(ColorScheme colors, ReadProgressInfo progress) {
+    if (progress.totalChapters <= 0) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
+      decoration: BoxDecoration(
+        color: colors.scrim.withValues(alpha: 0.55),
+        borderRadius: BorderRadius.circular(6),
+      ),
+      child: Text(
+        "${progress.readChapters}/${progress.totalChapters}",
+        style: ts.s10.copyWith(color: colors.surface),
+      ),
+    );
+  }
+
+  /// 长按是多选（和详情行一致），菜单就只能另开一个口子：封面右下角这个点。
+  /// 全部塞进长按会和列表页的操作对不上。
+  Widget _buildMenuButton(ColorScheme colors) {
+    return GestureDetector(
+      behavior: HitTestBehavior.opaque,
+      onTap: () {
+        final box = context.findRenderObject() as RenderBox?;
+        if (box == null) return;
+        showMenuX(context, box.localToGlobal(Offset.zero), widget.menu);
+      },
+      child: Container(
+        padding: const EdgeInsets.all(2),
+        decoration: BoxDecoration(
+          color: colors.scrim.withValues(alpha: 0.45),
+          shape: BoxShape.circle,
+        ),
+        child: Icon(Icons.more_horiz, size: 14, color: colors.surface),
+      ),
+    );
+  }
+}
+
 /// 依据，藏在详情页里就白做了。
 class _LocalComicTile extends StatefulWidget {
   const _LocalComicTile({

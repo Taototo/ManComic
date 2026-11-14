@@ -50,7 +50,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Test connection'.tl), findsOneWidget);
+    expect(find.text('Test all'.tl), findsOneWidget);
     expect(find.text('Enable'.tl), findsOneWidget);
   });
 
@@ -64,7 +64,7 @@ void main() {
     await tester.pump(const Duration(milliseconds: 600));
 
     expect(tester.takeException(), isNull);
-    expect(find.text('Test connection'.tl), findsOneWidget);
+    expect(find.text('Test all'.tl), findsOneWidget);
   });
 
   testWidgets('嵌入模式下不再画自己的标题栏', (tester) async {

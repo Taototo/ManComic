@@ -57,5 +57,6 @@ part 'effects.dart';
 part 'liquid_glass_engine.dart';
 part 'glass_menu.dart';
 part 'glass_segment.dart';
+part 'ladder_icon.dart';
 part 'gesture.dart';
 part 'code.dart';

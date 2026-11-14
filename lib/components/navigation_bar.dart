@@ -19,6 +19,10 @@ class PaneActionEntry {
 
   IconData icon;
 
+  /// 自定义图标（IconData 表达不出来的形状）。
+  /// 给了它就替换 [icon]，后者仍必填，只作兜底。
+  Widget? iconWidget;
+
   VoidCallback? onTap;
 
   /// 需要「贴着按钮弹菜单」的操作（收藏页的「更多」）。
@@ -37,6 +41,7 @@ class PaneActionEntry {
   PaneActionEntry({
     required this.label,
     required this.icon,
+    this.iconWidget,
     this.onTap,
     this.onTapWithAnchor,
     this.color,
@@ -47,11 +52,7 @@ class PaneActionEntry {
 ///
 /// 拆成纯函数是因为它直接决定 App 退不退出，写错方向很难察觉：
 /// 太宽松会在提示消失后仍然一滑就退，太严格则永远退不出去。
-bool isSecondExitAttempt(
-  DateTime? lastAttempt,
-  DateTime now,
-  Duration window,
-) {
+bool isSecondExitAttempt(DateTime? lastAttempt, DateTime now, Duration window) {
   if (lastAttempt == null) return false;
   final delta = now.difference(lastAttempt);
   // 系统时间被调整时会算出负数，按「不退出」处理更安全。
@@ -157,7 +158,9 @@ class NaviPaneState extends State<NaviPane>
   static const _kTopBarHeight = 48.0;
 
   double get bottomBarHeight =>
-      _kBottomBarHeight + _kBottomBarMargin + MediaQuery.of(context).padding.bottom;
+      _kBottomBarHeight +
+      _kBottomBarMargin +
+      MediaQuery.of(context).padding.bottom;
 
   /// 当前是否显示顶栏。
   ///
@@ -301,10 +304,7 @@ class NaviPaneState extends State<NaviPane>
           ],
         );
         if (sideInsets != EdgeInsets.zero) {
-          content = Padding(
-            padding: sideInsets,
-            child: content,
-          );
+          content = Padding(padding: sideInsets, child: content);
         }
         return content;
       },
@@ -429,13 +429,13 @@ class NaviPaneState extends State<NaviPane>
                           key: ValueKey(currentPage),
                           child:
                               widget.titleBuilder?.call(currentPage, context) ??
-                                  Text(
-                                    widget.paneItems[currentPage].label,
-                                    style: const TextStyle(
-                                      fontSize: 18,
-                                      fontWeight: FontWeight.bold,
-                                    ),
-                                  ),
+                              Text(
+                                widget.paneItems[currentPage].label,
+                                style: const TextStyle(
+                                  fontSize: 18,
+                                  fontWeight: FontWeight.bold,
+                                ),
+                              ),
                         ),
                       ),
                     ),
@@ -443,6 +443,7 @@ class NaviPaneState extends State<NaviPane>
                   for (var action in widget.paneActions)
                     _GlassActionButton(
                       icon: action.icon,
+                      iconWidget: action.iconWidget,
                       label: action.label,
                       color: action.color,
                       onTap: action.onTap,
@@ -453,11 +454,7 @@ class NaviPaneState extends State<NaviPane>
             ),
           ),
           if (header != null && extra > 0)
-            SizedBox(
-              height: extra,
-              width: double.infinity,
-              child: header,
-            ),
+            SizedBox(height: extra, width: double.infinity, child: header),
         ],
       ),
     );
@@ -465,8 +462,12 @@ class NaviPaneState extends State<NaviPane>
 
   Widget buildBottom() {
     final bottomInset = MediaQuery.of(context).padding.bottom;
-    final outer =
-        EdgeInsets.fromLTRB(14, 0, 14, bottomInset + _kBottomBarMargin);
+    final outer = EdgeInsets.fromLTRB(
+      14,
+      0,
+      14,
+      bottomInset + _kBottomBarMargin,
+    );
     // 液态开启时用包里完整的底栏：玻璃胶囊 + 会折射下方图标的果冻滑块。
     // 切换时滑块按弹簧曲线滑过去，途中横向拉伸、到站回弹——这正是
     // iOS 26 标签栏的那个动效，自绘的渐变色药丸做不出折射。
@@ -745,8 +746,8 @@ class _BottomNavBarState extends State<_BottomNavBar>
       builder: (context, constraints) {
         final itemWidth = constraints.maxWidth / count;
         final blobWidth = (itemWidth - 14).clamp(52.0, 92.0);
-        final left = itemWidth * widget.currentIndex +
-            (itemWidth - blobWidth) / 2;
+        final left =
+            itemWidth * widget.currentIndex + (itemWidth - blobWidth) / 2;
         return Stack(
           children: [
             AnimatedPositioned(
@@ -820,12 +821,15 @@ class _GlassActionButton extends StatefulWidget {
   const _GlassActionButton({
     required this.icon,
     required this.label,
+    this.iconWidget,
     this.color,
     this.onTap,
     this.onTapWithAnchor,
   });
 
   final IconData icon;
+
+  final Widget? iconWidget;
 
   final String label;
 
@@ -864,8 +868,8 @@ class _GlassActionButtonState extends State<_GlassActionButton> {
     final highlight = _pressed
         ? 0.14
         : _hovering
-            ? 0.07
-            : 0.0;
+        ? 0.07
+        : 0.0;
     return Tooltip(
       message: widget.label,
       child: MouseRegion(
@@ -894,12 +898,15 @@ class _GlassActionButtonState extends State<_GlassActionButton> {
                     shape: BoxShape.circle,
                     color: colors.onSurface.withValues(alpha: highlight),
                   ),
-                  child: Icon(
-                    widget.icon,
-                    size: 22,
-                    color: widget.color ??
-                        colors.onSurface.withValues(alpha: 0.86),
-                  ),
+                  child:
+                      widget.iconWidget ??
+                      Icon(
+                        widget.icon,
+                        size: 22,
+                        color:
+                            widget.color ??
+                            colors.onSurface.withValues(alpha: 0.86),
+                      ),
                 ),
               ),
             ),
@@ -1134,18 +1141,8 @@ class _NaviMainViewState extends State<_NaviMainView> {
         // 玻璃的 backdrop 读取一旦排在它栅格化之前，读到的就是空的。
         // 现在让页面直接画进同一趟 pass。
         Positioned.fill(child: page),
-        Positioned(
-          left: 0,
-          right: 0,
-          top: 0,
-          child: state.buildTop(),
-        ),
-        Positioned(
-          left: 0,
-          right: 0,
-          bottom: 0,
-          child: state.buildBottom(),
-        ),
+        Positioned(left: 0, right: 0, top: 0, child: state.buildTop()),
+        Positioned(left: 0, right: 0, bottom: 0, child: state.buildBottom()),
       ],
     );
   }

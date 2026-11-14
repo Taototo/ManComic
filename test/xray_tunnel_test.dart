@@ -227,5 +227,50 @@ trojan://pass@host:443#节点二
       expect(probe.message, isNotNull);
       expect(probe.milliseconds, isNull, reason: '失败时不该有耗时');
     });
+
+    test('批量测速的配置：每个入站钉一个出口', () {
+      final nodes = [
+        VpnNode(name: '香港', outbound: {'tag': '香港', 'protocol': 'vless'}),
+        VpnNode(name: '日本', outbound: {'tag': '日本', 'protocol': 'vless'}),
+      ];
+      final config =
+          jsonDecode(
+                XrayTunnel.buildProbeConfig(
+                  ports: [10001, 10002],
+                  nodes: nodes,
+                ),
+              )
+              as Map<String, dynamic>;
+
+      final inbounds = config['inbounds'] as List;
+      expect(inbounds.length, 2);
+      expect(inbounds.first['port'], 10001);
+      expect(inbounds.first['listen'], '127.0.0.1');
+      expect(
+        inbounds.first['protocol'],
+        'http',
+        reason: 'Dart 自带的 HttpClient 只认 HTTP 代理',
+      );
+
+      // 一个进程只能跑一个 Xray，所以 N 个节点靠 routing 分到 N 个入站上；
+      // 这条对应关系错了，测出来的就全是同一个节点的结果。
+      final rules = (config['routing'] as Map)['rules'] as List;
+      expect(rules.length, 2);
+      expect(rules[1]['inboundTag'], ['probe-1']);
+      expect(rules[1]['outboundTag'], '日本');
+      expect((config['outbounds'] as List).length, 2);
+    });
+
+    test('端口不够时按少的那个来，不能越界', () {
+      final nodes = [
+        VpnNode(name: 'A', outbound: {'tag': 'A'}),
+        VpnNode(name: 'B', outbound: {'tag': 'B'}),
+      ];
+      final config =
+          jsonDecode(XrayTunnel.buildProbeConfig(ports: [10001], nodes: nodes))
+              as Map<String, dynamic>;
+      expect((config['inbounds'] as List).length, 1);
+      expect((config['outbounds'] as List).length, 1);
+    });
   });
 }
