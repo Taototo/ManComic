@@ -84,9 +84,11 @@ class SubscriptionService {
   /// 拉取并解析。失败抛异常，由调用方显示原因。
   static Future<VpnSubscription> refresh(String url) async {
     final text = await _fetch(url);
-    final plain = await XrayCore.decodeSubscription(text);
+    final plain = plainSubscriptionText(await _decrypt(text));
     final links = splitShareLinks(plain);
     if (links.isEmpty) {
+      // 原文只进日志：里面可能带 token。
+      Log.error('Xray', '订阅解析不出节点，开头是: ${_preview(plain)}');
       throw XrayException('订阅里没有节点');
     }
     // 核心能吃的那部分直接交给它（vmess-aead / vless / ss / trojan / hysteria2），
@@ -106,14 +108,23 @@ class SubscriptionService {
 
     final nodes = <VpnNode>[];
     if (supported.isNotEmpty) {
-      final outbounds = await XrayCore.convertLinks(supported.join('\n'));
-      for (final outbound in outbounds) {
-        nodes.add(
-          VpnNode(
-            name: (outbound['tag'] ?? '').toString().trim(),
-            outbound: outbound,
-          ),
-        );
+      try {
+        final outbounds = await XrayCore.convertLinks(supported.join('\n'));
+        for (final outbound in outbounds) {
+          nodes.add(
+            VpnNode(
+              name: (outbound['tag'] ?? '').toString().trim(),
+              outbound: outbound,
+            ),
+          );
+        }
+      } on XrayException catch (e) {
+        // 核心整批失败（一条都转不出来）时别把异常原样抛给用户：
+        // "no valid outbound found" 看不出是协议不支持还是链接坏了。
+        Log.error('Xray', '分享链接转换失败（${supported.length} 条）: ${e.message}');
+        if (legacy.isEmpty) {
+          throw XrayException('订阅里的节点都无法解析');
+        }
       }
     }
     for (final outbound in legacy) {
@@ -125,7 +136,7 @@ class SubscriptionService {
       );
     }
     if (nodes.isEmpty) {
-      throw XrayException('订阅里的节点都无法解析');
+      throw XrayException('${links.length} 条链接都无法解析');
     }
     // 名字为空或不唯一时补个序号：Xray 的 outbound tag 必须唯一。
     final seen = <String>{};
@@ -146,11 +157,29 @@ class SubscriptionService {
       );
     }
 
+    // 机场爱把「剩余流量：798.52 GB」「套餐到期：长期有效」做成节点塞在最前面，
+    // 复用一台真实机器。它们能连，但选中时界面只显示一串账单信息，看不出是哪个
+    // 地区。挪到列表末尾：默认选中项（nodes.first）就落在一个真节点上。
+    final ordered = [
+      ...nodes.where((n) => !isInfoNode(n.name)),
+      ...nodes.where((n) => isInfoNode(n.name)),
+    ];
+
     return VpnSubscription(
       url: url,
       updatedAt: DateTime.now().millisecondsSinceEpoch,
-      nodes: nodes,
+      nodes: ordered,
     );
+  }
+
+  /// 这个名字像不像「用节点名传话」的信息条（流量余额、到期时间等）。
+  static bool isInfoNode(String name) {
+    final flat = name.replaceAll(RegExp(r'[\s\u3000]+'), '');
+    if (flat.isEmpty) {
+      return false;
+    }
+    const prefixes = ['剩余流量', '套餐到期', '到期时间', '套餐', '官网', '订阅', '有效期'];
+    return prefixes.any(flat.startsWith);
   }
 
   static Future<String> _fetch(String url) async {
@@ -175,6 +204,62 @@ class SubscriptionService {
       throw XrayException('订阅内容为空');
     }
     return body;
+  }
+
+  /// age 加密的订阅交给核心解；非加密文本它会原样返回。
+  ///
+  /// 明文直接跳过这一步：每次都要过一次 MethodChannel + Go，没必要。
+  static Future<String> _decrypt(String raw) async {
+    final text = raw.trim();
+    if (text.contains('://')) {
+      return text;
+    }
+    try {
+      final decoded = await XrayCore.decodeSubscription(text);
+      if (decoded.trim().isNotEmpty) {
+        return decoded;
+      }
+    } catch (e) {
+      // 核心不认识就交给本地的 base64 兜底，不要因为这一步把订阅整个否掉。
+      Log.error('Xray', '订阅解密失败: $e');
+    }
+    return text;
+  }
+
+  /// 把订阅原文变成「一行一条分享链接」的明文。
+  ///
+  /// **核心不解 base64**：`decodeSubscriptionText` 只处理 age 加密
+  /// （`share/decode_subscription.go` 里就一次 `decryptShareText`），而绝大多数
+  /// 机场发的正是 base64。之前拿核心的返回值直接按行找 `vless://`，明文其实还
+  /// 是那串 base64，于是一条都找不到，界面报「订阅里没有节点」——同一个链接在
+  /// v2rayNG 里明明好好的。
+  static String plainSubscriptionText(String raw) {
+    final text = raw.trim();
+    if (text.isEmpty || text.contains('://')) {
+      return text;
+    }
+    return _tryBase64(text) ?? text;
+  }
+
+  /// 整段 base64 → 明文。只认「解出来确实含 `://`」的结果，别把乱码当成功。
+  static String? _tryBase64(String text) {
+    final packed = text.replaceAll(RegExp(r'\s'), '');
+    if (packed.length < 16) {
+      return null;
+    }
+    try {
+      // allowMalformed 默认 false：html 错误页解出来的乱码会被拒掉。
+      final plain = utf8.decode(base64Decode(base64Normalize(packed)));
+      return plain.contains('://') ? plain : null;
+    } catch (_) {
+      return null;
+    }
+  }
+
+  /// 日志用，截断到 80 字（订阅里带 token，不能整段进日志文件）。
+  static String _preview(String text) {
+    final flat = text.replaceAll(RegExp(r'\s+'), ' ').trim();
+    return flat.length <= 80 ? flat : '${flat.substring(0, 80)}…';
   }
 
   /// 把订阅明文拆成一条条分享链接。

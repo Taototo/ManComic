@@ -35,6 +35,62 @@ trojan://pass@host:443#节点二
     });
   });
 
+  group('订阅原文解码', () {
+    // 真实的机场订阅就是这个形状：整段 base64，解出来才是每行一条 vless://。
+    const plain =
+        'vless://38f85244-d8c2-4cc3-9f42-3066712f5b01@a.example.com:443'
+        '?type=tcp&security=reality&sni=updates.cdn-apple.com&pbk=70V0&sid=3191#日本节点\n'
+        'vless://38f85244-d8c2-4cc3-9f42-3066712f5b01@b.example.com:443'
+        '?type=ws&security=tls&sni=viphk1.example.com#香港节点';
+
+    test('核心只解 age、不解 base64，所以这一层必须自己兜住', () {
+      final packed = base64Encode(utf8.encode(plain));
+      final decoded = SubscriptionService.plainSubscriptionText(packed);
+      expect(decoded, plain);
+      expect(SubscriptionService.splitShareLinks(decoded), hasLength(2));
+    });
+
+    test('url-safe、缺 padding、夹换行和空白也要解开', () {
+      var packed = base64Encode(
+        utf8.encode(plain),
+      ).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '');
+      // 订阅站常把长 base64 折行
+      packed = '${packed.substring(0, 20)}\r\n${packed.substring(20)}';
+      expect(SubscriptionService.plainSubscriptionText(packed), plain);
+    });
+
+    test('已经是明文就原样返回，不去动它', () {
+      expect(SubscriptionService.plainSubscriptionText(plain), plain);
+      expect(
+        SubscriptionService.plainSubscriptionText('  $plain  '),
+        plain,
+        reason: '两侧空白要 trim 掉',
+      );
+    });
+
+    test('html 错误页、纯广告词不会被当成 base64', () {
+      const page = '<!DOCTYPE html><html><body>token 无效</body></html>';
+      expect(SubscriptionService.plainSubscriptionText(page), page);
+      expect(
+        SubscriptionService.splitShareLinks(
+          SubscriptionService.plainSubscriptionText(page),
+        ),
+        isEmpty,
+        reason: '解不出来就该是空列表，由上层报「订阅里没有节点」',
+      );
+    });
+
+    test('用节点名传话的信息条认得出来，真节点不误伤', () {
+      expect(SubscriptionService.isInfoNode('剩余流量：798.52 GB'), isTrue);
+      expect(SubscriptionService.isInfoNode('套餐到期：长期有效'), isTrue);
+      expect(SubscriptionService.isInfoNode(' 到期时间 2027-01-01'), isTrue);
+      // 真节点的名字里也可能带「套餐」以外的字样，不能一眼当成信息条
+      expect(SubscriptionService.isInfoNode('🇯🇵日本•移联01'), isFalse);
+      expect(SubscriptionService.isInfoNode('香港 01'), isFalse);
+      expect(SubscriptionService.isInfoNode(''), isFalse);
+    });
+  });
+
   group('老式 vmess:// 转 outbound', () {
     test('ws + tls 的基本字段', () {
       final outbound = SubscriptionService.legacyVmessToOutbound(
