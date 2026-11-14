@@ -19,6 +19,10 @@ class _NetworkSettingsState extends State<NetworkSettings> {
           builder: () => const _ProxySettingView(),
         ).toSliver(),
         _PopupWindowSetting(
+          title: "Built-in proxy".tl,
+          builder: () => const XrayPage(),
+        ).toSliver(),
+        _PopupWindowSetting(
           title: "DNS Overrides".tl,
           builder: () => const _DNSOverrides(),
         ).toSliver(),

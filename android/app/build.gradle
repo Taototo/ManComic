@@ -26,7 +26,7 @@ if (flutterVersionName == null) {
 }
 
 // App display version. Bump the last segment (001 -> 002 ...) for every new build.
-def appVersionName = "1.4.70"
+def appVersionName = "1.4.71"
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
@@ -151,4 +151,11 @@ dependencies {
     implementation "androidx.activity:activity-ktx:1.10.1"
     implementation 'androidx.documentfile:documentfile:1.0.1'
     coreLibraryDesugaring 'com.android.tools:desugar_jdk_libs:2.1.4'
+    // 内置代理核心（Xray-core 的 gomobile 封装）。
+    //
+    // 只保留 arm 两个 ABI（已从 aar 里删掉 x86/x86_64），其余 ABI 的 .so 是
+    // 纯浪费：x86_64 在 release 里本来就要剔，x86 只有老模拟器用。
+    // 注意 libXray 里嵌了一个 Go runtime：一个进程只能有一份，别再往里加第二个
+    // Go/gomobile 库，否则会在加载阶段就崩。
+    implementation files('libs/libXray.aar')
 }

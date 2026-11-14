@@ -279,6 +279,13 @@ class MainActivity : FlutterFragmentActivity() {
 
     override fun configureFlutterEngine(flutterEngine: FlutterEngine) {
         GeneratedPluginRegistrant.registerWith(flutterEngine)
+
+        // 内置代理核心（Xray-core）。细节见 XrayBridge。
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mancomi/xray"
+        ).setMethodCallHandler { call, res -> XrayBridge.handle(call, res) }
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "venera/method_channel"

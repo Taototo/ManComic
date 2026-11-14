@@ -332,9 +332,12 @@ class RHttpAdapter implements HttpClientAdapter {
       dnsOverrides: overrides,
     );
     var settings = rhttp.ClientSettings(
+      // reqwest 的 Proxy 要一个带 scheme 的 URL。设置页历来只存 `host:port`
+      // （Dart 那套 `PROXY host:port` 就是这么写的），直接丢给 rhttp 会当成
+      // 非法 URL——代理于是从来没生效过。这里补默认的 http://。
       proxySettings: proxy == null
           ? const rhttp.ProxySettings.noProxy()
-          : rhttp.ProxySettings.proxy(proxy),
+          : rhttp.ProxySettings.proxy(withProxyScheme(proxy)),
       redirectSettings: const rhttp.RedirectSettings.limited(5),
       timeoutSettings: const rhttp.TimeoutSettings(
         connectTimeout: Duration(seconds: 15),

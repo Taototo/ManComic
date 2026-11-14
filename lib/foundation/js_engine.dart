@@ -248,7 +248,7 @@ class JsEngine with _JSEngineApi, JsUiApi, Init {
         dio.httpClientAdapter = IOHttpClientAdapter(
           createHttpClient: () {
             return HttpClient()
-              ..findProxy = (uri) => proxy == null ? "DIRECT" : "PROXY $proxy";
+              ..findProxy = (uri) => proxy == null ? "DIRECT" : "PROXY ${withoutProxyScheme(proxy)}";
           },
         );
         dio.interceptors

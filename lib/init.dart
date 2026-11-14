@@ -10,6 +10,7 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/display_refresh.dart';
 import 'package:venera/foundation/js_engine.dart';
+import 'package:venera/network/xray_tunnel.dart';
 import 'package:venera/background_tasks.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/local.dart';
@@ -150,6 +151,9 @@ Future<void> _initDeferredAndroidServices() async {
     await BackgroundTasks.initialize();
     await BackgroundTasks.syncSchedule();
   });
+  // 内置代理：上次开着就重新拉起。隧道只把代理覆盖在内存里，所以冷启动时
+  // 不会有残留的死端口，这里失败也只是回到直连/系统代理。
+  await _runSafely("Built-in Proxy", XrayTunnel.restore);
   await _runSafely("Display Mode", () async {
     // 先读一次屏幕信息（档位、最高刷新率），再按用户选择申请。
     // 申请失败不影响使用，Flutter 仍会跟随系统 vsync。
