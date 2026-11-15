@@ -579,25 +579,34 @@ class LocalManager with ChangeNotifier {
   Future<List<File>> _listPageFiles(Directory directory) async {
     var files = <File>[];
     await for (var entity in directory.list()) {
-      if (entity is File) {
-        // Do not exclude comic.cover, since it may be the first page of the chapter.
-        // A file with name starting with 'cover.' is not a comic page.
-        if (entity.name.startsWith('cover.')) {
-          continue;
-        }
-        //Hidden file in some file system
-        if (entity.name.startsWith('.')) {
-          continue;
-        }
-        // 下载时顺手写进漫画目录的详情快照（details.json）不是漫画页。
-        // 无章节的漫画所有图都在根目录，不排掉它就会出现「最后一页打不开」。
-        if (entity.name.endsWith('.json')) {
-          continue;
-        }
+      if (entity is File && isComicPageName(entity.name)) {
         files.add(entity);
       }
     }
     return files;
+  }
+
+  /// 文件名能不能当正文页。
+  ///
+  /// 规则只此一份：阅读（[_listPageFiles]）、导出、书库体检都调这里。以前
+  /// 导出各自 `listSync` 了一遍，三个格式全挂在同一处；体检再抄一份的话，
+  /// 「体检说 30 页、阅读器只有 29 页」这种对不上的账又会回来。
+  static bool isComicPageName(String name) {
+    // Do not exclude comic.cover, since it may be the first page of the chapter.
+    // A file with name starting with 'cover.' is not a comic page.
+    if (name.startsWith('cover.')) {
+      return false;
+    }
+    // Hidden file in some file system
+    if (name.startsWith('.')) {
+      return false;
+    }
+    // 下载时顺手写进漫画目录的详情快照（details.json）不是漫画页。
+    // 无章节的漫画所有图都在根目录，不排掉它就会出现「最后一页打不开」。
+    if (name.endsWith('.json')) {
+      return false;
+    }
+    return true;
   }
 
   /// 体检用：数一章的页，同时看出「中间有没有断号」。
@@ -1690,6 +1699,24 @@ class LocalManager with ChangeNotifier {
       }
     }
     remove(c.id, c.comicType);
+    notifyListeners();
+  }
+
+  /// 体检用：按磁盘上的真实情况重写「已下载章节」。
+  ///
+  /// 和 [deleteComicChapters] 的区别是它**不碰任何目录**——修复时多出来的
+  /// 那些章恰恰是记录漏标的，删掉就是丢用户已经下好的图。
+  ///
+  /// 空列表直接忽略：整本一章都不剩时该由调用方走 [deleteComic]，这里静默
+  /// 清空会让这本书变成「在库里、但一话都标着没下」的僵尸条目。
+  void setDownloadedChapters(LocalComic c, List<String> chapters) {
+    if (chapters.isEmpty) {
+      return;
+    }
+    _db.execute(
+      'UPDATE comics SET downloadedChapters = ? WHERE id = ? AND comic_type = ?;',
+      [jsonEncode(chapters), c.id, c.comicType.value],
+    );
     notifyListeners();
   }
 

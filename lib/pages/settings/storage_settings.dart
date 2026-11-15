@@ -100,6 +100,24 @@ class _StorageSettingsState extends State<StorageSettings> {
             ),
           ),
           _SettingPartTitle(
+            title: "Local library".tl,
+            icon: Icons.auto_stories_outlined,
+          ),
+          // 「本地漫画」那行的数字只告诉你占了多少，看不出里面有几个是没人
+          // 认领的残留目录、几本书的记录已经失效。那些数量只有扫一遍才知道，
+          // 所以入口单独放，不在这一页顺手扫（几百本的库扫起来要几秒）。
+          ListTile(
+            contentPadding: kSettingTilePadding,
+            leading: const Icon(Icons.health_and_safety_outlined),
+            title: Text("Library health".tl),
+            subtitle: Text(
+              "Find leftover folders and records that no longer match the device"
+                  .tl,
+            ),
+            trailing: const Icon(Icons.chevron_right),
+            onTap: () => LocalHealthPage.show(context),
+          ).toSliver(),
+          _SettingPartTitle(
             title: "Cache limit".tl,
             icon: Icons.tune_rounded,
           ),
