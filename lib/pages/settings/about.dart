@@ -1095,7 +1095,7 @@ class UpdateDownloadDialog extends StatelessWidget {
                     Align(
                       alignment: Alignment.centerRight,
                       child: Tooltip(
-                        message: "Download in background".tl,
+                        message: "Collapse".tl,
                         child: IconButton(
                           onPressed: onMinimize,
                           icon: const Icon(Icons.keyboard_arrow_down_rounded),
@@ -1141,15 +1141,15 @@ class UpdateDownloadDialog extends StatelessWidget {
                   ),
                 ),
                 const SizedBox(height: 8),
-                // 「后台下载」放在左边：收起不是中断，用户往往只是想边看
-                // 漫画边等；「取消」放右边且用更淡的颜色，避免误触。
+                // 「收起」放在左边：它只是把这张卡片收成悬浮条，下载照常
+                // 继续，不是中断；「取消」放右边且用更淡的颜色，避免误触。
                 Row(
                   children: [
                     Expanded(
                       child: Button.text(
                         onPressed: onMinimize,
                         child: Text(
-                          "Download in background".tl,
+                          "Collapse".tl,
                           style: TextStyle(
                             fontSize: 12.5,
                             color: cs.primary.withValues(alpha: 0.85),

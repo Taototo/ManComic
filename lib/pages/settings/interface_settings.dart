@@ -54,11 +54,11 @@ class _AppSettingsState extends State<AppSettings> {
         SelectSetting(
           title: "Initial Page".tl,
           settingKey: "initialPage",
+          // 编号和底栏顺序一致：0 主页、1 推荐、2 收藏。
           optionTranslation: {
-            '0': "Home Page".tl,
-            '1': "Explore Page".tl,
-            '2': "Categories Page".tl,
-            '3': "Favorites Page".tl,
+            '0': "Home".tl,
+            '1': "Explore".tl,
+            '2': "Favorites".tl,
           },
         ).toSliver(),
         _CallbackSetting(

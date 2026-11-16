@@ -55,6 +55,27 @@ bool isSecondExitAttempt(DateTime? lastAttempt, DateTime now, Duration window) {
   return delta <= window;
 }
 
+/// 退到最底层时，这一次返回应该干什么。
+enum RootBackAction {
+  /// 还在别的页面上：先回主页，什么都不提示。
+  goHome,
+
+  /// 已经在主页：走「再按一次退出」那一套。
+  exit,
+}
+
+/// 决定「最底层的这一次返回」是回主页还是退出。
+///
+/// 和 [isSecondExitAttempt] 一样拆成纯函数：这条规则写反了不会报错，
+/// 只会表现为「在推荐页侧滑一下就退出 App」或者「怎么滑都退不出去」，
+/// 两种都很难靠肉眼在真机上复现。
+RootBackAction rootBackAction({
+  required int currentPage,
+  required int homeIndex,
+}) {
+  return currentPage == homeIndex ? RootBackAction.exit : RootBackAction.goHome;
+}
+
 class NaviPane extends StatefulWidget {
   const NaviPane({
     required this.paneItems,
@@ -62,6 +83,7 @@ class NaviPane extends StatefulWidget {
     required this.pageBuilder,
     this.titleBuilder,
     this.initialPage = 0,
+    this.homeIndex = 0,
     this.onPageChanged,
     required this.observer,
     required this.navigatorKey,
@@ -101,6 +123,12 @@ class NaviPane extends StatefulWidget {
   final void Function(int index)? onPageChanged;
 
   final int initialPage;
+
+  /// 「主页」在 [paneItems] 里的序号，返回键退到最底层时先回这一页。
+  ///
+  /// 只有一页（或首页不在第一格）的宿主也按默认 0 走，不会因此变成
+  /// 「按返回一直原地打转」——[pageCount] 为 1 时它就是唯一那页。
+  final int homeIndex;
 
   final NaviObserver observer;
 
@@ -215,6 +243,15 @@ class NaviPaneState extends State<NaviPane>
   static const Duration _kExitConfirmWindow = Duration(seconds: 2);
 
   void _confirmExit() {
+    // 底栏是「主页 / 推荐 / 收藏」：用户从推荐页一路侧滑回来，期望落在
+    // 主页而不是直接撞上退出提示。回主页这一次不弹任何东西，也不参与
+    // 「再按一次」的计时；已经在主页了才轮到退出那一套。
+    final home = widget.homeIndex.clamp(0, widget.paneItems.length - 1);
+    if (rootBackAction(currentPage: _currentPage, homeIndex: home) ==
+        RootBackAction.goHome) {
+      updatePage(home);
+      return;
+    }
     // 只有 Android 有系统返回手势和返回键，其它平台不会走到这里。
     if (!App.isAndroid) {
       return;

@@ -16,6 +16,7 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/notification_service.dart';
 import 'package:venera/utils/download_background.dart';
+import 'package:venera/utils/data_sync.dart';
 import 'package:venera/foundation/startup_gate.dart';
 import 'package:venera/foundation/update_check_policy.dart';
 import 'package:venera/network/cookie_jar.dart';
@@ -110,6 +111,9 @@ Future<void> init() async {
   }
   CacheManager().setLimitSize(appdata.settings['cacheSize']);
   _checkOldConfigs();
+  // 自动同步只在启动时跑这一次：先拉、本地有没传的改动再补一推。
+  // 放在首帧之后，不占白屏时间；运行期间的任何改动只记账，不再整包上传。
+  _afterFirstFrame(() => DataSync().syncOnLaunch());
   if (App.isAndroid) {
     // 这两件必须赶在首帧之前：深链和分享要在 UI 起来时就能落地。
     handleLinks();

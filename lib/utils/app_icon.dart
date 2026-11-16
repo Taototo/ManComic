@@ -21,10 +21,12 @@ class AppIconOption {
 /// 第一项即默认图标（comic4.png 线稿恐龙）。
 /// key 与 Android 端 activity-alias 通过 [iconAliases] 一一对应，
 /// alias 组件名（Icon1/Icon2/Icon4/Icon5/Icon6）必须保持稳定，改名会导致桌面入口失效。
+///
+/// 「经典 / 霓虹」两套已经下架：它们的 alias 仍然留在 manifest 和原生映射里
+/// （删组件会让装过它们的用户桌面上直接没有图标），只是不再出现在选项里。
+/// 选过这两个的用户，`currentKey` 会落到默认图标，下次启动自动切回去。
 const List<AppIconOption> appIconOptions = [
   AppIconOption('default', 'Sketch', 'assets/icons/icon_0.png'),
-  AppIconOption('classic', 'Classic', 'assets/icons/icon_1.png'),
-  AppIconOption('neon', 'Neon', 'assets/icons/icon_2.png'),
   AppIconOption('cat', 'Cat', 'assets/icons/icon_3.png'),
   AppIconOption('logo', 'Logo', 'assets/icons/icon_4.png'),
 ];

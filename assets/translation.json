@@ -994,7 +994,8 @@
     "Library is clean": "书库很干净",
     "@a issues found": "发现 @a 个问题",
     "@a books checked": "已检查 @a 本",
-    "@a can be freed": "可释放 @a"
+    "@a can be freed": "可释放 @a",
+    "Collapse": "收起"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -1991,6 +1992,7 @@
     "Library is clean": "書庫很乾淨",
     "@a issues found": "發現 @a 個問題",
     "@a books checked": "已檢查 @a 本",
-    "@a can be freed": "可釋放 @a"
+    "@a can be freed": "可釋放 @a",
+    "Collapse": "收合"
   }
 }

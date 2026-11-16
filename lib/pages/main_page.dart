@@ -9,6 +9,7 @@ import 'package:venera/utils/translations.dart';
 
 import '../components/components.dart';
 import '../foundation/app.dart';
+import '../foundation/nav_order.dart';
 import 'explore_page.dart';
 import 'favorites/favorites_page.dart';
 import 'home_page.dart';
@@ -41,21 +42,15 @@ class _MainPageState extends State<MainPage> {
   /// 这里做一次性的索引迁移，避免老用户启动后落到错误的页面。
   static const _kNavMergedCategoriesKey = "navMergedCategories";
 
-  /// 底栏顺序：推荐 / 主页 / 收藏。
-  ///
-  /// 注意 [appdata.settings] 里的 `initialPage` 存的是「哪一页」而不是下标
-  /// （0 主页、1 推荐、2 收藏），设置页的文案也是按这个编号写的。底栏换了
-  /// 顺序以后两者不再相等，所以这里必须显式映射一次，不能直接把存下来的
-  /// 数字当索引用——否则老用户开机会落到隔壁那一页。
-  static const _tabExplore = 0;
-
-  static const _tabHome = 1;
-
-  static const _tabFavorites = 2;
+  // 底栏顺序见 [tabHome] / [tabExplore] / [tabFavorites]：主页、推荐、收藏。
+  // 设置里 `initialPage` 的编号和这套顺序一致，两者都在 nav_order.dart 里，
+  // 调顺序只改那一处，映射可以单测。
 
   int resolveInitialPage() {
     var saved = int.tryParse(appdata.settings['initialPage'].toString()) ?? 0;
     if (appdata.settings[_kNavMergedCategoriesKey] != "1") {
+      // 更早的底栏是「首页 / 发现 / 分类 / 收藏」，分类并入发现后用这段
+      // 把老编号折过来。只跑一次。
       saved = switch (saved) {
         2 => 1,
         3 => 2,
@@ -65,11 +60,7 @@ class _MainPageState extends State<MainPage> {
       appdata.settings[_kNavMergedCategoriesKey] = "1";
       appdata.saveData();
     }
-    return switch (saved) {
-      1 => _tabExplore,
-      2 => _tabFavorites,
-      _ => _tabHome,
-    };
+    return initialTabFromSetting(saved);
   }
 
   @override
@@ -79,8 +70,8 @@ class _MainPageState extends State<MainPage> {
     App.mainNavigatorKey = _navigatorKey;
     index = resolveInitialPage();
     _pages = [
-      ExplorePage(key: const PageStorageKey('explore'), group: _exploreGroup),
       const HomePage(),
+      ExplorePage(key: const PageStorageKey('explore'), group: _exploreGroup),
       FavoritesPage(
         key: const PageStorageKey('favorites'),
         folders: _favoritesFolders,
@@ -172,7 +163,7 @@ class _MainPageState extends State<MainPage> {
       // 收藏页则显示当前文件夹名——那条栏去掉以后，这里是唯一还写着
       // 「我在哪个文件夹」的地方。
       titleBuilder: (page, context) {
-        if (page == _tabFavorites) {
+        if (page == tabFavorites) {
           final title = _favoritesTopBar.title;
           if (title == null || title.isEmpty) {
             return const SizedBox.shrink();
@@ -190,7 +181,7 @@ class _MainPageState extends State<MainPage> {
             ),
           );
         }
-        if (page != _tabExplore) {
+        if (page != tabExplore) {
           return const SizedBox.shrink();
         }
         return AnimatedBuilder(
@@ -208,7 +199,7 @@ class _MainPageState extends State<MainPage> {
       // 整体让开这么多。两段玻璃合起来看就是一整块，不再有自己的磨砂底
       // 和自己的边缘高光。
       headerBuilder: (page, context) {
-        if (page != _tabExplore) {
+        if (page != tabExplore) {
           return null;
         }
         return AnimatedBuilder(
@@ -218,18 +209,20 @@ class _MainPageState extends State<MainPage> {
               const SizedBox.shrink(),
         );
       },
-      headerHeight: (page) =>
-          page == _tabExplore ? ExplorePage.tabBarHeight : 0,
+      headerHeight: (page) => page == tabExplore ? ExplorePage.tabBarHeight : 0,
+      // 第一格是主页：底栏最左边、也是返回键在别的页面退到底以后要回到的
+      // 那一页。
+      homeIndex: tabHome,
       paneItems: [
-        PaneItemEntry(
-          label: 'Explore'.tl,
-          icon: Icons.explore_outlined,
-          activeIcon: Icons.explore,
-        ),
         PaneItemEntry(
           label: 'Home'.tl,
           icon: Icons.home_outlined,
           activeIcon: Icons.home,
+        ),
+        PaneItemEntry(
+          label: 'Explore'.tl,
+          icon: Icons.explore_outlined,
+          activeIcon: Icons.explore,
         ),
         PaneItemEntry(
           label: 'Favorites'.tl,
@@ -245,12 +238,12 @@ class _MainPageState extends State<MainPage> {
       paneActions: [
         // 收藏页自己的按钮（同步 / 排序 / 多选 / 搜索 / 更多）。原来它们长在
         // 页面那条标题栏里，现在整条搬到顶栏，由页面登记、这里拼进来。
-        if (index == _tabFavorites) ..._favoritesTopBar.actions,
+        if (index == tabFavorites) ..._favoritesTopBar.actions,
         // 这里原本还有一颗「文件夹」图标，和标题点击是同一个入口——顶栏宽度
         // 只够 6 颗图标，同一件事占两处不值当，分类菜单只留标题那一下。
         // 收藏页自带「在当前文件夹里搜」的放大镜，这里再放一个全局搜索就是
         // 同一屏两颗放大镜（原来截图里那两个就是这么来的）。
-        if (index != _tabHome && index != _tabFavorites)
+        if (index != tabHome && index != tabFavorites)
           PaneActionEntry(
             icon: Icons.search,
             label: "Search".tl,
@@ -264,7 +257,7 @@ class _MainPageState extends State<MainPage> {
         // 基本就不再动了；而「详细 / 简洁」是「一张卡显示多少信息」，翻两页
         // 就想换一次——后者才是高频操作，放到顶栏才合理。布局本身仍在
         // 设置 - 界面 里。
-        if (index == _tabExplore)
+        if (index == tabExplore)
           PaneActionEntry(
             icon:
                 (appdata.settings['comicDisplayMode'] ?? 'detailed') ==
@@ -298,7 +291,7 @@ class _MainPageState extends State<MainPage> {
             },
           ),
         // 年度阅读报告入口 - 仅首页显示，放在设置按钮旁边
-        if (index == _tabHome)
+        if (index == tabHome)
           PaneActionEntry(
             icon: Icons.insights_rounded,
             label: "Reading Report".tl,
@@ -311,7 +304,7 @@ class _MainPageState extends State<MainPage> {
         //
         // 现在它和「内置代理」是同一页的两屏（左滑切换）：两者都是「外部连接
         // 的配置」，顶栏也就那么多位置，合成一页比再加一颗按钮划算。
-        if (index == _tabHome)
+        if (index == tabHome)
           PaneActionEntry(
             icon: Icons.dns_outlined,
             label: "Comic Sources".tl,
@@ -325,7 +318,7 @@ class _MainPageState extends State<MainPage> {
         // 图标是钥匙：开启时实心、关闭时空心。自己画的梯子（两根竖杆加四根
         // 横档）在 22px 上一缩小就成了一格栅栏，和旁边几颗 Material 图标
         // 摆在一起格格不入；钥匙既有的现成字形，又正好表达「开一条通道」。
-        if (index == _tabHome && _proxySupported)
+        if (index == tabHome && _proxySupported)
           PaneActionEntry(
             icon: XrayTunnel.enabled ? Icons.key_rounded : Icons.key_outlined,
             color: XrayTunnel.enabled ? context.colorScheme.primary : null,

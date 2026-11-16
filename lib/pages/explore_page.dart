@@ -4,6 +4,7 @@ import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/global_state.dart';
+import 'package:venera/foundation/nav_order.dart';
 import 'package:venera/foundation/res.dart';
 import 'package:venera/pages/categories_page.dart';
 import 'package:venera/pages/comic_source_page.dart';
@@ -144,8 +145,8 @@ class _ExplorePageState extends State<ExplorePage>
   }
 
   void onNaviItemTapped(int index) {
-    // 底栏里的推荐页现在是第 2 项
-    if (index != 1) return;
+    // 底栏里「推荐」的序号，见 foundation/nav_order.dart。
+    if (index != tabExplore) return;
     _toTopCurrentGroup();
   }
 
@@ -244,12 +245,37 @@ class _ExplorePageState extends State<ExplorePage>
     GlobalState.find<_SingleExplorePageState>(pages[i]).refresh();
   }
 
-  Widget buildFAB() => Material(
-        color: Colors.transparent,
-        child: FloatingActionButton(
-          key: const Key("FAB"),
-          onPressed: refresh,
-          child: const Icon(Icons.refresh),
+  /// 悬浮刷新按钮。
+  ///
+  /// 原来是 Material 的 [FloatingActionButton]：一块实色药丸压在封面流上，
+  /// 和顶栏、底栏那套折射玻璃是两种材质，插在中间显得像是从别的 App 抄来的
+  /// 一颗按钮。现在换成同一套玻璃——底色给到能压住花哨封面的那一档，
+  /// 模糊本身负责把背后的封面糊开。
+  Widget buildFAB() => Tooltip(
+        message: "Refresh".tl,
+        child: LiquidGlassPanel(
+          borderRadius: BorderRadius.circular(28),
+          // 面积小、背后又全是高对比的封面：底色太淡图标会陷进去。
+          // 这一档和顶栏/底栏对齐。
+          tintAlpha: LiquidGlassEngine.barTintAlpha,
+          child: Material(
+            color: Colors.transparent,
+            shape: const CircleBorder(),
+            clipBehavior: Clip.antiAlias,
+            child: InkWell(
+              key: const Key("FAB"),
+              onTap: refresh,
+              child: SizedBox(
+                width: 56,
+                height: 56,
+                child: Icon(
+                  Icons.refresh_rounded,
+                  size: 24,
+                  color: Theme.of(context).colorScheme.onSurface.toOpacity(0.9),
+                ),
+              ),
+            ),
+          ),
         ),
       );
 

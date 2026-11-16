@@ -18,11 +18,20 @@ import 'package:venera/utils/translations.dart';
 
 import 'io.dart';
 
+/// 启动同步拉完云端之后，还要不要把本地那份推上去。
+///
+/// 三条规则挤在一个布尔里，单独抽出来是为了能单测：
+/// - 云端更新、刚把本地覆盖掉 → 不再上传（传上去的就是刚拉下来的东西，
+///   白跑一趟几十 MB，还会把 dataVersion 顶高，让别的设备以为有更新）；
+/// - 云端没有更新的 → 上次留下的改动还是要推；
+/// - 什么都没改 → 不上传。这条正是「一天不再传几十次」的来源。
+bool shouldUploadAfterLaunch({
+  required bool importedRemote,
+  required bool pending,
+}) => !importedRemote && pending;
+
 class DataSync with ChangeNotifier {
   DataSync._() {
-    if (isEnabled) {
-      downloadData();
-    }
     LocalFavoritesManager().addListener(onDataChanged);
     ComicSourceManager().addListener(onDataChanged);
     if (App.isDesktop) {
@@ -33,31 +42,79 @@ class DataSync with ChangeNotifier {
     }
   }
 
+  /// 数据变了：只记一笔「有改动待上传」，不当场传。
+  ///
+  /// 以前这里是「攒 3 秒发一次整包」。收藏改一下、源变一次状态、退出阅读
+  /// 页、改个设置都会走到这里，再加上 `saveData()` 里那次直传，一天下来
+  /// 能往坚果云推几十份几十 MB 的包——而且每次换网/换代理都要再来一遍。
+  /// 现在只写一个布尔标记，真正的自动上传收在 [syncOnLaunch] 里，
+  /// 一次启动最多一次。
   void onDataChanged() {
     if (isEnabled) {
-      _scheduleUpload();
+      _markPendingUpload();
     }
   }
 
-  /// 自动上传的合并窗口。
-  ///
-  /// 收藏一次改动、源变一次状态都会走到这里，连着操作几下就是几次完整的
-  /// 上传（每次都要重新打包一遍数据、还可能顺手把服务器上的旧档删掉）。
-  /// 攒 3 秒再发一次就够了。
-  Timer? _uploadDebounce;
+  /// 有没有「本地改过、还没传上去」的东西。标记落盘，杀进程也不丢。
+  static const _pendingKey = 'webdavPendingUpload';
 
-  void _scheduleUpload() {
-    _uploadDebounce?.cancel();
-    _uploadDebounce = Timer(const Duration(seconds: 3), () {
-      _uploadDebounce = null;
-      unawaited(uploadData());
-    });
+  bool get hasPendingUpload => appdata.implicitData[_pendingKey] == true;
+
+  void _markPendingUpload() {
+    // 已经是 true 就别再写盘：这个函数被调用的频率和「用户操作」一样高。
+    if (hasPendingUpload) {
+      return;
+    }
+    appdata.implicitData[_pendingKey] = true;
+    unawaited(appdata.writeImplicitData());
   }
 
-  /// 自动同步失败后的重试。
+  void _clearPendingUpload() {
+    if (!hasPendingUpload) {
+      return;
+    }
+    appdata.implicitData[_pendingKey] = false;
+    unawaited(appdata.writeImplicitData());
+  }
+
+  /// 启动时的那一次自动同步。
+  ///
+  /// 顺序是「先拉后推」：云端有更新的就整份覆盖（本地那点改动本来也就
+  /// 被覆盖了，再传回去没有意义）；云端没有更新的，才把上次留下的改动
+  /// 推上去。整个过程一次启动一次，由 `init` 触发，运行期间不再自动发起。
+  bool _launchSyncStarted = false;
+
+  Future<void> syncOnLaunch() async {
+    if (_launchSyncStarted) {
+      return;
+    }
+    _launchSyncStarted = true;
+    if (!isEnabled) {
+      return;
+    }
+    await downloadData();
+    if (!isEnabled) {
+      return;
+    }
+    if (_importedRemote) {
+      // 本地已经被云端那份覆盖，pending 也跟着作废。
+      _clearPendingUpload();
+    }
+    if (shouldUploadAfterLaunch(
+      importedRemote: _importedRemote,
+      pending: hasPendingUpload,
+    )) {
+      await uploadData();
+    }
+  }
+
+  /// 同步失败后的重试。
   ///
   /// 断网、VPN 切换、坚果云抽风都会让一次同步失败，不值得为此在主页挂一
   /// 个红点让用户自己点。退避重试几次，实在不行才把错误留在界面上。
+  ///
+  /// 只有「真的发起过一次同步」（启动那一次、或者用户手点）才会走到这里，
+  /// 所以它不会变成「一换网就传一次」的来源。
   Timer? _retryTimer;
 
   int _retryCount = 0;
@@ -119,6 +176,12 @@ class DataSync with ChangeNotifier {
   bool _isDownloading = false;
 
   bool get isDownloading => _isDownloading;
+
+  /// 最近一次 [downloadData] 是否真的把云端那份导进来了。
+  ///
+  /// 只有「导进来了」才说明本地被覆盖过；「云端没有更新的」和「根本没连上」
+  /// 都不算，这两种情况下本地改动仍然需要上传。
+  bool _importedRemote = false;
 
   bool _isUploading = false;
 
@@ -228,6 +291,7 @@ class DataSync with ChangeNotifier {
         data.deleteIgnoreError();
         Log.info("Upload Data", "Data uploaded successfully");
         _resetRetry();
+        _clearPendingUpload();
         _markSynced();
         return const Res(true);
       } catch (e, s) {
@@ -251,6 +315,7 @@ class DataSync with ChangeNotifier {
     _haveWaitingTask = false;
     _isDownloading = true;
     _lastError = null;
+    _importedRemote = false;
     notifyListeners();
     try {
       var config = _validateConfig();
@@ -296,6 +361,10 @@ class DataSync with ChangeNotifier {
         await client.read2File(file.name!, localFile.path);
         await importAppData(localFile, true);
         await localFile.delete();
+        _importedRemote = true;
+        // 导入过程中 `syncData()` 会顺手 saveData 一次，把 pending 标起来；
+        // 那批改动来源就是云端，不该再等下一次启动推回去。
+        _clearPendingUpload();
         Log.info("Data Sync", "Data downloaded successfully");
         _resetRetry();
         _markSynced();

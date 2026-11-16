@@ -47,7 +47,13 @@ class Appdata with Init {
       _isSavingData = false;
     }
     if (sync) {
-      DataSync().uploadData();
+      // 只登记「有改动待上传」，不再当场推一整包。
+      //
+      // `saveData()` 被 60 多处调用：改一个设置、写一条阅读进度、切一次
+      // 代理……每一次都上传的话，云盘里很快就是几十份重复的整包，
+      // 而且换一次网就再来一轮。真正的自动上传收在启动那一次同步里
+      // （见 `DataSync.syncOnLaunch`），手动上传仍然在同步卡片上。
+      DataSync().onDataChanged();
     }
   }
 

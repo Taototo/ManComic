@@ -49,7 +49,7 @@ void main() {
       "Download",
       "GitHub",
       // 下载可收起 + 完成后再问安装
-      "Download in background",
+      "Collapse",
       "Install update",
       "Install",
       "Install now",
