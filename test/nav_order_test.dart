@@ -1,3 +1,4 @@
+import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter_test/flutter_test.dart';
@@ -144,6 +145,47 @@ void main() {
         isFalse,
         reason: '这个按钮只是把卡片收成悬浮条，下载一直在跑，叫「后台」会让人以为在切换什么',
       );
+    });
+  });
+
+  group('推荐 / 筛选文案', () {
+    // 页面上本来写着「探索」和「分类」，但底栏和整个界面早就统一叫「推荐」
+    // 了，设置里的这两项就成了一块对不上的旧词。只改翻译表、不动 key，
+    // 因为代码里这两个字符串同时也决定 settingsIndex 和页签顺序。
+    late Map<String, dynamic> translations;
+
+    setUpAll(() {
+      translations =
+          jsonDecode(read('assets/translation.json')) as Map<String, dynamic>;
+    });
+
+    String? zh(String key) => (translations['zh_CN'] as Map)[key] as String?;
+
+    String? tw(String key) => (translations['zh_TW'] as Map)[key] as String?;
+
+    test('内容来源里的两项叫「推荐页面 / 筛选页面」', () {
+      expect(zh('Explore Pages'), '推荐页面');
+      expect(zh('Category Pages'), '筛选页面');
+      expect(tw('Explore Pages'), '推薦頁面');
+      expect(tw('Category Pages'), '篩選頁面');
+    });
+
+    test('推荐页顶部分段控件叫「推荐 / 筛选」', () {
+      expect(zh('Explore'), '推荐');
+      expect(zh('Categories'), '筛选');
+      expect(tw('Categories'), '篩選');
+    });
+
+    test('空状态跟着换了口径', () {
+      expect(zh('No Explore Pages'), '没有推荐页面');
+      expect(zh('No Category Pages'), '没有筛选页面');
+    });
+
+    test('分段控件仍然用这两个 key', () {
+      // 改文案只动翻译表；把 key 一起改掉会连 settingsIndex 和页签顺序
+      // 一起漂移，而且老用户存下来的页面列表按 key 匹配。
+      final src = read('lib/pages/explore_page.dart');
+      expect(src.contains('labels: const ["Explore", "Categories"]'), isTrue);
     });
   });
 
