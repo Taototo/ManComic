@@ -18,7 +18,9 @@ String? normalizeVersion(String raw) {
 
 /// 版本号比较，返回 true 表示 [version1] 高于 [version2]。
 ///
-/// 只比较前 3 段数字，多余的段（如 `1.4.0.1`）与预发布后缀忽略。
+/// 逐段比较数字，段数不同的按 0 补齐。以前只比前三段，`1.5.2.001` 和
+/// `1.5.2` 被判成相等——补丁号就永远推不出去了。预发布后缀（`-beta`）
+/// 仍然不参与比较。
 bool compareVersion(String version1, String version2) {
   List<int> parse(String v) {
     var res = <int>[];
@@ -26,19 +28,19 @@ bool compareVersion(String version1, String version2) {
       var digits = RegExp(r'^\d+').stringMatch(part);
       res.add(int.tryParse(digits ?? "") ?? 0);
     }
-    while (res.length < 3) {
-      res.add(0);
-    }
     return res;
   }
 
   var v1 = parse(version1);
   var v2 = parse(version2);
-  for (var i = 0; i < 3; i++) {
-    if (v1[i] > v2[i]) {
+  var length = v1.length > v2.length ? v1.length : v2.length;
+  for (var i = 0; i < length; i++) {
+    var a = i < v1.length ? v1[i] : 0;
+    var b = i < v2.length ? v2[i] : 0;
+    if (a > b) {
       return true;
     }
-    if (v1[i] < v2[i]) {
+    if (a < b) {
       return false;
     }
   }

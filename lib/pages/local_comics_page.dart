@@ -23,6 +23,16 @@ import 'package:venera/utils/translations.dart';
 import 'package:zip_flutter/zip_flutter.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 
+/// 压在封面图上的小角标（进度、菜单点）的底色与字色。
+///
+/// 封面可以是任何颜色，所以这两个值不能跟主题走，只能是「深底 + 白字」。
+/// 之前底色用 `colorScheme.scrim`（两套主题都是黑，没问题）配 `surface`
+/// 当字色：亮色主题下 surface 是白的，看着正常；暗色主题下它也是近黑的，
+/// 字和底糊成一团，深色封面上根本读不出页码。
+const kCoverOverlayScrim = Color(0x8C000000);
+
+const kCoverOverlayInk = Colors.white;
+
 class LocalComicsPage extends StatefulWidget {
   const LocalComicsPage({super.key});
 
@@ -1109,12 +1119,12 @@ class _LocalComicGridTileState extends State<_LocalComicGridTile> {
                       Positioned(
                         right: 2,
                         bottom: 2,
-                        child: _buildMenuButton(colors),
+                        child: _buildMenuButton(),
                       ),
                     Positioned(
                       left: 6,
                       bottom: 6,
-                      child: _buildProgressPill(colors, progress),
+                      child: _buildProgressPill(progress),
                     ),
                   ],
                 ),
@@ -1162,26 +1172,31 @@ class _LocalComicGridTileState extends State<_LocalComicGridTile> {
   }
 
   /// 封面左下角那一小块「3/20」，压在图上所以得自带底色。
-  Widget _buildProgressPill(ColorScheme colors, ReadProgressInfo progress) {
+  ///
+  /// 底色和字色都是固定的：这是压在封面照片上的东西，底必须一直暗、
+  /// 字必须一直白。以前底色用 `scrim`（两套主题都是黑，没问题），字色却
+  /// 用了 `colorScheme.surface`——暗色主题下那是近黑色，字和底一起糊成
+  /// 一团，深色封面上完全看不见页码。
+  Widget _buildProgressPill(ReadProgressInfo progress) {
     if (progress.totalChapters <= 0) {
       return const SizedBox.shrink();
     }
     return Container(
       padding: const EdgeInsets.symmetric(horizontal: 6, vertical: 1),
       decoration: BoxDecoration(
-        color: colors.scrim.withValues(alpha: 0.55),
+        color: kCoverOverlayScrim,
         borderRadius: BorderRadius.circular(6),
       ),
       child: Text(
         "${progress.readChapters}/${progress.totalChapters}",
-        style: ts.s10.copyWith(color: colors.surface),
+        style: ts.s10.copyWith(color: kCoverOverlayInk),
       ),
     );
   }
 
   /// 长按是多选（和详情行一致），菜单就只能另开一个口子：封面右下角这个点。
   /// 全部塞进长按会和列表页的操作对不上。
-  Widget _buildMenuButton(ColorScheme colors) {
+  Widget _buildMenuButton() {
     return GestureDetector(
       behavior: HitTestBehavior.opaque,
       onTap: () {
@@ -1191,11 +1206,15 @@ class _LocalComicGridTileState extends State<_LocalComicGridTile> {
       },
       child: Container(
         padding: const EdgeInsets.all(2),
-        decoration: BoxDecoration(
-          color: colors.scrim.withValues(alpha: 0.45),
+        decoration: const BoxDecoration(
+          color: kCoverOverlayScrim,
           shape: BoxShape.circle,
         ),
-        child: Icon(Icons.more_horiz, size: 14, color: colors.surface),
+        child: const Icon(
+          Icons.more_horiz,
+          size: 14,
+          color: kCoverOverlayInk,
+        ),
       ),
     );
   }

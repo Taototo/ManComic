@@ -18,14 +18,16 @@ const firstChapter = 1;
 
 /// 应用自身的发布版本号。
 ///
-/// 必须与 `pubspec.yaml` 的 `version`（`+` 之前的部分）以及
-/// `android/app/build.gradle` 中的 `appVersionName` 保持一致，
-/// 否则「关于」页显示的版本号与更新检查都会出错。
+/// 必须与 `android/app/build.gradle` 中的 `appVersionName` 完全一致；与
+/// `pubspec.yaml` 的 `version` 的一致性只能是「前缀相等」——pub 的语义化
+/// 版本只允许三段，像 `1.5.2.001` 这种补丁号写不进 pubspec，只能放在这里
+/// 和 gradle 里（`+352` 是版本号，不是版本名）。
+/// 一旦漂移，「关于」页显示的版本号与更新检查都会出错。
 /// 该一致性由 `test/app_version_test.dart` 校验。
 ///
 /// 注意：`App.version` 是 Venera 上游的兼容版本号（漫画源 / UA 使用），
 /// 不是本应用的发布版本，不要混用。
-const appVersionName = "1.5.2";
+const appVersionName = "1.5.2.001";
 
 /// 应用仓库信息（「关于」页面与更新检查使用）。
 const appRepoOwner = "Taototo";

@@ -14,6 +14,27 @@ import 'package:venera/utils/translations.dart';
 
 const _sortSettingKey = 'readingStatisticsSort';
 
+/// 最近 30 天列表一屏固定显示几行。
+const kRecentRows = 5;
+
+/// 行高：`_ComicStatRow` 是 58 的封面 + 上下各 10 的留白。
+const kRecentRowHeight = 78.0;
+
+/// 行间分隔线的高度（最后一行没有）。
+const kRecentDividerHeight = 0.7;
+
+/// 最近 30 天列表要占多高：最多五行，不足则按实际条数收缩。
+///
+/// 抽成顶层函数是为了能单测。这个数字改错了在界面上只表现为「多露半行」
+/// 或者「少一行」，跟别的问题很难区分。
+double recentListHeight(int count) {
+  if (count <= 0) {
+    return 0;
+  }
+  final rows = count > kRecentRows ? kRecentRows : count;
+  return rows * kRecentRowHeight + (rows - 1) * kRecentDividerHeight;
+}
+
 /// 阅读报告：抬头是最近 30 天在读什么，往下是这一年的成绩。
 ///
 /// 原来「阅读统计」和「年度报告」是两个入口，但它们读的是同一张表，
@@ -48,6 +69,16 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
 
   /// 最近 7 天（含今天）每天读了多少秒，用来算「今天 / 最近 7 天」
   List<({DateTime day, int seconds})> _daily = const [];
+
+  /// 最近 30 天那段自己的滚动位置。外层页面也是滚动视图，这里必须自带
+  /// controller：否则它会去抢外层的 `PrimaryScrollController`，两段一起滚。
+  final _recentScroll = ScrollController();
+
+  @override
+  void dispose() {
+    _recentScroll.dispose();
+    super.dispose();
+  }
 
   @override
   void initState() {
@@ -807,21 +838,52 @@ class _ReadingReportPageState extends State<ReadingReportPage> {
               clipBehavior: Clip.antiAlias,
               child: Material(
                 type: MaterialType.transparency,
-                child: Column(
-                  children: [
-                    for (var i = 0; i < _recent.length; i++)
-                      _ComicStatRow(
-                        comic: _recent[i],
-                        showDivider: i != _recent.length - 1,
-                        onTap: () => _openComic(_recent[i]),
-                        onDelete: () => _deleteComic(_recent[i]),
-                      ),
-                  ],
-                ),
+                child: _buildRecentList(),
               ),
             ),
           ),
       ],
+    );
+  }
+
+  /// 最近 30 天读过的作品列表。
+  ///
+  /// 这一段以前是直接铺开的：读了三十本就三十行，把下面的年度报告推到很
+  /// 远的地方，而它本身只是个「最近在读什么」的提醒，不是用来翻的。现在
+  /// 固定成五行高度，多出来的在里面滚，右侧挂一条常显的滚动条——列表自己
+  /// 会截断，不挂条的话用户根本不知道下面还有。
+  ///
+  /// 高度按行算出来的：行是 58 的封面 + 上下各 10 的留白，分隔线另算且
+  /// 最后一行没有。行高不写死进 `_ComicStatRow`，那里一改高度这里就得跟
+  /// 着改，代价是「刚好五行」只在默认字号下精确（大字号会露出半行）——
+  /// 这是可以接受的，写在行里反而会在超大字号下把文字裁掉。
+  Widget _buildRecentList() {
+    final overflow = _recent.length > kRecentRows;
+    final list = SingleChildScrollView(
+      controller: overflow ? _recentScroll : null,
+      child: Column(
+        children: [
+          for (var i = 0; i < _recent.length; i++)
+            _ComicStatRow(
+              comic: _recent[i],
+              showDivider: i != _recent.length - 1,
+              onTap: () => _openComic(_recent[i]),
+              onDelete: () => _deleteComic(_recent[i]),
+            ),
+        ],
+      ),
+    );
+    return SizedBox(
+      height: recentListHeight(_recent.length),
+      // 不足五行时内容正好铺满，没有可滚的余量，这时候挂条只会画一根满格
+      // 的假滑条。
+      child: overflow
+          ? Scrollbar(
+              controller: _recentScroll,
+              thumbVisibility: true,
+              child: list,
+            )
+          : list,
     );
   }
 

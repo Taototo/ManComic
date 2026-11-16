@@ -19,7 +19,15 @@ void main() {
 
     test('缺段视为 0', () {
       expect(compareVersion("1.4", "1.3.9"), isTrue);
-      expect(compareVersion("1.3.9.1", "1.3.9"), isFalse);
+      expect(compareVersion("1.3.9", "1.3.9.0"), isFalse);
+    });
+
+    test('第四段是补丁号，必须参与比较', () {
+      // 1.5.2.001 是给停在 1.5.2 的用户的补丁，判成相等就永远推不出去
+      expect(compareVersion("1.5.2.001", "1.5.2"), isTrue);
+      expect(compareVersion("1.5.2", "1.5.2.001"), isFalse);
+      expect(compareVersion("1.5.2.001", "1.5.2.001"), isFalse);
+      expect(compareVersion("1.5.2.002", "1.5.2.001"), isTrue);
     });
 
     test('非数字段不抛异常', () {

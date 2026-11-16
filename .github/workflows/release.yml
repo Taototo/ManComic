@@ -23,12 +23,22 @@ jobs:
           dart=$(sed -n 's/.*const appVersionName = "\(.*\)".*/\1/p' lib/foundation/consts.dart)
           tag="${GITHUB_REF_NAME#v}"
           echo "pubspec=$pubspec gradle=$gradle dart=$dart tag=$tag"
-          if [ "$pubspec" != "$gradle" ] || [ "$pubspec" != "$dart" ]; then
-            echo "::error::版本号三处不一致：请同步 pubspec.yaml / android/app/build.gradle / lib/foundation/consts.dart"
+          # 版本名以 gradle 与 consts 为准，两处必须逐字相同。
+          if [ "$gradle" != "$dart" ]; then
+            echo "::error::版本名不一致：请同步 android/app/build.gradle 与 lib/foundation/consts.dart"
             exit 1
           fi
-          if [ "$tag" != "$pubspec" ]; then
-            echo "::error::tag ($tag) 与版本号 ($pubspec) 不一致"
+          # pubspec 只能是三段（pub 的语义化版本要求），像 1.5.2.001 这种
+          # 补丁号写不进去，所以这里只要求「主版本相等」。
+          case "$gradle" in
+            "$pubspec"|"$pubspec".*) ;;
+            *)
+              echo "::error::pubspec 的 $pubspec 与版本名 $gradle 不是同一主版本"
+              exit 1
+              ;;
+          esac
+          if [ "$tag" != "$gradle" ]; then
+            echo "::error::tag ($tag) 与版本名 ($gradle) 不一致"
             exit 1
           fi
 
