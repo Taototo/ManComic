@@ -77,7 +77,7 @@ Future<Map<String, dynamic>?> showOpenListLogin(
           loginUri.scheme != 'https' ||
           loginUri.host.isEmpty) {
         throw FormatException(
-          target is String ? target : 'Unable to start authorization',
+          target is String ? target : '无法启动授权',
         );
       }
       redirected = true;
@@ -86,7 +86,7 @@ Future<Map<String, dynamic>?> showOpenListLogin(
       if (!finished) {
         failure = error is FormatException
             ? error.message
-            : 'Unable to start authorization';
+            : '无法启动授权';
         finished = true;
         close();
       }
@@ -97,7 +97,7 @@ Future<Map<String, dynamic>?> showOpenListLogin(
 
   if (App.isLinux) {
     if (!await DesktopWebview.isAvailable()) {
-      throw const FormatException('Webview is not available');
+      throw const FormatException('当前平台无法打开登录窗口');
     }
     if (!context.mounted) return null;
     final closed = Completer<void>();

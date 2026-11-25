@@ -7,7 +7,6 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/features/comic_widgets/comic_widgets.dart';
 import 'package:venera/features/search/library_tag_picker.dart';
 import 'package:venera/foundation/context.dart';
-import 'package:venera/foundation/translations.dart';
 
 import 'remote_library_engine.dart';
 
@@ -102,7 +101,7 @@ class _RemoteLibrarySearchPageState extends State<RemoteLibrarySearchPage> {
       if (!mounted || !identical(_engine, engine)) return;
       final error = result.errorMessage;
       if (error != null) {
-        context.showMessage(message: error.tl);
+        context.showMessage(message: error);
         return;
       }
       final selected = await showLibraryTagPicker(
@@ -130,7 +129,7 @@ class _RemoteLibrarySearchPageState extends State<RemoteLibrarySearchPage> {
           AppSearchBar(
             controller: _searchController,
             action: IconButton(
-              tooltip: 'Tags'.tl,
+              tooltip: '标签',
               icon: const Icon(Icons.filter_alt_outlined),
               selectedIcon: const Icon(Icons.filter_alt),
               isSelected: tags.isNotEmpty,
@@ -159,7 +158,7 @@ class _RemoteLibrarySearchPageState extends State<RemoteLibrarySearchPage> {
             ),
           Expanded(
             child: engine == null
-                ? Center(child: Text('Source unavailable'.tl))
+                ? Center(child: Text('漫画源不可用'))
                 : ComicList(
                     key: _listKey,
                     preserveScrollPosition: true,
@@ -179,7 +178,7 @@ class _RemoteLibrarySearchPageState extends State<RemoteLibrarySearchPage> {
                           ),
                     emptySliver: SliverFillRemaining(
                       hasScrollBody: false,
-                      child: Center(child: Text('No search results found'.tl)),
+                      child: Center(child: Text('没有找到搜索结果')),
                     ),
                   ),
           ),

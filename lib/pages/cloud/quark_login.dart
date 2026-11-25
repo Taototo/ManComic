@@ -80,7 +80,7 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
       close();
     } catch (_) {
       if (!finished) {
-        failure = 'Unable to read login cookies';
+        failure = '无法读取登录 Cookie，请检查登录状态或手动填写 Cookie';
         finished = true;
         close();
       }
@@ -92,7 +92,7 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
   try {
     if (App.isLinux) {
       if (!await DesktopWebview.isAvailable()) {
-        throw const FormatException('Webview is not available');
+        throw const FormatException('当前平台无法打开登录窗口');
       }
       if (!context.mounted) return null;
       final closed = Completer<void>();

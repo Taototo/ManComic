@@ -1,16 +1,14 @@
 import 'dart:convert';
 
-/// Only drivers compiled into the bundled OpenList core are exposed.
-/// The pinned core registers quark_uc / onedrive (plus 115/123/baidu/google),
-/// but the app intentionally offers just these two to users.
+/// 内置内核里编译了多家驱动，但本 App 只向用户开放夸克网盘。
+/// 其它驱动名仅用于识别旧版本遗留账号，避免出现未知类型导致启动失败。
 const openListSupportedDrivers = <String>{
   'Quark',
-  'Onedrive',
 };
 
-const openListLoginDrivers = <String, String>{
-  'Onedrive': 'onedrive_pr',
-};
+/// 本 App 不再提供公共授权代理登录（OneDrive 已移除）。
+/// 夸克走自己的 WebView 登录页，不经过 api.oplist.org。
+const openListLoginDrivers = <String, String>{};
 
 Uri openListLoginUri(
   String driver, {
@@ -54,13 +52,11 @@ Map<String, dynamic>? parseOpenListLoginCallback(
     throw FormatException('$error');
   }
   if (value['driver_txt'] != openListLoginDrivers[driver]) {
-    throw const FormatException(
-      'Authorization does not match the selected provider',
-    );
+    throw const FormatException('授权信息与所选网盘不匹配');
   }
   final refreshToken = value['refresh_token'];
   if (refreshToken is! String || refreshToken.trim().isEmpty) {
-    throw const FormatException('Refresh Token is required');
+    throw const FormatException('缺少刷新令牌');
   }
   value['server_use'] = true;
   value['client_id'] = '';
@@ -70,7 +66,6 @@ Map<String, dynamic>? parseOpenListLoginCallback(
     'api.oplist.org',
     '/${openListLoginDrivers[driver]!.split('_').first}/renewapi',
   ).toString();
-  if (driver == 'Onedrive') value['region'] = 'global';
   return value;
 }
 
@@ -155,7 +150,7 @@ Map<String, dynamic> _decodePayload(String value) {
     );
     if (result is Map) return result.map((key, item) => MapEntry('$key', item));
   } catch (_) {}
-  throw const FormatException('Invalid authorization response');
+  throw const FormatException('授权响应无效');
 }
 
 void _move(Map<String, dynamic> value, String source, String destination) {

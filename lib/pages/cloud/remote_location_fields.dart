@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:venera/foundation/context.dart';
-import 'package:venera/foundation/translations.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
 
 import 'remote_directory_picker.dart';
@@ -58,19 +57,19 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
       crossAxisAlignment: CrossAxisAlignment.stretch,
       children: [
         InputDecorator(
-          decoration: InputDecoration(labelText: 'Cloud Storage Account'.tl),
+          decoration: InputDecoration(labelText: '网盘账号'),
           child: widget.accountLocked
-              ? Text(account?.name ?? 'Account unavailable'.tl)
+              ? Text(account?.name ?? '账号不可用')
               : DropdownButtonHideUnderline(
                   child: DropdownButton<String>(
                     isExpanded: true,
                     value: account?.id ?? (widget.allowNone ? '' : null),
-                    hint: Text('Select an account'.tl),
+                    hint: Text('选择账号'),
                     items: [
                       if (widget.allowNone)
                         DropdownMenuItem(
                           value: '',
-                          child: Text('Not Configured'.tl),
+                          child: Text('未配置'),
                         ),
                       for (final value in _storage.accounts)
                         DropdownMenuItem(
@@ -79,7 +78,7 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
                         ),
                       DropdownMenuItem(
                         value: '__add_account__',
-                        child: Text('Add Cloud Storage Account'.tl),
+                        child: Text('添加网盘账号'),
                       ),
                     ],
                     onChanged: _adding
@@ -101,7 +100,7 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
         ),
         if (account?.statusMessage != null)
           Text(
-            account!.statusMessage!.tl,
+            account!.statusMessage!,
             style: TextStyle(color: Theme.of(context).colorScheme.error),
           ),
         ListTile(
@@ -109,12 +108,12 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
           leading: const Icon(Icons.folder_outlined),
           title: Text(
             widget.multiSelect
-                ? 'Recognition Directories'.tl
-                : 'Remote Directory'.tl,
+                ? '可识别目录'
+                : '网盘目录',
           ),
           subtitle: Text(
             widget.directories.isEmpty
-                ? 'None selected'.tl
+                ? '未选择'
                 : widget.directories.join('\n'),
           ),
           trailing: const Icon(Icons.arrow_right),

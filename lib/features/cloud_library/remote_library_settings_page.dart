@@ -4,7 +4,6 @@ import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/pages/cloud/storage.dart';
 import 'package:venera/features/cloud_library/remote_library_engine.dart';
 import 'package:venera/foundation/appdata.dart';
-import 'package:venera/foundation/translations.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
 
 final _storage = RemoteStorageAccounts.instance;
@@ -86,8 +85,8 @@ Future<void> showRemoteLibraryEditor(
     builder: (context) => StatefulBuilder(
       builder: (context, setDialogState) => ContentDialog(
         title: initial == null
-            ? 'Add Comic Library'.tl
-            : 'Edit Comic Library'.tl,
+            ? '添加漫画库'
+            : '编辑漫画库',
         content: Padding(
           padding: const EdgeInsets.symmetric(horizontal: 16),
           child: Column(
@@ -96,7 +95,7 @@ Future<void> showRemoteLibraryEditor(
               TextFormField(
                 initialValue: name,
                 onChanged: (value) => name = value,
-                decoration: InputDecoration(labelText: 'Name'.tl),
+                decoration: InputDecoration(labelText: '名称'),
               ),
               RemoteLocationFields(
                 accountId: account?.id ?? initial?.accountId,
@@ -113,7 +112,7 @@ Future<void> showRemoteLibraryEditor(
               ),
               SwitchListTile(
                 contentPadding: EdgeInsets.zero,
-                title: Text('Automatic library updates'.tl),
+                title: Text('自动更新漫画库'),
                 value: autoRefresh,
                 onChanged: (value) => setDialogState(() {
                   autoRefresh = value;
@@ -124,18 +123,18 @@ Future<void> showRemoteLibraryEditor(
                 DropdownButtonFormField<int>(
                   isExpanded: true,
                   initialValue: refreshIntervalMinutes,
-                  decoration: InputDecoration(labelText: 'Update interval'.tl),
+                  decoration: InputDecoration(labelText: '更新间隔'),
                   items: [
                     DropdownMenuItem(
                       value: 15,
-                      child: Text('Every 15 minutes'.tl),
+                      child: Text('每 15 分钟'),
                     ),
-                    DropdownMenuItem(value: 60, child: Text('Every hour'.tl)),
+                    DropdownMenuItem(value: 60, child: Text('每小时')),
                     DropdownMenuItem(
                       value: 360,
-                      child: Text('Every 6 hours'.tl),
+                      child: Text('每 6 小时'),
                     ),
-                    DropdownMenuItem(value: 1440, child: Text('Every day'.tl)),
+                    DropdownMenuItem(value: 1440, child: Text('每天')),
                   ],
                   onChanged: (value) {
                     if (value != null) {
@@ -150,7 +149,7 @@ Future<void> showRemoteLibraryEditor(
           TextButton(
             style: actionButtonStyle,
             onPressed: () => Navigator.pop(context),
-            child: Text('Cancel'.tl),
+            child: Text('取消'),
           ),
           FilledButton(
             style: actionButtonStyle,
@@ -176,7 +175,7 @@ Future<void> showRemoteLibraryEditor(
                     );
               Navigator.pop(context, library);
             },
-            child: Text('Save'.tl),
+            child: Text('保存'),
           ),
         ],
       ),
@@ -205,7 +204,7 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
           return SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('No Cloud Comic Libraries'.tl),
+              child: Text('暂无在线漫画库'),
             ),
           );
         }
@@ -222,7 +221,7 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
               subtitle: Text(
                 '${account?.name ?? library.accountId}\n'
                 '${library.directories.join('\n')}'
-                '${failures.isEmpty ? '' : '\n${'Failed'.tl}: ${failures.keys.join(', ')}'}',
+                '${failures.isEmpty ? '' : '\n${'失败'}: ${failures.keys.join(', ')}'}',
               ),
               isThreeLine:
                   library.directories.length > 1 || failures.isNotEmpty,
@@ -231,7 +230,7 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
                 mainAxisSize: MainAxisSize.min,
                 children: [
                   IconButton(
-                    tooltip: 'Refresh'.tl,
+                    tooltip: '刷新',
                     icon: const Icon(Icons.refresh),
                     onPressed: engine == null
                         ? null
@@ -241,7 +240,7 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
                           },
                   ),
                   IconButton(
-                    tooltip: 'Delete'.tl,
+                    tooltip: '删除',
                     icon: const Icon(Icons.delete_outline),
                     onPressed: () async {
                       _removePageVisibility(library);

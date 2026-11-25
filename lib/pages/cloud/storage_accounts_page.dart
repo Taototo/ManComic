@@ -2,7 +2,6 @@ import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app_page_route.dart';
 import 'package:venera/foundation/context.dart';
-import 'package:venera/foundation/translations.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
 
@@ -11,6 +10,13 @@ import 'openlist_login.dart';
 import 'quark_login.dart';
 
 enum StorageAccountPurpose { library, sync, archive }
+
+/// 把内部驱动名转成中文显示名。
+String _providerLabel(String driver) => switch (driver) {
+      'Quark' => '夸克网盘',
+      'WebDAV' => 'WebDAV',
+      _ => driver,
+    };
 
 Future<StorageAccount?> showStorageAccountEditor(
   BuildContext context, {
@@ -79,16 +85,16 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
         .length;
     final uses = <String>[
       if (libraries > 0)
-        '@count comic libraries'.tlParams({'count': libraries}),
+        '$libraries 个漫画库',
       for (final (key, title) in [
-        ('syncRemoteLocation', 'App Data Sync'),
-        ('backupRemoteLocation', 'Comic Archive Backup'),
+        ('syncRemoteLocation', '应用数据同步'),
+        ('backupRemoteLocation', '漫画备份'),
       ])
         if (appdata.settings[key] is Map &&
             appdata.settings[key]['accountId'] == account.id)
-          title.tl,
+          title,
     ];
-    return uses.isEmpty ? 'Not in use'.tl : uses.join(' · ');
+    return uses.isEmpty ? '未使用' : uses.join(' · ');
   }
 
   Future<void> _test(StorageAccount account) async {
@@ -132,16 +138,16 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     final purpose = await showDialog<StorageAccountPurpose>(
       context: context,
       builder: (context) => SimpleDialog(
-        title: Text('Use this account for'.tl),
+        title: Text('此账号用于'),
         children: [
           for (final (value, label) in [
-            (StorageAccountPurpose.library, 'Online Comic Libraries'),
-            (StorageAccountPurpose.sync, 'App Data Sync'),
-            (StorageAccountPurpose.archive, 'Comic Archive Backup'),
+            (StorageAccountPurpose.library, '在线漫画库'),
+            (StorageAccountPurpose.sync, '应用数据同步'),
+            (StorageAccountPurpose.archive, '漫画备份'),
           ])
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, value),
-              child: Text(label.tl),
+              child: Text(label),
             ),
         ],
       ),
@@ -151,7 +157,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: Appbar(title: Text('Cloud Storage Accounts'.tl)),
+    appBar: Appbar(title: Text('网盘账号')),
     floatingActionButton: FloatingActionButton(
       onPressed: _edit,
       child: const Icon(Icons.add),
@@ -165,11 +171,11 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  account.statusMessage?.tl ??
-                      '${account.driver.tl} · ${switch (account.status) {
-                        StorageAuthorizationStatus.valid => 'Connected'.tl,
-                        StorageAuthorizationStatus.invalid => 'Authorization invalid'.tl,
-                        StorageAuthorizationStatus.unknown => 'Connection not verified'.tl,
+                  account.statusMessage ??
+                      '${_providerLabel(account.driver)} · ${switch (account.status) {
+                        StorageAuthorizationStatus.valid => '已连接',
+                        StorageAuthorizationStatus.invalid => '授权失效',
+                        StorageAuthorizationStatus.unknown => '连接未验证',
                       }}',
                 ),
                 Text(_usage(account)),
@@ -184,7 +190,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
             ),
             leading: IconButton(
               icon: const Icon(Icons.refresh),
-              tooltip: 'Test connection'.tl,
+              tooltip: '测试连接',
               onPressed: () => _test(account),
             ),
             onTap: () => _edit(account),
@@ -201,7 +207,7 @@ class _StorageProviderPage extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: Appbar(title: Text('Add Cloud Storage Account'.tl)),
+    appBar: Appbar(title: Text('添加网盘账号')),
     body: SafeArea(
       child: Align(
         alignment: Alignment.topCenter,
@@ -211,12 +217,10 @@ class _StorageProviderPage extends StatelessWidget {
             children: [
               for (final driver in [...openListSupportedDrivers, 'WebDAV'])
                 ListTile(
-                  title: Text(driver.tl),
+                  title: Text(_providerLabel(driver)),
                   subtitle: Text(switch (driver) {
-                    'WebDAV' =>
-                      'Connect with a server address, username and password.'
-                          .tl,
-                    _ => 'Log in to authorize and save automatically.'.tl,
+                    'WebDAV' => '通过服务器地址、账号和密码连接（坚果云等）。',
+                    _ => '登录后自动保存授权。',
                   }),
                   trailing: const Icon(Icons.arrow_right),
                   onTap: () async {
@@ -308,10 +312,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
     return Scaffold(
       appBar: Appbar(
         title: Text(
-          (widget.initial == null
-                  ? 'Add @provider Account'
-                  : 'Edit @provider Account')
-              .tlParams({'provider': _driver.tl}),
+          '${widget.initial == null ? '添加' : '编辑'} ${_providerLabel(_driver)} 账号',
         ),
       ),
       body: SafeArea(
@@ -326,24 +327,24 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                 children: [
                   TextField(
                     controller: _name,
-                    decoration: InputDecoration(labelText: 'Name'.tl),
+                    decoration: InputDecoration(labelText: '名称'),
                   ),
                   const SizedBox(height: 16),
                   if (webdav) ...[
                     TextField(
                       controller: _url,
-                      decoration: InputDecoration(labelText: 'URL'.tl),
+                      decoration: InputDecoration(labelText: '服务器地址'),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _user,
-                      decoration: InputDecoration(labelText: 'Username'.tl),
+                      decoration: InputDecoration(labelText: '用户名'),
                     ),
                     const SizedBox(height: 16),
                     TextField(
                       controller: _password,
                       obscureText: true,
-                      decoration: InputDecoration(labelText: 'Password'.tl),
+                      decoration: InputDecoration(labelText: '密码'),
                     ),
                   ] else ...[
                     if (_hasProviderLogin) ...[
@@ -352,7 +353,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                         style: actionButtonStyle,
                         onPressed: _loggingIn ? null : _login,
                         icon: const Icon(Icons.login),
-                        label: Text('Log in and authorize'.tl),
+                        label: Text('登录并授权'),
                       ),
                       if (quark) ...[
                         const SizedBox(height: 4),
@@ -362,8 +363,8 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                           ),
                           child: Text(
                             _showManualCookie
-                                ? 'Hide manual cookie input'.tl
-                                : 'Login not working? Enter cookie manually'.tl,
+                                ? '收起手动 Cookie'
+                                : '登录失败？手动填写 Cookie',
                           ),
                         ),
                       ],
@@ -377,7 +378,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                         enableSuggestions: false,
                         maxLines: 3,
                         decoration: InputDecoration(
-                          labelText: 'Cookie'.tl,
+                          labelText: 'Cookie',
                           hintText: '__pus=...; __puus=...',
                           helperText:
                               'Copy the full cookie from pan.quark.cn in a browser.',
@@ -389,7 +390,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                         child: FilledButton(
                           style: actionButtonStyle,
                           onPressed: _loggingIn ? null : _save,
-                          child: Text('Save and test connection'.tl),
+                          child: Text('保存并测试连接'),
                         ),
                       ),
                       const SizedBox(height: 16),
@@ -398,7 +399,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                         controller: _refreshToken,
                         onChanged: (_) => _accessToken.clear(),
                         decoration: InputDecoration(
-                          labelText: 'Refresh Token'.tl,
+                          labelText: '刷新令牌',
                         ),
                       ),
                     ],
@@ -406,7 +407,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                   if (_error != null) ...[
                     const SizedBox(height: 16),
                     Text(
-                      _error!.tl,
+                      _error!,
                       style: TextStyle(
                         color: Theme.of(context).colorScheme.error,
                       ),
@@ -420,7 +421,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                       child: FilledButton(
                         style: actionButtonStyle,
                         onPressed: _loggingIn ? null : _save,
-                        child: Text('Save and test connection'.tl),
+                        child: Text('保存并测试连接'),
                       ),
                     ),
                   ],
@@ -440,10 +441,10 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
       final name = _validatedName();
       if (quark) {
         if (_cookie.text.trim().isEmpty) {
-          throw const FormatException('Cookie is required');
+          throw const FormatException('请填写 Cookie');
         }
       } else if (!webdav && !quark && _refreshToken.text.trim().isEmpty) {
-        throw const FormatException('Refresh Token is required');
+        throw const FormatException('请填写刷新令牌');
       }
       final auth = webdav
           ? <String, dynamic>{
@@ -475,18 +476,22 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
   }
 
   String _validatedName() {
-    final name = _name.text.trim().isEmpty ? _driver.tl : _name.text.trim();
+    final name = _name.text.trim().isEmpty
+        ? _providerLabel(_driver)
+        : _name.text.trim();
     if (widget.accounts.isNameInUse(name, excludingId: widget.initial?.id)) {
-      throw const FormatException('An account with this name already exists.');
+      throw const FormatException('已存在同名账号');
     }
     return name;
   }
 
   Future<void> _login() async {
     if (_autoSaveAfterLogin) {
-      final name = _name.text.trim().isEmpty ? _driver.tl : _name.text.trim();
+      final name = _name.text.trim().isEmpty
+          ? _providerLabel(_driver)
+          : _name.text.trim();
       if (widget.accounts.isNameInUse(name)) {
-        setState(() => _error = 'An account with this name already exists.'.tl);
+        setState(() => _error = '已存在同名账号');
         return;
       }
     }

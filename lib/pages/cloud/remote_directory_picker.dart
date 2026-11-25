@@ -1,6 +1,5 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
-import 'package:venera/foundation/translations.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
 
 /// Browser shared by library (multi-select) and single-target sync/backup UI.
@@ -65,7 +64,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
       leading: Icon(current ? Icons.folder_open : Icons.folder_outlined),
       title: Text(name, maxLines: 1, overflow: TextOverflow.ellipsis),
       subtitle: current
-          ? Text(normalizedPath == '/' ? 'Root directory'.tl : normalizedPath)
+          ? Text(normalizedPath == '/' ? '根目录' : normalizedPath)
           : null,
       selected: selected,
       selectedTileColor: Theme.of(
@@ -84,7 +83,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
 
   @override
   Widget build(BuildContext context) => Scaffold(
-    appBar: Appbar(title: Text('Select Remote Directory'.tl)),
+    appBar: Appbar(title: Text('选择网盘目录')),
     body: SafeArea(
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
@@ -92,14 +91,14 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
           Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
             child: Text(
-              'Current path: @path'.tlParams({'path': _directory}),
+              '当前路径：$_directory',
               maxLines: 2,
               overflow: TextOverflow.ellipsis,
               style: Theme.of(context).textTheme.bodySmall,
             ),
           ),
           const Divider(height: 1),
-          _folderTile(_directory, 'Current folder'.tl, current: true),
+          _folderTile(_directory, '当前文件夹', current: true),
           const Divider(height: 1),
           Expanded(
             child: FutureBuilder<List<RemoteEntry>>(
@@ -119,7 +118,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
                     if (_directory != '/')
                       ListTile(
                         leading: const Icon(Icons.arrow_upward),
-                        title: Text('Parent directory'.tl),
+                        title: Text('上级目录'),
                         onTap: () {
                           final parts = _directory.split('/')
                             ..removeWhere((item) => item.isEmpty);
@@ -132,7 +131,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
                     if (directories.isEmpty)
                       Padding(
                         padding: const EdgeInsets.all(24),
-                        child: Text('No subfolders'.tl),
+                        child: Text('没有子文件夹'),
                       ),
                   ],
                 );
@@ -145,11 +144,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
             child: Row(
               children: [
                 Expanded(
-                  child: Text(
-                    '@count folders selected'.tlParams({
-                      'count': _selected.length,
-                    }),
-                  ),
+                  child: Text('已选择 ${_selected.length} 个文件夹'),
                 ),
                 const SizedBox(width: 16),
                 FilledButton(
@@ -158,7 +153,7 @@ class _RemoteDirectoryPickerState extends State<RemoteDirectoryPicker> {
                       ? null
                       : () =>
                             Navigator.pop(context, List<String>.of(_selected)),
-                  child: Text('Done'.tl),
+                  child: Text('完成'),
                 ),
               ],
             ),
