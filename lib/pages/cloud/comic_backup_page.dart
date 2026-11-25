@@ -479,7 +479,7 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
 
 /// 备份 / 恢复任务的传输进度对话框。
 class _ArchiveTransferDialog extends StatefulWidget {
-  const _ArchiveTransferDialog({super.key, required this.batch, required this.title});
+  const _ArchiveTransferDialog({required this.batch, required this.title});
 
   final ComicArchiveBatch batch;
   final String title;

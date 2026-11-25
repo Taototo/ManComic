@@ -23,6 +23,7 @@ Future<StorageAccount?> showStorageAccountEditor(
   StorageAccount? initial,
   RemoteStorageAccounts? accounts,
   bool useRootNavigator = true,
+  ValueChanged<StorageAccount>? onSaved,
 }) async {
   final storage = accounts ?? RemoteStorageAccounts.instance;
   final page = initial == null
@@ -54,9 +55,18 @@ Future<StorageAccount?> showStorageAccountEditor(
     );
   }
   if (saved.statusMessage != null) return saved;
+  // 账号已经落盘，先让调用方刷新列表——后面的连接测试即使很慢，
+  // 用户也能立刻看到账号出现，而不是盯着进度条猜发生了什么。
+  onSaved?.call(saved);
   final store = storage.storeFor(saved.id);
   try {
-    await store.test();
+    await store.test().timeout(
+      const Duration(seconds: 45),
+      onTimeout: () => throw const RemoteStorageException(
+        '连接测试超时，请检查网络或代理设置',
+        code: 'timeout',
+      ),
+    );
     saved = saved.copyWith(
       status: StorageAuthorizationStatus.valid,
       clearStatusMessage: true,
@@ -174,6 +184,11 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
         initial: initial,
         accounts: widget.accounts,
         useRootNavigator: false,
+        onSaved: (account) {
+          // 账号已落盘：先把列表刷出来，再慢慢验证连接。
+          if (mounted) setState(() {});
+          _notify('账号“${account.name}”已保存，正在验证连接…');
+        },
       );
     } catch (e) {
       error = e;

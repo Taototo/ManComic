@@ -12,10 +12,20 @@ import 'openlist_rpc.dart';
 class EmbeddedOpenListRpc implements OpenListRpcClient {
   static const _channelName = 'mancomi/openlist';
 
-  EmbeddedOpenListRpc({MethodChannel? channel})
-    : _channel = channel ?? const MethodChannel(_channelName);
+  EmbeddedOpenListRpc({MethodChannel? channel, Duration? timeout})
+    : _channel = channel ?? const MethodChannel(_channelName),
+      _timeout = timeout;
 
   final MethodChannel _channel;
+
+  /// 仅供测试注入；正式运行时按方法取默认值。
+  final Duration? _timeout;
+
+  Duration _timeoutFor(String method) =>
+      _timeout ??
+      (method == 'initialize'
+          ? const Duration(seconds: 75)
+          : const Duration(seconds: 40));
 
   static Future<bool>? _available;
 
@@ -33,9 +43,16 @@ class EmbeddedOpenListRpc implements OpenListRpcClient {
   ) async {
     final message = jsonEncode({'method': method, 'arguments': request});
     try {
-      final response = await _channel.invokeMethod<String>('invoke', {
-        'request': message,
-      });
+      // 原生侧自己也有超时；这里只是兜底——通道异常、进程被杀等情况下
+      // 不能让 Future 永远不完成，否则界面会一直转圈。
+      final response = await _channel
+          .invokeMethod<String>('invoke', {'request': message})
+          .timeout(_timeoutFor(method), onTimeout: () => null);
+      if (response == null) {
+        return {
+          'error': {'code': 'timeout', 'message': '网盘内核无响应（超时）'},
+        };
+      }
       return _decode(response);
     } catch (error) {
       return {
