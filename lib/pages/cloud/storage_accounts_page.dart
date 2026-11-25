@@ -43,7 +43,16 @@ Future<StorageAccount?> showStorageAccountEditor(
         ).push<StorageAccount>(AppPageRoute(builder: (_) => page))
       : await context.to<StorageAccount>(() => page);
   if (result == null) return null;
-  var saved = await storage.save(result);
+  StorageAccount saved;
+  try {
+    saved = await storage.save(result);
+  } catch (error) {
+    // 重名、驱动冲突或原生写入异常都在这里转成可展示的提示，
+    // 避免异常一路冒泡导致界面静默无反应。
+    throw FormatException(
+      error is ArgumentError ? '保存账号失败：${error.message}' : '保存账号失败：$error',
+    );
+  }
   if (saved.statusMessage != null) return saved;
   final store = storage.storeFor(saved.id);
   try {
@@ -59,10 +68,21 @@ Future<StorageAccount?> showStorageAccountEditor(
           : StorageAuthorizationStatus.unknown,
       statusMessage: error.message,
     );
+  } catch (error) {
+    // 原生初始化/网络探测可能抛出非 RemoteStorageException 的异常。
+    // 这里必须兜住，否则调用方的 setState 与提示都执行不到，看起来「什么都没发生」。
+    saved = saved.copyWith(
+      status: StorageAuthorizationStatus.unknown,
+      statusMessage: '连接测试失败：$error',
+    );
   } finally {
     storage.release(store);
   }
-  await storage.updateStatus(saved);
+  try {
+    await storage.updateStatus(saved);
+  } catch (_) {
+    // 状态回写失败不影响账号本身已保存的事实。
+  }
   return saved;
 }
 
@@ -79,6 +99,9 @@ class StorageAccountsPage extends StatefulWidget {
 }
 
 class _StorageAccountsPageState extends State<StorageAccountsPage> {
+  /// 添加/保存账号期间为 true，用于在列表页显示进度并防止重复提交。
+  bool _busy = false;
+
   String _usage(StorageAccount account) {
     final libraries = widget.accounts.libraries
         .where((library) => library.accountId == account.id)
@@ -97,10 +120,18 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     return uses.isEmpty ? '未使用' : uses.join(' · ');
   }
 
+  void _notify(String message) {
+    if (!mounted) return;
+    ScaffoldMessenger.of(context)
+      ..hideCurrentSnackBar()
+      ..showSnackBar(SnackBar(content: Text(message)));
+  }
+
   Future<void> _test(StorageAccount account) async {
     var result = account;
-    final store = widget.accounts.storeFor(account.id);
+    RemoteFileStore? store;
     try {
+      store = widget.accounts.storeFor(account.id);
       await store.test();
       result = account.copyWith(
         status: StorageAuthorizationStatus.valid,
@@ -113,30 +144,56 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
             : StorageAuthorizationStatus.unknown,
         statusMessage: error.message,
       );
+    } catch (error) {
+      result = account.copyWith(
+        status: StorageAuthorizationStatus.unknown,
+        statusMessage: '连接测试失败：$error',
+      );
     } finally {
-      widget.accounts.release(store);
+      if (store != null) widget.accounts.release(store);
     }
-    await widget.accounts.updateStatus(result);
+    try {
+      await widget.accounts.updateStatus(result);
+    } catch (_) {}
     if (mounted) setState(() {});
+    _notify(
+      result.status == StorageAuthorizationStatus.valid
+          ? '“${result.name}”连接正常'
+          : '“${result.name}”连接失败：${result.statusMessage ?? "未知错误"}',
+    );
   }
 
   Future<void> _edit([StorageAccount? initial]) async {
-    final saved = await showStorageAccountEditor(
-      context,
-      initial: initial,
-      accounts: widget.accounts,
-      useRootNavigator: false,
-    );
-    if (mounted) setState(() {});
-    if (!mounted || saved == null) return;
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(
-        content: Text(
-          saved.status == StorageAuthorizationStatus.valid
-              ? '账号“${saved.name}”已添加并连接成功'
-              : '账号“${saved.name}”已保存，但连接验证未通过：${saved.statusMessage ?? "请检查授权信息"}',
-        ),
-      ),
+    if (_busy) return;
+    setState(() => _busy = true);
+    StorageAccount? saved;
+    Object? error;
+    try {
+      saved = await showStorageAccountEditor(
+        context,
+        initial: initial,
+        accounts: widget.accounts,
+        useRootNavigator: false,
+      );
+    } catch (e) {
+      error = e;
+    } finally {
+      // 成功、失败或中途抛异常都必须刷新：账号可能已经写进设置，
+      // 只是后续的原生注册/连接测试失败了，不刷新就会看起来「什么都没发生」。
+      if (mounted) setState(() => _busy = false);
+    }
+    if (!mounted) return;
+    if (error != null) {
+      _notify(
+        error is FormatException ? error.message : '添加账号失败：$error',
+      );
+      return;
+    }
+    if (saved == null) return;
+    _notify(
+      saved.status == StorageAuthorizationStatus.valid
+          ? '账号“${saved.name}”已添加并连接成功'
+          : '账号“${saved.name}”已保存，但连接验证未通过：${saved.statusMessage ?? "请检查授权信息"}',
     );
     if (initial != null ||
         saved.status != StorageAuthorizationStatus.valid ||
@@ -167,42 +224,49 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
   Widget build(BuildContext context) => Scaffold(
     appBar: Appbar(title: Text('网盘账号')),
     floatingActionButton: FloatingActionButton(
-      onPressed: _edit,
+      onPressed: _busy ? null : _edit,
       child: const Icon(Icons.add),
     ),
-    body: ListView(
+    body: Column(
       children: [
-        for (final account in widget.accounts.accounts)
-          ListTile(
-            title: Text(account.name),
-            subtitle: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                Text(
-                  account.statusMessage ??
-                      '${_providerLabel(account.driver)} · ${switch (account.status) {
-                        StorageAuthorizationStatus.valid => '已连接',
-                        StorageAuthorizationStatus.invalid => '授权失效',
-                        StorageAuthorizationStatus.unknown => '连接未验证',
-                      }}',
+        if (_busy) const LinearProgressIndicator(),
+        Expanded(
+          child: ListView(
+            children: [
+              for (final account in widget.accounts.accounts)
+                ListTile(
+                  title: Text(account.name),
+                  subtitle: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(
+                        account.statusMessage ??
+                            '${_providerLabel(account.driver)} · ${switch (account.status) {
+                              StorageAuthorizationStatus.valid => '已连接',
+                              StorageAuthorizationStatus.invalid => '授权失效',
+                              StorageAuthorizationStatus.unknown => '连接未验证',
+                            }}',
+                      ),
+                      Text(_usage(account)),
+                    ],
+                  ),
+                  trailing: IconButton(
+                    icon: const Icon(Icons.delete_outline),
+                    onPressed: () async {
+                      await widget.accounts.remove(account.id);
+                      if (mounted) setState(() {});
+                    },
+                  ),
+                  leading: IconButton(
+                    icon: const Icon(Icons.refresh),
+                    tooltip: '测试连接',
+                    onPressed: () => _test(account),
+                  ),
+                  onTap: () => _edit(account),
                 ),
-                Text(_usage(account)),
-              ],
-            ),
-            trailing: IconButton(
-              icon: const Icon(Icons.delete_outline),
-              onPressed: () async {
-                await widget.accounts.remove(account.id);
-                if (mounted) setState(() {});
-              },
-            ),
-            leading: IconButton(
-              icon: const Icon(Icons.refresh),
-              tooltip: '测试连接',
-              onPressed: () => _test(account),
-            ),
-            onTap: () => _edit(account),
+            ],
           ),
+        ),
       ],
     ),
   );
