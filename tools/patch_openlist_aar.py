@@ -222,8 +222,21 @@ with zipfile.ZipFile(patched_jar, "w", zipfile.ZIP_DEFLATED) as out:
     for name, data in entries.items():
         out.writestr(name, data)
 
+# 内核 AAR 自带的 consumer proguard 规则必须同步改名。
+#
+# 原来只有 `-keep class go.**`，而我们把包改成了 gx.**——R8 会把 gx/Seq 连类带
+# 方法名一起混淆/裁掉，Go 侧 FindClass("gx/Seq")、GetMethodID("getRef") 全部失败，
+# gomobile 直接 abort，进程当场死（表现就是"内核连续 N 次启动失败"）。
+# gomobile 是按**字符串名字**反射 Java 的，所以 gx.** 必须整体保留。
+CONSUMER_PROGUARD = """-keep class go.** { *; }
+-keep class gx.** { *; }
+-keep class openlistcore.** { *; }
+"""
+
 with zipfile.ZipFile(DST, "w", zipfile.ZIP_DEFLATED) as out:
     for name, data in others.items():
+        if name == "proguard.txt":
+            data = CONSUMER_PROGUARD.encode()
         out.writestr(name, data)
     out.writestr("classes.jar", patched_jar.getvalue())
     for name, data in so_files.items():
@@ -257,6 +270,7 @@ with zipfile.ZipFile(DST) as z:
           "| Java_gx_:", so.count(b"Java_gx_"),
           "| go/Seq left:", so.count(b"go/Seq"),
           "| gx/Seq:", so.count(b"gx/Seq"))
+    print("proguard.txt:", z.read("proguard.txt").decode())
     print("so exports openlistcore invoke:",
           b"Java_openlistcore_Openlistcore_invoke" in so)
 

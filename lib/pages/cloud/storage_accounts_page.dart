@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart' show PlatformException;
 import 'package:venera/components/components.dart';
 import 'package:venera/foundation/app_page_route.dart';
 import 'package:venera/foundation/context.dart';
@@ -51,7 +52,7 @@ Future<StorageAccount?> showStorageAccountEditor(
     // 重名、驱动冲突或原生写入异常都在这里转成可展示的提示，
     // 避免异常一路冒泡导致界面静默无反应。
     throw FormatException(
-      error is ArgumentError ? '保存账号失败：${error.message}' : '保存账号失败：$error',
+      error is ArgumentError ? '保存账号失败：${error.message}' : '保存账号失败：${describeCloudError(error)}',
     );
   }
   if (saved.statusMessage != null) return saved;
@@ -83,7 +84,7 @@ Future<StorageAccount?> showStorageAccountEditor(
     // 这里必须兜住，否则调用方的 setState 与提示都执行不到，看起来「什么都没发生」。
     saved = saved.copyWith(
       status: StorageAuthorizationStatus.unknown,
-      statusMessage: '连接测试失败：$error',
+      statusMessage: '连接测试失败：${describeCloudError(error)}',
     );
   } finally {
     storage.release(store);
@@ -157,7 +158,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     } catch (error) {
       result = account.copyWith(
         status: StorageAuthorizationStatus.unknown,
-        statusMessage: '连接测试失败：$error',
+        statusMessage: '连接测试失败：${describeCloudError(error)}',
       );
     } finally {
       if (store != null) widget.accounts.release(store);
@@ -625,4 +626,19 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
       widget.initial?.authorization[primary] as String? ??
       widget.initial?.authorization[alternate] as String? ??
       '';
+}
+
+/// 把底层异常转成一句能读的中文提示。
+///
+/// 原生桥的错误是 `PlatformException`，直接 `toString()` 会变成
+/// `PlatformException(openlist, 内核进程已崩溃…, null, null)`，
+/// 用户看到的就是这串噪音。这里只取真正的原因。
+String describeCloudError(Object error) {
+  if (error is PlatformException) {
+    final message = error.message?.trim();
+    if (message != null && message.isNotEmpty) return message;
+    return error.code;
+  }
+  if (error is FormatException) return error.message;
+  return '$error';
 }

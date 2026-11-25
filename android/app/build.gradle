@@ -26,7 +26,7 @@ if (flutterVersionName == null) {
 }
 
 // App display version. Bump the last segment (001 -> 002 ...) for every new build.
-def appVersionName = "1.5.11"
+def appVersionName = "1.5.12"
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
@@ -90,6 +90,8 @@ android {
         release {
             minifyEnabled true
             shrinkResources true
+            // gomobile 桥接类靠字符串名反射，必须保留（见 proguard-rules.pro）。
+            proguardFiles getDefaultProguardFile('proguard-android.txt'), 'proguard-rules.pro'
             ndk {
                 abiFilters "armeabi-v7a", "arm64-v8a", "x86_64"
             }
