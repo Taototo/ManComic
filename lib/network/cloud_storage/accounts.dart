@@ -1,4 +1,5 @@
 import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/foundation.dart';
 import 'package:uuid/uuid.dart';
@@ -143,6 +144,32 @@ class RemoteStorageAccounts with ChangeNotifier {
   StorageAccount? account(String id) {
     for (final value in accounts) {
       if (value.id == id) return value;
+    }
+    return null;
+  }
+
+  /// 读取内核自己写的日志尾部。
+  ///
+  /// 内核（OpenList）会把详细错误写进 `<dataDir>/log/log.log`，而 RPC 只回传
+  /// 一句 `Get "…": EOF` 这种概括信息。排查网络/授权问题时，日志里那几行才是
+  /// 关键（有没有走代理、握手停在哪一步）。读不到就返回 null，不影响主流程。
+  Future<String?> kernelLogTail({int maxLines = 3}) async {
+    final dir = _dataDir;
+    if (dir == null) return null;
+    for (final path in ['$dir/log/log.log', '$dir/logs/log.log']) {
+      try {
+        final file = File(path);
+        if (!await file.exists()) continue;
+        final lines = const LineSplitter()
+            .convert(await file.readAsString())
+            .where((line) => line.trim().isNotEmpty)
+            .toList();
+        if (lines.isEmpty) continue;
+        final start = lines.length > maxLines ? lines.length - maxLines : 0;
+        return lines.sublist(start).join(' | ');
+      } catch (_) {
+        // 日志读不到只是少一条诊断信息，绝不能让主流程失败。
+      }
     }
     return null;
   }

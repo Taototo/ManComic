@@ -7,7 +7,6 @@ import 'package:venera/foundation/log.dart';
 import 'package:venera/features/cloud_library/remote_library_engine.dart';
 import 'package:venera/network/cloud_storage/accounts.dart';
 import 'package:venera/network/cloud_storage/openlist_bridge.dart';
-import 'package:venera/network/proxy.dart';
 
 /// 网盘漫画库的运行时装配。
 ///
@@ -31,7 +30,11 @@ class CloudBootstrap {
       accounts.configureOpenList(
         EmbeddedOpenListRpc(),
         dataDir: '${App.dataPath}/openlist',
-        proxyResolver: available ? getProxy : null,
+        // 刻意不给内核传代理：这里的后端只有夸克（国内直连最快最稳）。
+        // 之前把 App 的代理（内置 Xray 隧道或设置里的节点）塞给内核，夸克
+        // 服务端遇到境外出口会直接掐连接，Go 侧只能看到 `Get …: EOF`，
+        // 表现为「连不上网盘」。真要全局代理，用户开系统 VPN 更合适。
+        proxyResolver: null,
       );
       if (available) {
         await accounts.ensureInitialized();

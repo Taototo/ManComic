@@ -61,13 +61,7 @@ Future<StorageAccount?> showStorageAccountEditor(
   onSaved?.call(saved);
   final store = storage.storeFor(saved.id);
   try {
-    await store.test().timeout(
-      const Duration(seconds: 45),
-      onTimeout: () => throw const RemoteStorageException(
-        '连接测试超时，请检查网络或代理设置',
-        code: 'timeout',
-      ),
-    );
+    await _testWithRetry(store);
     saved = saved.copyWith(
       status: StorageAuthorizationStatus.valid,
       clearStatusMessage: true,
@@ -77,14 +71,17 @@ Future<StorageAccount?> showStorageAccountEditor(
       status: error.isAuthorizationFailure
           ? StorageAuthorizationStatus.invalid
           : StorageAuthorizationStatus.unknown,
-      statusMessage: error.message,
+      statusMessage: await _withKernelLog(storage, _cleanCoreMessage(error.message)),
     );
   } catch (error) {
     // 原生初始化/网络探测可能抛出非 RemoteStorageException 的异常。
     // 这里必须兜住，否则调用方的 setState 与提示都执行不到，看起来「什么都没发生」。
     saved = saved.copyWith(
       status: StorageAuthorizationStatus.unknown,
-      statusMessage: '连接测试失败：${describeCloudError(error)}',
+      statusMessage: await _withKernelLog(
+        storage,
+        '连接测试失败：${describeCloudError(error)}',
+      ),
     );
   } finally {
     storage.release(store);
@@ -143,7 +140,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     RemoteFileStore? store;
     try {
       store = widget.accounts.storeFor(account.id);
-      await store.test();
+      await _testWithRetry(store);
       result = account.copyWith(
         status: StorageAuthorizationStatus.valid,
         clearStatusMessage: true,
@@ -153,12 +150,18 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
         status: error.isAuthorizationFailure
             ? StorageAuthorizationStatus.invalid
             : StorageAuthorizationStatus.unknown,
-        statusMessage: error.message,
+        statusMessage: await _withKernelLog(
+          widget.accounts,
+          _cleanCoreMessage(error.message),
+        ),
       );
     } catch (error) {
       result = account.copyWith(
         status: StorageAuthorizationStatus.unknown,
-        statusMessage: '连接测试失败：${describeCloudError(error)}',
+        statusMessage: await _withKernelLog(
+          widget.accounts,
+          '连接测试失败：${describeCloudError(error)}',
+        ),
       );
     } finally {
       if (store != null) widget.accounts.release(store);
@@ -629,16 +632,72 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
 }
 
 /// 把底层异常转成一句能读的中文提示。
-///
 /// 原生桥的错误是 `PlatformException`，直接 `toString()` 会变成
 /// `PlatformException(openlist, 内核进程已崩溃…, null, null)`，
 /// 用户看到的就是这串噪音。这里只取真正的原因。
 String describeCloudError(Object error) {
   if (error is PlatformException) {
     final message = error.message?.trim();
-    if (message != null && message.isNotEmpty) return message;
+    if (message != null && message.isNotEmpty) return _cleanCoreMessage(message);
     return error.code;
   }
-  if (error is FormatException) return error.message;
-  return '$error';
+  if (error is FormatException) return _cleanCoreMessage(error.message);
+  return _cleanCoreMessage('$error');
+}
+
+/// 去掉内核的包装前缀，留下真正有用的那句。
+///
+/// 内核初始化失败一次后，再次初始化会回 `failed init storage but storage is
+/// already created: failed init storage: <真正原因>`——前半段是它自己的状态机噪音，
+/// 直接把整串丢给用户只会更难读。
+String _cleanCoreMessage(String message) {
+  var text = message.trim();
+  for (final prefix in [
+    'failed init storage but storage is already created: ',
+    'failed init storage: ',
+    'Exception: ',
+  ]) {
+    while (text.startsWith(prefix)) {
+      text = text.substring(prefix.length).trimLeft();
+    }
+  }
+  return text;
+}
+
+/// 这类错误重试一次往往就好了（链路被掐、握手抖动），别急着让用户去改配置。
+bool _isTransientNetworkError(Object error) {
+  final text = describeCloudError(error).toLowerCase();
+  return text.contains('eof') ||
+      text.contains('connection reset') ||
+      text.contains('broken pipe') ||
+      text.contains('timeout') ||
+      text.contains('超时');
+}
+
+/// 连接测试：瞬时网络错误自动重试一次。
+Future<void> _testWithRetry(RemoteFileStore store) async {
+  Future<void> attempt() => store.test().timeout(
+    const Duration(seconds: 45),
+    onTimeout: () => throw const RemoteStorageException(
+      '连接测试超时，请检查网络',
+      code: 'timeout',
+    ),
+  );
+  try {
+    await attempt();
+  } catch (error) {
+    if (!_isTransientNetworkError(error)) rethrow;
+    await Future<void>.delayed(const Duration(milliseconds: 800));
+    await attempt();
+  }
+}
+
+/// 失败提示后面补上内核日志尾部。
+///
+/// RPC 只回一句 `Get "…": EOF`，真正的原因（有没有走代理、停在哪一步）在内核
+/// 自己的日志里。附上最后几行，用户截图就能定位，不用再来回猜。
+Future<String> _withKernelLog(RemoteStorageAccounts storage, String message) async {
+  final tail = await storage.kernelLogTail();
+  if (tail == null || tail.trim().isEmpty) return message;
+  return '$message\n内核日志：$tail';
 }
