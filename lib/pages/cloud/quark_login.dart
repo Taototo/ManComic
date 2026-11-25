@@ -71,6 +71,39 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
       } catch (_) {}
       final verified = await _verifyQuarkSession(current);
       if (finished || !verified) return;
+
+      // 网页已经登录时，轮询会立刻读到有效 Cookie。这里不能静默关窗保存，
+      // 否则用户只看到「闪回」，误以为授权没走完。先给出明确的确认步骤。
+      if (!context.mounted) return;
+      final approved = await showDialog<bool>(
+        context: context,
+        useRootNavigator: true,
+        builder: (dialogContext) {
+          return AlertDialog(
+            title: const Text('确认授权'),
+            content: const Text(
+              '检测到夸克网盘已登录，是否使用此账号授权 ManComi 读取网盘文件？',
+            ),
+            actions: [
+              TextButton(
+                onPressed: () => Navigator.pop(dialogContext, false),
+                child: const Text('暂不授权'),
+              ),
+              FilledButton(
+                onPressed: () => Navigator.pop(dialogContext, true),
+                child: const Text('确认授权'),
+              ),
+            ],
+          );
+        },
+      );
+      if (!context.mounted || finished) return;
+      if (approved != true) {
+        // 用户拒绝授权：关掉网页，不保存任何 Cookie，也不当作失败。
+        finished = true;
+        close();
+        return;
+      }
       authorization = {
         'cookie': current.entries
             .map((entry) => '${entry.key}=${entry.value}')

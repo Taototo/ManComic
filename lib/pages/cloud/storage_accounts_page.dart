@@ -128,9 +128,17 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
       useRootNavigator: false,
     );
     if (mounted) setState(() {});
-    if (!mounted ||
-        initial != null ||
-        saved == null ||
+    if (!mounted || saved == null) return;
+    ScaffoldMessenger.of(context).showSnackBar(
+      SnackBar(
+        content: Text(
+          saved.status == StorageAuthorizationStatus.valid
+              ? '账号“${saved.name}”已添加并连接成功'
+              : '账号“${saved.name}”已保存，但连接验证未通过：${saved.statusMessage ?? "请检查授权信息"}',
+        ),
+      ),
+    );
+    if (initial != null ||
         saved.status != StorageAuthorizationStatus.valid ||
         !widget.selectPurposeOnAdd) {
       return;
