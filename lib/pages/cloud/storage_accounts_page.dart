@@ -287,6 +287,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
   bool get _autoSaveAfterLogin => widget.initial == null && _hasProviderLogin;
   String? _error;
   bool _loggingIn = false;
+  bool _showManualCookie = false;
 
   @override
   void dispose() {
@@ -353,25 +354,53 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                         icon: const Icon(Icons.login),
                         label: Text('Log in and authorize'.tl),
                       ),
-                      const SizedBox(height: 16),
-                    ],
-                    if (!_autoSaveAfterLogin) ...[
-                      if (quark)
-                        TextField(
-                          controller: _cookie,
-                          obscureText: true,
-                          autocorrect: false,
-                          enableSuggestions: false,
-                          decoration: InputDecoration(labelText: 'Cookie'.tl),
-                        )
-                      else
-                        TextField(
-                          controller: _refreshToken,
-                          onChanged: (_) => _accessToken.clear(),
-                          decoration: InputDecoration(
-                            labelText: 'Refresh Token'.tl,
+                      if (quark) ...[
+                        const SizedBox(height: 4),
+                        TextButton(
+                          onPressed: () => setState(
+                            () => _showManualCookie = !_showManualCookie,
+                          ),
+                          child: Text(
+                            _showManualCookie
+                                ? 'Hide manual cookie input'.tl
+                                : 'Login not working? Enter cookie manually'.tl,
                           ),
                         ),
+                      ],
+                      const SizedBox(height: 16),
+                    ],
+                    if (quark && _showManualCookie) ...[
+                      TextField(
+                        controller: _cookie,
+                        obscureText: true,
+                        autocorrect: false,
+                        enableSuggestions: false,
+                        maxLines: 3,
+                        decoration: InputDecoration(
+                          labelText: 'Cookie'.tl,
+                          hintText: '__pus=...; __puus=...',
+                          helperText:
+                              'Copy the full cookie from pan.quark.cn in a browser.',
+                        ),
+                      ),
+                      const SizedBox(height: 12),
+                      SizedBox(
+                        width: double.infinity,
+                        child: FilledButton(
+                          style: actionButtonStyle,
+                          onPressed: _loggingIn ? null : _save,
+                          child: Text('Save and test connection'.tl),
+                        ),
+                      ),
+                      const SizedBox(height: 16),
+                    ] else if (!_autoSaveAfterLogin) ...[
+                      TextField(
+                        controller: _refreshToken,
+                        onChanged: (_) => _accessToken.clear(),
+                        decoration: InputDecoration(
+                          labelText: 'Refresh Token'.tl,
+                        ),
+                      ),
                     ],
                   ],
                   if (_error != null) ...[
@@ -383,7 +412,8 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                       ),
                     ),
                   ],
-                  if (!_autoSaveAfterLogin) ...[
+                  if (!_autoSaveAfterLogin &&
+                      !(quark && _showManualCookie)) ...[
                     const SizedBox(height: 16),
                     SizedBox(
                       width: double.infinity,

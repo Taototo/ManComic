@@ -1,4 +1,6 @@
 import 'dart:async';
+import 'dart:convert';
+import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter_inappwebview/flutter_inappwebview.dart'
@@ -13,27 +15,35 @@ const _desktopUserAgent =
     'AppleWebKit/537.36 (KHTML, like Gecko) '
     'Chrome/133.0.0.0 Safari/537.36';
 
-// Keep the probe in the browser session. Reading this flag synchronously also
-// works on desktop WebViews that cannot return a JavaScript Promise result.
-const _checkLoginScript =
-    '''
-(() => {
-  if (location.origin !== 'https://pan.quark.cn') return false;
-  if (window.__veneraQuarkLoggedIn) return true;
-  if (!window.__veneraQuarkChecking) {
-    window.__veneraQuarkChecking = true;
-    fetch('$_apiUrl/file/sort?pr=ucpro&fr=pc&pdir_fid=0&_page=1&_size=1',
-      {credentials: 'include'})
-      .then(response => response.json())
-      .then(data => {
-        window.__veneraQuarkLoggedIn = data.status === 200 && data.code === 0;
-      })
-      .catch(() => {})
-      .finally(() => { window.__veneraQuarkChecking = false; });
+/// Verify the session with a plain HTTP request from the app side. Doing this
+/// outside the WebView avoids the cross-origin fetch being blocked by CORS
+/// inside the login page (which leaves the JS probe hanging on some ROMs).
+Future<bool> _verifyQuarkSession(Map<String, String> cookies) async {
+  final cookie = cookies.entries
+      .map((entry) => '${entry.key}=${entry.value}')
+      .join('; ');
+  if (cookie.isEmpty) return false;
+  final client = HttpClient();
+  try {
+    final uri = Uri.parse(
+      '$_apiUrl/file/sort?pr=ucpro&fr=pc&pdir_fid=0&_page=1&_size=1',
+    );
+    final request = await client.getUrl(uri).timeout(const Duration(seconds: 15));
+    request.headers.set('Cookie', cookie);
+    request.headers.set('User-Agent', _desktopUserAgent);
+    request.headers.set('Accept', 'application/json');
+    final response = await request.close().timeout(const Duration(seconds: 15));
+    final body = await utf8.decodeStream(response).timeout(
+      const Duration(seconds: 15),
+    );
+    final data = jsonDecode(body);
+    return data is Map && data['status'] == 200 && data['code'] == 0;
+  } catch (_) {
+    return false;
+  } finally {
+    client.close(force: true);
   }
-  return false;
-})()
-''';
+}
 
 Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
   Map<String, dynamic>? authorization;
@@ -43,8 +53,7 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
   String? failure;
 
   Future<void> checkLogin(
-    Future<Map<String, String>> Function() getCookies,
-    Future<dynamic> Function(String script) evaluate,
+    Future<Map<String, String>> Function([String? url]) getCookies,
     VoidCallback close,
   ) async {
     if (finished || checking) return;
@@ -52,18 +61,16 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
     try {
       final cookies = await getCookies();
       if (finished || (cookies['__pus'] ?? '').isEmpty) return;
-      dynamic loggedIn;
+      // Read cookies from the .quark.cn parent domain, not just the API host:
+      // __pus/__puus are often scoped to pan.quark.cn and invisible when
+      // queried against drive.quark.cn.
+      var current = cookies;
       try {
-        loggedIn = await evaluate(_checkLoginScript);
-      } catch (_) {
-        // Navigation may invalidate the JavaScript context; retry after load.
-        return;
-      }
-      if (finished || (loggedIn != true && loggedIn != 'true')) return;
-      // The probe can renew __puus. Read the native cookie store again so the
-      // saved Cookie includes the renewed value and HttpOnly cookies.
-      final current = await getCookies();
-      if (finished || (current['__pus'] ?? '').isEmpty) return;
+        final broad = await getCookies('https://quark.cn/');
+        if (broad.isNotEmpty) current = {...broad, ...cookies};
+      } catch (_) {}
+      final verified = await _verifyQuarkSession(current);
+      if (finished || !verified) return;
       authorization = {
         'cookie': current.entries
             .map((entry) => '${entry.key}=${entry.value}')
@@ -92,8 +99,7 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
       final webview = DesktopWebview(
         initialUrl: _loginUrl,
         onTitleChange: (_, webview) => checkLogin(
-          () => webview.getCookies(_apiUrl),
-          webview.evaluateJavascript,
+          ([url]) => webview.getCookies(url ?? _apiUrl),
           webview.close,
         ),
         onClose: () => closed.complete(),
@@ -104,11 +110,11 @@ Future<Map<String, dynamic>?> showQuarkLogin(BuildContext context) async {
     } else {
       await context.to<void>(() {
         void check(InAppWebViewController controller) => checkLogin(
-          () async => {
-            for (final cookie in await controller.getCookies(_apiUrl) ?? [])
+          ([url]) async => {
+            for (final cookie
+                in await controller.getCookies(url ?? _apiUrl) ?? [])
               cookie.name: cookie.value,
           },
-          (script) => controller.evaluateJavascript(source: script),
           () => context.pop(),
         );
         return AppWebview(

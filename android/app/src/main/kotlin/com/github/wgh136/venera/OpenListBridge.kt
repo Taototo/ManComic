@@ -83,7 +83,12 @@ object OpenListBridge {
 
     fun handle(call: MethodCall, result: MethodChannel.Result) {
         when (call.method) {
-            "available" -> result.success(bound || service != null)
+            // The core AAR is bundled with every Android build, so the bridge
+            // itself is always present. Do NOT gate this on `bound`: binding
+            // only happens on the first `invoke`, so checking it here would
+            // always report false and hide the whole feature. Native init
+            // failures surface as `invoke` errors instead.
+            "available" -> result.success(true)
             "invoke" -> {
                 val request = call.argument<String>("request")
                 if (request.isNullOrEmpty()) {
