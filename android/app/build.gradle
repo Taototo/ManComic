@@ -26,7 +26,7 @@ if (flutterVersionName == null) {
 }
 
 // App display version. Bump the last segment (001 -> 002 ...) for every new build.
-def appVersionName = "1.5.4"
+def appVersionName = "1.5.5"
 
 def keystorePropertiesFile = rootProject.file("key.properties")
 def keystoreProperties = new Properties()
@@ -158,4 +158,8 @@ dependencies {
     // 注意 libXray 里嵌了一个 Go runtime：一个进程只能有一份，别再往里加第二个
     // Go/gomobile 库，否则会在加载阶段就崩。
     implementation files('libs/libXray.aar')
+    // 网盘内核（Go/gomobile），AAR 已打补丁：go.* → openlistgo.*、
+    // libgojni → libopenlistjni，避免与 libXray 的 runtime 撞名。
+    // 实际调用在 :openlist 独立进程（见 OpenListService.kt）。
+    implementation files('libs/openlistcore-patched.aar')
 }

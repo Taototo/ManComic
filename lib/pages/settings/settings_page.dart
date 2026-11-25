@@ -25,6 +25,7 @@ import 'package:venera/foundation/update_check_policy.dart';
 import 'package:venera/pages/xray_proxy_page.dart';
 import 'package:venera/network/app_dio.dart';
 import 'package:venera/pages/comic_source_page.dart';
+import 'package:venera/pages/cloud/cloud_library_page.dart';
 import 'package:venera/pages/home_modules_page.dart';
 import 'package:venera/pages/local_health_page.dart';
 import 'package:venera/pages/reading_report_page.dart';

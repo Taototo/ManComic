@@ -46,6 +46,12 @@
             android:exported="false"
             android:foregroundServiceType="dataSync"
             android:stopWithTask="true"/>
+        <!-- 网盘内核（Go/gomobile）。必须独立进程：主进程已有 libXray 的
+             Go runtime，一个进程塞两份会在加载阶段崩。 -->
+        <service
+            android:name=".OpenListService"
+            android:exported="false"
+            android:process=":openlist"/>
         <activity
             android:name=".MainActivity"
             android:exported="true"

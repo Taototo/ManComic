@@ -24,6 +24,7 @@ import 'package:venera/pages/comic_source_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
 import 'package:venera/pages/settings/settings_page.dart';
 import 'package:venera/utils/app_icon.dart';
+import 'package:venera/utils/cloud_bootstrap.dart';
 import 'package:venera/utils/app_links.dart';
 import 'package:venera/utils/handle_text_share.dart';
 import 'package:venera/utils/opencc.dart';
@@ -158,6 +159,9 @@ Future<void> _initDeferredAndroidServices() async {
   // 内置代理：上次开着就重新拉起。隧道只把代理覆盖在内存里，所以冷启动时
   // 不会有残留的死端口，这里失败也只是回到直连/系统代理。
   await _runSafely("Built-in Proxy", XrayTunnel.restore);
+  // 网盘漫画库：绑定原生内核并把已配置的库注册成漫画源。
+  // 放首帧后是因为绑定服务要走一次 channel，不该压白屏时间。
+  await _runSafely("Cloud Libraries", CloudBootstrap.configure);
   await _runSafely("Display Mode", () async {
     // 先读一次屏幕信息（档位、最高刷新率），再按用户选择申请。
     // 申请失败不影响使用，Flutter 仍会跟随系统 vsync。

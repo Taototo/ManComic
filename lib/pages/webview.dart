@@ -55,6 +55,7 @@ extension WebviewExtension on InAppWebViewController {
 class AppWebview extends StatefulWidget {
   const AppWebview(
       {required this.initialUrl,
+      this.userAgent,
       this.onTitleChange,
       this.onNavigation,
       this.singlePage = false,
@@ -63,6 +64,9 @@ class AppWebview extends StatefulWidget {
       super.key});
 
   final String initialUrl;
+
+  /// 需要桌面 UA 的登录页（如夸克网盘）走这里覆盖默认 UA。
+  final String? userAgent;
 
   final void Function(String title, InAppWebViewController controller)?
       onTitleChange;
@@ -198,6 +202,7 @@ class _AppWebviewState extends State<AppWebview> {
       webViewEnvironment: e,
       initialSettings: InAppWebViewSettings(
         isInspectable: true,
+        userAgent: widget.userAgent,
       ),
       initialUrlRequest: URLRequest(url: WebUri(widget.initialUrl)),
       onTitleChanged: (c, t) {

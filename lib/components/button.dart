@@ -1,5 +1,14 @@
 part of 'components.dart';
 
+/// 网盘/远程库页面里「保存 / 登录 / 完成」这类主操作按钮的统一样式。
+///
+/// 移植前这些页面直接引用 `actionButtonStyle`，ManComi 原先没有这个常量；
+/// 放在组件库里，FilledButton / OutlinedButton 都能共用。
+final ButtonStyle actionButtonStyle = FilledButton.styleFrom(
+  minimumSize: const Size(88, 40),
+  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+);
+
 class HoverBox extends StatefulWidget {
   const HoverBox(
       {super.key, required this.child, this.borderRadius = BorderRadius.zero});

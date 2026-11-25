@@ -323,6 +323,7 @@ class ComicSource {
     LoadComicPagesFunc? loadComicPages,
     GetImageLoadingConfigFunc? getImageLoadingConfig,
     GetThumbnailLoadingConfigFunc? getThumbnailLoadingConfig,
+    List<ExplorePageData>? explorePages,
   }) : this(
           name,
           key,
@@ -330,7 +331,7 @@ class ComicSource {
           null, // categoryData
           null, // categoryComicsData
           null, // favoriteData
-          const [], // explorePages
+          explorePages ?? const [], // explorePages
           null, // searchPageData
           null, // settings
           loadComicInfo,
@@ -428,8 +429,17 @@ class ExplorePageData {
     this.loadPage,
     this.loadNext,
     this.loadMultiPart,
-    this.loadMixed,
-  );
+    this.loadMixed, {
+    this.changeListenable,
+    this.statusMessage,
+    this.onRefresh,
+  });
+
+  /// 网盘库这类"运行时变化"的源用：内容变化/状态提示/下拉刷新。
+  /// 普通 JS 源不传，行为与以前完全一致。
+  final Listenable? changeListenable;
+  final String Function()? statusMessage;
+  final Future<void> Function()? onRefresh;
 }
 
 class ExplorePagePart {
@@ -478,7 +488,17 @@ class SearchPageData {
 
   final SearchNextFunction? loadNext;
 
-  const SearchPageData(this.searchOptions, this.loadPage, this.loadNext);
+  const SearchPageData(
+    this.searchOptions,
+    this.loadPage,
+    this.loadNext, {
+    this.loadTags,
+    this.changeListenable,
+  });
+
+  /// 网盘库用：标签列表与内容变化通知。普通源不传，行为不变。
+  final Future<List<String>> Function()? loadTags;
+  final Listenable? changeListenable;
 }
 
 class SearchOptions {

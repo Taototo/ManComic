@@ -1,0 +1,1065 @@
+import 'dart:convert';
+
+import 'package:flutter/foundation.dart';
+import 'package:uuid/uuid.dart';
+import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/appdata_sync_policy.dart';
+
+import 'models.dart';
+import 'openlist_rpc.dart';
+import 'remote_file_store.dart';
+import 'remote_read_scheduler.dart';
+import 'webdav_file_store.dart';
+import '../webdav.dart';
+
+const remoteStorageAccountsSetting = 'remoteStorageAccounts';
+const remoteLibrariesSetting = 'remoteLibraries';
+
+class RemoteStorageAccounts with ChangeNotifier {
+  RemoteStorageAccounts({OpenListRpcClient? openListRpc})
+    : _openListRpc = openListRpc;
+  static final instance = RemoteStorageAccounts();
+  OpenListRpcClient? _openListRpc;
+  Future<void>? _initialization;
+  bool _openListReady = false;
+  Future<void>? _proxyUpdate;
+  String? _dataDir;
+  String? _proxy;
+  Future<String?> Function()? _proxyResolver;
+  final _uuid = const Uuid();
+  final _activeStores = <String, Set<RemoteFileStore>>{};
+  final _readSchedulers = <String, RemoteReadScheduler>{};
+  final _pendingNativeWrites = <String, Future<void>>{};
+
+  RemoteReadScheduler readSchedulerFor(StorageAccount account) =>
+      _readSchedulers.putIfAbsent('${App.dataPath}:${account.id}', () {
+        final raw = appdata.implicitData['remoteStorageCooldowns'];
+        final until = raw is Map ? raw[account.id] : null;
+        return RemoteReadScheduler(
+          minInterval: account.backend == StorageBackend.webdav
+              ? Duration.zero
+              : const Duration(milliseconds: 150),
+          rateLimitDelay: const Duration(minutes: 15),
+          failDuringCooldown: true,
+          cooldownUntil: until is int
+              ? DateTime.fromMillisecondsSinceEpoch(until)
+              : null,
+          onCooldown: (deadline) async {
+            final current = appdata.implicitData['remoteStorageCooldowns'];
+            appdata.implicitData['remoteStorageCooldowns'] = {
+              if (current is Map) ...current,
+              account.id: deadline.millisecondsSinceEpoch,
+            };
+            await appdata.writeImplicitData();
+          },
+        );
+      });
+
+  void configureOpenList(
+    OpenListRpcClient rpc, {
+    String? dataDir,
+    String? proxy,
+    Future<String?> Function()? proxyResolver,
+  }) {
+    _openListRpc = rpc;
+    _dataDir = dataDir;
+    _proxy = proxy;
+    _proxyResolver = proxyResolver;
+  }
+
+  /// 后台启动和网盘操作共享初始化，并在操作前应用当前代理。
+  Future<void> ensureInitialized() async {
+    final dataDir = _dataDir;
+    if (dataDir == null) return;
+    final resolver = _proxyResolver;
+    final proxy = resolver == null ? _proxy : await resolver();
+    await (_initialization ?? initialize(dataDir: dataDir, proxy: proxy));
+    await updateProxy(proxy);
+  }
+
+  Future<void> initialize({required String dataDir, String? proxy}) {
+    final rpc = _openListRpc;
+    if (rpc == null) return Future.value();
+    _dataDir = dataDir;
+    _proxy = proxy;
+    return _initialization ??= _initialize(rpc, dataDir, proxy).catchError((
+      Object error,
+    ) {
+      _initialization = null;
+      throw error;
+    });
+  }
+
+  Future<void> _initialize(
+    OpenListRpcClient rpc,
+    String dataDir,
+    String? proxy,
+  ) async {
+    _throwRpcError(
+      await rpc.invoke('initialize', {
+        'dataDir': dataDir,
+        if (proxy != null && proxy.isNotEmpty)
+          'proxy': proxy.contains('://') ? proxy : 'http://$proxy',
+      }),
+    );
+    await _refreshNativeAccounts();
+    _openListReady = true;
+  }
+
+  Future<void> updateProxy(String? proxy) async {
+    final rpc = _openListRpc;
+    final dataDir = _dataDir;
+    if (rpc == null || dataDir == null) return;
+    await (_initialization ?? initialize(dataDir: dataDir, proxy: proxy));
+    while (_proxyUpdate != null) {
+      await _proxyUpdate;
+    }
+    if (_proxy == proxy) return;
+    final update = rpc
+        .invoke('initialize', {
+          'dataDir': dataDir,
+          if (proxy != null && proxy.isNotEmpty)
+            'proxy': proxy.contains('://') ? proxy : 'http://$proxy',
+        })
+        .then(_throwRpcError);
+    _proxyUpdate = update;
+    try {
+      await update;
+      _proxy = proxy;
+    } finally {
+      _proxyUpdate = null;
+    }
+  }
+
+  List<StorageAccount> get accounts => _readAccounts();
+  List<RemoteLibrary> get libraries => _readLibraries();
+  bool isNameInUse(String name, {String? excludingId}) => accounts.any(
+    (account) =>
+        account.id != excludingId &&
+        _accountNameKey(account.name) == _accountNameKey(name),
+  );
+  String availableName(String name) => _availableAccountName(name, accounts);
+  StorageAccount? account(String id) {
+    for (final value in accounts) {
+      if (value.id == id) return value;
+    }
+    return null;
+  }
+
+  Future<void> migrateLegacyWebDavLocations() async {
+    final values = accounts;
+    final legacyLibraryAccounts = libraries
+        .where((library) => library.accountId.startsWith('legacy-'))
+        .map((library) => library.accountId)
+        .toSet();
+    var changed = false;
+    for (final (setting, locationKey, directory) in [
+      ('webdav', 'syncRemoteLocation', '/VeneraPlus/'),
+      (
+        'backupWebdav',
+        'backupRemoteLocation',
+        appdata.settings['backupWebdavPath'] as String? ?? '/venera_backup/',
+      ),
+    ]) {
+      final previousLocation = appdata.settings[locationKey];
+      if (previousLocation is Map &&
+          values.any((value) => value.id == previousLocation['accountId'])) {
+        continue;
+      }
+      final raw = appdata.settings[setting];
+      if (raw is! List ||
+          raw.length != 3 ||
+          raw.any((item) => item is! String)) {
+        continue;
+      }
+      final endpoint = WebDavEndpoint(
+        url: raw[0] as String,
+        user: raw[1] as String,
+        password: setting == 'backupWebdav'
+            ? (raw[2] as String).trim()
+            : raw[2] as String,
+      );
+      if (!endpoint.isValid) continue;
+      StorageAccount? selected;
+      for (final value in values.where(
+        (a) => a.backend == StorageBackend.webdav,
+      )) {
+        if (setting == 'webdav' && legacyLibraryAccounts.contains(value.id)) {
+          continue;
+        }
+        final existing = WebDavEndpoint(
+          url: value.authorization['url'] as String? ?? '',
+          user: value.authorization['user'] as String? ?? '',
+          password: value.authorization['password'] as String? ?? '',
+        );
+        if (existing.url == endpoint.url &&
+            existing.user == endpoint.user &&
+            existing.password == endpoint.password) {
+          selected = value;
+          break;
+        }
+      }
+      selected ??= StorageAccount(
+        id:
+            previousLocation is Map &&
+                previousLocation['accountId'] is String &&
+                (previousLocation['accountId'] as String).isNotEmpty
+            ? previousLocation['accountId'] as String
+            : _uuid.v4(),
+        backend: StorageBackend.webdav,
+        driver: 'webdav',
+        name: setting == 'webdav' ? 'WebDAV同步' : 'WebDAV',
+        authorization: {
+          'url': endpoint.url,
+          'user': endpoint.user,
+          'password': endpoint.password,
+        },
+      );
+      if (!values.any((a) => a.id == selected!.id)) values.add(selected);
+      appdata.settings[locationKey] = RemoteLocation(
+        accountId: selected.id,
+        directory:
+            previousLocation is Map && previousLocation['directory'] is String
+            ? previousLocation['directory'] as String
+            : directory,
+      ).toJson();
+      appdata.settings[setting] = const [];
+      changed = true;
+    }
+    if (appdata.settings['legacyWebDavAccountNamesMigrated'] != true) {
+      final syncLocation = appdata.settings['syncRemoteLocation'];
+      for (var index = 0; index < values.length; index++) {
+        final value = values[index];
+        if (value.backend != StorageBackend.webdav || value.name != 'WebDAV') {
+          continue;
+        }
+        final isLibrary = legacyLibraryAccounts.contains(value.id);
+        final isSync =
+            syncLocation is Map && syncLocation['accountId'] == value.id;
+        if (!isLibrary && !isSync) continue;
+        values[index] = value.copyWith(
+          name: isLibrary ? 'WebDAV漫画库' : 'WebDAV同步',
+        );
+        if (isLibrary && isSync) {
+          // The previous migration reused the library account for sync. Keep
+          // the library identity and give the sync destination its own account.
+          final syncAccount = StorageAccount(
+            id: _uuid.v4(),
+            backend: value.backend,
+            driver: value.driver,
+            name: 'WebDAV同步',
+            authorization: value.authorization,
+            status: value.status,
+            statusMessage: value.statusMessage,
+          );
+          values.add(syncAccount);
+          appdata.settings['syncRemoteLocation'] = {
+            ...syncLocation,
+            'accountId': syncAccount.id,
+          };
+        }
+      }
+      appdata.settings['legacyWebDavAccountNamesMigrated'] = true;
+      changed = true;
+    }
+    if (!changed) return;
+    appdata.settings[remoteStorageAccountsSetting] = values
+        .map((value) => value.toJson())
+        .toList();
+    await appdata.saveData(false);
+    notifyListeners();
+  }
+
+  Future<StorageAccount> save(StorageAccount value) async {
+    value = value.copyWith(name: value.name.trim());
+    if (isNameInUse(value.name, excludingId: value.id)) {
+      throw ArgumentError('An account with this name already exists.');
+    }
+    var account = value.id.isEmpty
+        ? StorageAccount(
+            id: _uuid.v4(),
+            backend: value.backend,
+            driver: value.driver,
+            name: value.name,
+            oauthCallbackUrl: value.oauthCallbackUrl,
+            authorization: value.authorization,
+            status: value.status,
+            statusMessage: value.statusMessage,
+          )
+        : value;
+    var previous = this.account(account.id);
+    final replacesQuarkOpen =
+        previous?.backend == StorageBackend.openlist &&
+        account.backend == StorageBackend.openlist &&
+        previous?.driver == 'QuarkOpen' &&
+        account.driver == 'Quark';
+    if (previous != null &&
+        (previous.backend != account.backend ||
+            previous.driver != account.driver) &&
+        !replacesQuarkOpen) {
+      throw ArgumentError(
+        'Storage account backend and driver cannot be changed',
+      );
+    }
+    RemoteStorageException? initializationError;
+    if (account.backend == StorageBackend.openlist && _openListRpc != null) {
+      try {
+        await ensureInitialized();
+      } on RemoteStorageException catch (error) {
+        initializationError = error;
+      }
+    }
+    if (previous != null &&
+        previous.backend == StorageBackend.openlist &&
+        initializationError == null &&
+        jsonEncode(previous.authorization) ==
+            jsonEncode(account.authorization)) {
+      await _refreshNativeAccounts();
+      final refreshed = this.account(account.id);
+      if (refreshed != null) {
+        previous = refreshed;
+        account = refreshed.copyWith(
+          name: account.name,
+          oauthCallbackUrl: account.oauthCallbackUrl,
+          status: account.status,
+          statusMessage: account.statusMessage,
+          clearStatusMessage: account.statusMessage == null,
+        );
+      }
+    }
+    if (previous != null &&
+        (previous.driver != account.driver ||
+            previous.backend != account.backend ||
+            jsonEncode(previous.authorization) !=
+                jsonEncode(account.authorization))) {
+      await _cancelStores(account.id);
+    }
+    final values = accounts.where((item) => item.id != account.id).toList()
+      ..add(account);
+    appdata.settings[remoteStorageAccountsSetting] = values
+        .map((item) => item.toJson())
+        .toList();
+    await appdata.saveData();
+    final rpc = _openListRpc;
+    if (account.backend == StorageBackend.openlist && rpc != null) {
+      try {
+        if (initializationError != null) throw initializationError;
+        if (_pendingNativeAccounts.containsKey(account.id)) {
+          await _registerPendingNativeAccount(rpc, account.id);
+        } else {
+          await _saveNativeAccount(rpc, account);
+        }
+      } on RemoteStorageException catch (error) {
+        final pending = (this.account(account.id) ?? account).copyWith(
+          status: error.isAuthorizationFailure
+              ? StorageAuthorizationStatus.invalid
+              : StorageAuthorizationStatus.unknown,
+          statusMessage: error.message,
+        );
+        await updateStatus(pending);
+        return pending;
+      }
+    }
+    notifyListeners();
+    return account;
+  }
+
+  Future<void> remove(String id) async {
+    final previous = account(id);
+    if (previous?.backend == StorageBackend.openlist) {
+      try {
+        await ensureInitialized();
+      } on RemoteStorageException {
+        // Local removal remains possible when the native core is unavailable.
+      }
+    }
+    await _cancelStores(id);
+    final rpc = _openListRpc;
+    if (previous?.backend == StorageBackend.openlist && rpc != null) {
+      try {
+        await _pendingNativeWrites[id];
+      } on RemoteStorageException {
+        // 即使应用待更新授权失败，仍可删除网盘账号。
+      }
+      try {
+        _throwRpcError(await rpc.invoke('cancelAccount', {'accountId': id}));
+        _throwRpcError(await rpc.invoke('deleteAccount', {'id': id}));
+      } catch (_) {}
+    }
+    final pending = _pendingNativeAccounts;
+    if (pending.remove(id) != null) _writePendingNativeAccounts(pending);
+    appdata.settings[remoteStorageAccountsSetting] = accounts
+        .where((item) => item.id != id)
+        .map((item) => item.toJson())
+        .toList();
+    for (final key in const ['syncRemoteLocation', 'backupRemoteLocation']) {
+      final value = appdata.settings[key];
+      if (value is Map && value['accountId'] == id) {
+        appdata.settings[key] = null;
+      }
+    }
+    await appdata.saveData();
+    notifyListeners();
+  }
+
+  RemoteFileStore storeFor(
+    String accountId, {
+    bool optimizeWebDavTransfers = false,
+  }) {
+    final value = account(accountId);
+    if (value == null) {
+      throw ArgumentError.value(
+        accountId,
+        'accountId',
+        'Unknown storage account',
+      );
+    }
+    final store = open(value, optimizeWebDavTransfers: optimizeWebDavTransfers);
+    (_activeStores[accountId] ??= {}).add(store);
+    return store;
+  }
+
+  void release(RemoteFileStore store) {
+    _activeStores[store.account.id]?.remove(store);
+    if (store is _StatusTrackingStore) store.close();
+  }
+
+  /// Stops outstanding transfers and releases native OpenList drivers. The
+  /// account manager remains reusable if this process later initializes again.
+  Future<void> close() async {
+    _openListReady = false;
+    final stores = _activeStores.values.expand((items) => items).toList();
+    _activeStores.clear();
+    try {
+      await Future.wait(stores.map((store) => store.cancelAll()));
+    } finally {
+      final rpc = _openListRpc;
+      try {
+        try {
+          await _initialization;
+          await _proxyUpdate;
+        } on RemoteStorageException {
+          // A failed initialization still needs its native resources closed.
+        }
+        if (rpc != null) _throwRpcError(await rpc.invoke('close', const {}));
+      } finally {
+        _initialization = null;
+        _openListReady = false;
+        _dataDir = null;
+        _proxy = null;
+      }
+    }
+  }
+
+  Future<void> updateStatus(StorageAccount value) async {
+    final current = account(value.id);
+    if (current == null) return;
+    final updated = current.copyWith(
+      status: value.status,
+      statusMessage: value.statusMessage,
+      clearStatusMessage: value.statusMessage == null,
+    );
+    appdata.settings[remoteStorageAccountsSetting] = [
+      ...accounts
+          .where((item) => item.id != updated.id)
+          .map((item) => item.toJson()),
+      updated.toJson(),
+    ];
+    await appdata.saveData(false);
+    notifyListeners();
+  }
+
+  RemoteFileStore open(
+    StorageAccount account, {
+    bool optimizeWebDavTransfers = false,
+  }) {
+    final delegate = switch (account.backend) {
+      StorageBackend.webdav => WebDavFileStore(
+        account,
+        optimizeTransfers: optimizeWebDavTransfers,
+      ),
+      StorageBackend.openlist => OpenListFileStore(
+        account,
+        _openListRpc ?? _UnavailableOpenListRpc(),
+        waitForInitialization: () => _ensureAccountInitialized(account.id),
+      ),
+    };
+    return _StatusTrackingStore(
+      delegate,
+      _recordResult,
+      readSchedulerFor(account),
+    );
+  }
+
+  Future<void> _recordResult(StorageAccount account, Object? error) async {
+    final current = this.account(account.id);
+    if (current == null) return;
+    StorageAccount? updated;
+    if (error == null && current.authorizationIsKnownInvalid) {
+      updated = current.copyWith(
+        status: StorageAuthorizationStatus.valid,
+        clearStatusMessage: true,
+      );
+    } else if (error is RemoteStorageException &&
+        error.isAuthorizationFailure) {
+      updated = current.copyWith(
+        status: StorageAuthorizationStatus.invalid,
+        statusMessage: error.message,
+      );
+    }
+    if (updated != null) await updateStatus(updated);
+  }
+
+  Future<void> _cancelStores(String accountId) async {
+    final stores =
+        _activeStores.remove(accountId)?.toList() ?? const <RemoteFileStore>[];
+    await Future.wait(stores.map((store) => store.cancelAll()));
+  }
+
+  /// 快照使用本机授权，并在内核就绪时读取它已保存的最新令牌。
+  Future<List<Map<String, dynamic>>> beforeExportSettings() async {
+    if (_openListReady &&
+        accounts.any((item) => item.backend == StorageBackend.openlist)) {
+      try {
+        final additions = await _readNativeAdditions();
+        if (additions != null) await _cacheNativeAuthorizations(additions);
+      } on RemoteStorageException {
+        // 读取失败时使用本机已有授权。
+      }
+    }
+    return accounts.map((item) => item.toJson()).toList();
+  }
+
+  Future<Map<String, Map<String, dynamic>>?> _readNativeAdditions() async {
+    final rpc = _openListRpc;
+    if (rpc == null) return null;
+    final response = await rpc.invoke('accounts', const {});
+    final data = response['data'];
+    if (data is! Map || data['accounts'] is! List) return null;
+    final additions = <String, Map<String, dynamic>>{};
+    for (final item in data['accounts'] as List) {
+      if (item is Map && item['id'] is String && item['addition'] is Map) {
+        additions[item['id'] as String] = (item['addition'] as Map).map(
+          (key, value) => MapEntry('$key', value),
+        );
+      }
+    }
+    return additions;
+  }
+
+  Future<void> _refreshNativeAccounts() async {
+    final rpc = _openListRpc;
+    if (rpc == null) return;
+    final additions = await _readNativeAdditions();
+    if (additions == null) return;
+    final pending = _pendingNativeAccounts;
+    final localIds = {
+      ...accounts.map((item) => item.id),
+      ...pending.values.expand((ids) => ids),
+    };
+    for (final nativeId in additions.keys.where(
+      (id) => !localIds.contains(id),
+    )) {
+      try {
+        await rpc.invoke('deleteAccount', {'id': nativeId});
+      } catch (_) {}
+    }
+    var saved = false;
+    for (final account in accounts.where((item) {
+      final addition = additions[item.id];
+      return item.backend == StorageBackend.openlist &&
+          !_pendingNativeAccounts.containsKey(item.id) &&
+          addition == null;
+    })) {
+      try {
+        await _saveNativeAccount(rpc, account);
+        saved = true;
+      } on RemoteStorageException {
+        // 保留本机授权，供下次初始化重试。
+      }
+    }
+    final latest = saved
+        ? await _readNativeAdditions() ?? additions
+        : additions;
+    await _cacheNativeAuthorizations(latest);
+  }
+
+  Future<void> _cacheNativeAuthorizations(
+    Map<String, Map<String, dynamic>> additions,
+  ) async {
+    final pending = _pendingNativeAccounts;
+    final updated = accounts.map((account) {
+      final addition = additions[account.id];
+      return addition == null ||
+              account.backend != StorageBackend.openlist ||
+              pending.containsKey(account.id)
+          ? account
+          : applyNativeAuthorization(account, addition);
+    }).toList();
+    appdata.settings[remoteStorageAccountsSetting] = updated
+        .map((item) => item.toJson())
+        .toList();
+    await appdata.saveData(false);
+  }
+
+  /// Capture before importing app-data because importing settings may replace
+  /// the current value before credentials are merged.
+  List<StorageAccount> captureLocalAccounts() => List.unmodifiable(accounts);
+
+  Map<String, Set<String>> get _pendingNativeAccounts {
+    final raw = appdata.settings[appdataPendingOpenListAccountsKey];
+    if (raw is! Map) return {};
+    return {
+      for (final entry in raw.entries)
+        if (entry.key is String && entry.value is List)
+          entry.key as String: (entry.value as List)
+              .whereType<String>()
+              .toSet(),
+    };
+  }
+
+  void _writePendingNativeAccounts(Map<String, Set<String>> pending) {
+    if (pending.isEmpty) {
+      // ManComi 的 Settings 没有 remove；置空即视为「无待注册账号」，
+      // 读取方只把 Map 当有效值，null 和删 key 行为一致。
+      appdata.settings[appdataPendingOpenListAccountsKey] = null;
+    } else {
+      appdata.settings[appdataPendingOpenListAccountsKey] = {
+        for (final entry in pending.entries) entry.key: entry.value.toList(),
+      };
+    }
+  }
+
+  Future<void> _saveNativeAccount(
+    OpenListRpcClient rpc,
+    StorageAccount account,
+  ) async {
+    _throwRpcError(
+      await rpc.invoke('saveAccount', {
+        'id': account.id,
+        'driver': account.driver,
+        'name': account.name,
+        'addition': account.authorization,
+      }),
+      driver: account.driver,
+    );
+  }
+
+  Future<void> _ensureAccountInitialized(String id) async {
+    await ensureInitialized();
+    final rpc = _openListRpc;
+    if (rpc != null && _pendingNativeAccounts.containsKey(id)) {
+      await _registerPendingNativeAccount(rpc, id);
+    }
+  }
+
+  Future<void> _registerPendingNativeAccount(OpenListRpcClient rpc, String id) {
+    return _pendingNativeWrites[id] ??= _applyPendingNativeAccount(rpc, id)
+        .whenComplete(() {
+          _pendingNativeWrites.remove(id);
+        });
+  }
+
+  Future<void> _applyPendingNativeAccount(
+    OpenListRpcClient rpc,
+    String id,
+  ) async {
+    while (true) {
+      final pendingAliases = _pendingNativeAccounts[id];
+      final value = account(id);
+      if (pendingAliases == null || value == null) return;
+
+      await _saveNativeAccount(rpc, value);
+      final addition = (await _readNativeAdditions())?[id];
+      for (final alias in pendingAliases) {
+        if (account(alias) != null) continue;
+        try {
+          await _cancelStores(alias);
+          await rpc.invoke('deleteAccount', {'id': alias});
+        } on RemoteStorageException {
+          // 未能清理的旧挂载在下次初始化时重试。
+        }
+      }
+
+      final pending = _pendingNativeAccounts;
+      final current = account(id);
+      if (current == null || !pending.containsKey(id)) return;
+      if (!setEquals(pending[id], pendingAliases) ||
+          current.name != value.name ||
+          jsonEncode(current.authorization) !=
+              jsonEncode(value.authorization)) {
+        continue;
+      }
+      final updated = applyNativeAuthorization(
+        current,
+        addition ?? value.authorization,
+      );
+      appdata.settings[remoteStorageAccountsSetting] = [
+        for (final item in accounts) (item.id == id ? updated : item).toJson(),
+      ];
+      pending.remove(id);
+      _writePendingNativeAccounts(pending);
+      await appdata.saveData(false);
+    }
+  }
+
+  /// 合并并保存本机授权，在使用对应网盘时将变更应用到内核。
+  Future<void> mergeImportedSettings(
+    Object? raw, {
+    List<StorageAccount>? localBeforeImport,
+  }) async {
+    if (raw is! List) return;
+    final incoming = raw
+        .whereType<Map>()
+        .map((item) => StorageAccount.fromJson(item))
+        .where((item) => item.isConfigured)
+        .toList();
+    final local = localBeforeImport ?? accounts;
+    final aliases = <String, String>{};
+    final merged = mergeRemoteStorageAccounts(
+      local,
+      incoming,
+      idAliases: aliases,
+    );
+    final remapped = aliases.entries.where((entry) => entry.key != entry.value);
+    final replacedIds = remapped.map((entry) => entry.value).toSet();
+    final openListAccounts = merged.where(
+      (item) => item.backend == StorageBackend.openlist,
+    );
+    final openListIds = openListAccounts.map((item) => item.id).toSet();
+    for (final entry in remapped) {
+      if (!openListIds.contains(entry.value)) await _cancelStores(entry.key);
+    }
+    final pending = _pendingNativeAccounts;
+    for (final value in openListAccounts) {
+      final existing = _accountById(local, value.id);
+      if (existing == null ||
+          replacedIds.contains(value.id) ||
+          jsonEncode(existing.authorization) !=
+              jsonEncode(value.authorization)) {
+        pending.putIfAbsent(value.id, () => {});
+      }
+    }
+    for (final entry in remapped) {
+      if (openListIds.contains(entry.value)) {
+        final oldAliases = pending.remove(entry.key);
+        pending[entry.value]!.addAll({entry.key, ...?oldAliases});
+      }
+    }
+    pending.removeWhere((id, _) => !openListIds.contains(id));
+    _remapAccountReferences(aliases);
+    appdata.settings[remoteStorageAccountsSetting] = merged
+        .map((item) => item.toJson())
+        .toList();
+    _writePendingNativeAccounts(pending);
+    await appdata.saveData(false);
+  }
+
+  void _remapAccountReferences(Map<String, String> aliases) {
+    for (final key in const ['syncRemoteLocation', 'backupRemoteLocation']) {
+      final location = appdata.settings[key];
+      if (location is Map && aliases.containsKey(location['accountId'])) {
+        appdata.settings[key] = {
+          ...location,
+          'accountId': aliases[location['accountId']],
+        };
+      }
+    }
+    final libraries = appdata.settings[remoteLibrariesSetting];
+    if (libraries is List) {
+      appdata.settings[remoteLibrariesSetting] = [
+        for (final library in libraries)
+          if (library is Map && aliases.containsKey(library['accountId']))
+            {...library, 'accountId': aliases[library['accountId']]}
+          else
+            library,
+      ];
+    }
+  }
+
+  Future<RemoteLibrary> saveLibrary(RemoteLibrary value) async {
+    final id = value.id.isEmpty ? _uuid.v4() : value.id;
+    final library = RemoteLibrary(
+      id: id,
+      sourceKey: value.sourceKey.isEmpty
+          ? 'remote_library_$id'
+          : value.sourceKey,
+      accountId: value.accountId,
+      directories: value.directories,
+      name: value.name,
+      autoRefresh: value.autoRefresh,
+      refreshIntervalMinutes: value.refreshIntervalMinutes,
+    ).normalized();
+    final values = libraries.where((item) => item.id != library.id).toList()
+      ..add(library);
+    appdata.settings[remoteLibrariesSetting] = values
+        .map((item) => item.toJson())
+        .toList();
+    await appdata.saveData(false);
+    notifyListeners();
+    return library;
+  }
+
+  Future<void> removeLibrary(String id) async {
+    appdata.settings[remoteLibrariesSetting] = libraries
+        .where((item) => item.id != id)
+        .map((item) => item.toJson())
+        .toList();
+    await appdata.saveData(false);
+    notifyListeners();
+  }
+
+  List<StorageAccount> _readAccounts() => _readList(
+    appdata.settings[remoteStorageAccountsSetting],
+    StorageAccount.fromJson,
+  );
+  List<RemoteLibrary> _readLibraries() => _readList(
+    appdata.settings[remoteLibrariesSetting],
+    RemoteLibrary.fromJson,
+  );
+}
+
+/// Matches accounts by ID or by unique name within the same backend and driver.
+/// 123 accounts take the newest complete authorization; other accounts retain
+/// local credentials unless explicitly invalid.
+List<StorageAccount> mergeRemoteStorageAccounts(
+  Iterable<StorageAccount> local,
+  Iterable<StorageAccount> incoming, {
+  Map<String, String>? idAliases,
+}) {
+  final merged = <StorageAccount>[];
+  final aliases = idAliases ?? <String, String>{};
+  for (final value in [...local, ...incoming]) {
+    var index = merged.indexWhere(
+      (item) => item.id == (aliases[value.id] ?? value.id),
+    );
+    if (index < 0 && value.name.trim().isNotEmpty) {
+      index = merged.indexWhere(
+        (item) =>
+            _accountNameKey(item.name) == _accountNameKey(value.name) &&
+            item.backend == value.backend &&
+            item.driver == value.driver,
+      );
+    }
+    if (index < 0) {
+      merged.add(value.copyWith(name: value.name.trim()));
+      aliases[value.id] = value.id;
+      continue;
+    }
+    final existing = merged[index];
+    if (existing.backend != value.backend || existing.driver != value.driver) {
+      continue;
+    }
+    // Both devices select the same survivor even when they import in reverse order.
+    final id = existing.id.compareTo(value.id) <= 0 ? existing.id : value.id;
+    for (final entry in aliases.entries.toList()) {
+      if (entry.value == existing.id) aliases[entry.key] = id;
+    }
+    aliases[existing.id] = id;
+    aliases[value.id] = id;
+    final useIncoming = existing.authorizationIsKnownInvalid;
+    if (useIncoming) {
+      merged[index] = existing.copyWith(
+        id: id,
+        name: value.name.trim(),
+        oauthCallbackUrl: value.oauthCallbackUrl,
+        authorization: value.authorization,
+        status: value.status,
+        statusMessage: value.statusMessage,
+        clearStatusMessage: value.statusMessage == null,
+      );
+    } else {
+      merged[index] = existing.copyWith(id: id, name: value.name.trim());
+    }
+  }
+  final named = <StorageAccount>[];
+  for (final value in merged) {
+    named.add(value.copyWith(name: _availableAccountName(value.name, named)));
+  }
+  return named;
+}
+
+String _accountNameKey(String name) => name.trim().toLowerCase();
+
+String _availableAccountName(
+  String preferredName,
+  List<StorageAccount> values,
+) {
+  final name = preferredName.trim();
+  bool used(String candidate) => values.any(
+    (value) => _accountNameKey(value.name) == _accountNameKey(candidate),
+  );
+  if (!used(name)) return name;
+  var number = 2;
+  while (used('$name ($number)')) {
+    number++;
+  }
+  return '$name ($number)';
+}
+
+StorageAccount? _accountById(Iterable<StorageAccount> values, String id) {
+  for (final value in values) {
+    if (value.id == id) return value;
+  }
+  return null;
+}
+
+List<T> _readList<T>(
+  Object? raw,
+  T Function(Map<Object?, Object?> value) converter,
+) {
+  if (raw is! List) return <T>[];
+  final values = <T>[];
+  for (final item in raw) {
+    if (item is Map) values.add(converter(item));
+  }
+  return values;
+}
+
+bool _hasActualAuthorization(Map<String, dynamic> value) {
+  for (final key in const [
+    'access_token',
+    'refresh_token',
+    'AccessToken',
+    'RefreshToken',
+  ]) {
+    if ((value[key] as String? ?? '').isNotEmpty) return true;
+  }
+  return false;
+}
+
+StorageAccount applyNativeAuthorization(
+  StorageAccount account,
+  Map<String, dynamic> authorization,
+) {
+  final rotated =
+      _hasActualAuthorization(authorization) &&
+      _authorizationTokensChanged(account.authorization, authorization);
+  return account.copyWith(
+    authorization: authorization,
+    status: rotated && account.authorizationIsKnownInvalid
+        ? StorageAuthorizationStatus.unknown
+        : account.status,
+    clearStatusMessage: rotated && account.authorizationIsKnownInvalid,
+  );
+}
+
+bool _authorizationTokensChanged(
+  Map<String, dynamic> previous,
+  Map<String, dynamic> current,
+) {
+  for (final key in const [
+    'access_token',
+    'refresh_token',
+    'AccessToken',
+    'RefreshToken',
+  ]) {
+    final next = current[key] as String? ?? '';
+    if (next.isNotEmpty && next != (previous[key] as String? ?? '')) {
+      return true;
+    }
+  }
+  return false;
+}
+
+class _StatusTrackingStore implements RemoteFileStore {
+  _StatusTrackingStore(this._delegate, this._record, this._scheduler);
+  final RemoteFileStore _delegate;
+  final Future<void> Function(StorageAccount account, Object? error) _record;
+  final RemoteReadScheduler _scheduler;
+
+  void close() {
+    final delegate = _delegate;
+    if (delegate is WebDavFileStore) delegate.close();
+  }
+
+  @override
+  StorageAccount get account => _delegate.account;
+  Future<T> _run<T>(Future<T> Function() operation) async {
+    _scheduler.throwIfCoolingDown();
+    try {
+      final value = await operation();
+      await _record(account, null);
+      return value;
+    } catch (error) {
+      await _scheduler.recordFailure(error);
+      await _record(account, error);
+      rethrow;
+    }
+  }
+
+  @override
+  Future<void> test() => _run(_delegate.test);
+  @override
+  Future<List<RemoteEntry>> list(String directory, {bool refresh = false}) =>
+      _run(() => _delegate.list(directory, refresh: refresh));
+  @override
+  Future<RemoteEntry> stat(String path) => _run(() => _delegate.stat(path));
+  @override
+  Future<RemoteLink> link(String path, {bool refresh = false}) =>
+      _run(() => _delegate.link(path, refresh: refresh));
+  @override
+  Future<RemoteTextFile> readText(String path) =>
+      _run(() => _delegate.readText(path));
+  @override
+  Future<RemoteWriteResult> writeText(
+    String path,
+    String content, {
+    bool createOnly = false,
+    String? ifMatch,
+    int? ifUnmodifiedSince,
+  }) => _run(
+    () => _delegate.writeText(
+      path,
+      content,
+      createOnly: createOnly,
+      ifMatch: ifMatch,
+      ifUnmodifiedSince: ifUnmodifiedSince,
+    ),
+  );
+  @override
+  Future<void> upload(
+    String localPath,
+    String remotePath, {
+    void Function(RemoteTransferProgress progress)? onProgress,
+  }) => _run(
+    () => _delegate.upload(localPath, remotePath, onProgress: onProgress),
+  );
+  @override
+  Future<void> download(
+    String remotePath,
+    String localPath, {
+    void Function(RemoteTransferProgress progress)? onProgress,
+  }) => _run(
+    () => _delegate.download(remotePath, localPath, onProgress: onProgress),
+  );
+  @override
+  Future<void> mkdir(String path) => _run(() => _delegate.mkdir(path));
+  @override
+  Future<void> delete(String path) => _run(() => _delegate.delete(path));
+  @override
+  Future<void> cancel(String taskId) => _delegate.cancel(taskId);
+  @override
+  Future<void> cancelAll() => _delegate.cancelAll();
+}
+
+class _UnavailableOpenListRpc implements OpenListRpcClient {
+  @override
+  Future<Map<String, dynamic>> invoke(
+    String method,
+    Map<String, dynamic> request,
+  ) async => {
+    'error': {
+      'code': 'unavailable',
+      'message': 'OpenList native core is unavailable',
+    },
+  };
+}
+
+void _throwRpcError(Map<String, dynamic> response, {String? driver}) {
+  final error = response['error'];
+  if (error is Map) {
+    throw openListRpcError(error, driver: driver);
+  }
+}

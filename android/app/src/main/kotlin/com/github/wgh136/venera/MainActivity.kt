@@ -286,6 +286,13 @@ class MainActivity : FlutterFragmentActivity() {
             "mancomi/xray"
         ).setMethodCallHandler { call, res -> XrayBridge.handle(call, res) }
 
+        // 网盘内核在 :openlist 独立进程，这里只做转发（见 OpenListBridge）。
+        OpenListBridge.attach(this)
+        MethodChannel(
+            flutterEngine.dartExecutor.binaryMessenger,
+            "mancomi/openlist"
+        ).setMethodCallHandler { call, res -> OpenListBridge.handle(call, res) }
+
         MethodChannel(
             flutterEngine.dartExecutor.binaryMessenger,
             "venera/method_channel"

@@ -29,6 +29,17 @@ class _ExploreSettingsState extends State<ExploreSettings> {
             context.to(() => const ComicSourcePage());
           },
         ).toSliver(),
+        // 网盘账号与在线漫画库：独立于 JS 源的一套存储后端。
+        ListTile(
+          contentPadding: kSettingTilePadding,
+          leading: const Icon(Icons.cloud_outlined),
+          title: const Text("网盘与在线漫画库"),
+          subtitle: const Text("添加网盘账号、管理在线漫画库"),
+          trailing: const Icon(Icons.arrow_right),
+          onTap: () {
+            context.to(() => const CloudLibraryPage());
+          },
+        ).toSliver(),
         _SettingPartTitle(
           title: "Content sources".tl,
           icon: Icons.tune_rounded,

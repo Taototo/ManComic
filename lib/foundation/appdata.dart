@@ -96,6 +96,9 @@ class Appdata with Init {
     "authorizationRequired",
     "customImageProcessing",
     "webdav",
+    // 网盘账号含令牌/Cookie，绝不能随 WebDAV 同步扩散到别的设备。
+    "remoteStorageAccounts",
+    "remoteLibraries",
     "disableSyncFields",
     "deviceId",
   ];
