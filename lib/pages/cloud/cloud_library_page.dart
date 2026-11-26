@@ -3,7 +3,6 @@ import 'package:venera/components/components.dart';
 import 'package:venera/features/cloud_library/remote_library_settings_page.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/network/cloud_storage/openlist_bridge.dart';
-import 'package:venera/pages/cloud/comic_backup_page.dart';
 import 'package:venera/pages/cloud/storage.dart';
 
 /// 网盘功能总入口：账号管理 + 在线漫画库。
@@ -77,24 +76,6 @@ class _CloudLibraryPageState extends State<CloudLibraryPage> {
             ),
           ),
           const RemoteLibrariesSliver(),
-          const SliverToBoxAdapter(
-            child: Padding(
-              padding: EdgeInsets.fromLTRB(16, 20, 16, 4),
-              child: Text(
-                '漫画备份',
-                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
-              ),
-            ),
-          ),
-          SliverToBoxAdapter(
-            child: ListTile(
-              leading: const Icon(Icons.backup_outlined),
-              title: const Text('漫画备份'),
-              subtitle: const Text('夸克 / WebDAV 共用，可随时切换'),
-              trailing: const Icon(Icons.arrow_right),
-              onTap: () => context.to(() => ComicBackupPage()),
-            ),
-          ),
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       ),

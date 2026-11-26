@@ -5,17 +5,17 @@ import 'package:venera/components/components.dart';
 import 'package:venera/components/window_frame.dart';
 import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
-import 'package:venera/foundation/webdav_url.dart' show normalizeWebdavUrl;
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/log.dart';
 import 'package:venera/foundation/res.dart';
-import 'package:venera/network/app_dio.dart';
+import 'package:venera/network/cloud_storage/remote_file_store.dart';
 import 'package:venera/utils/data.dart';
 import 'package:venera/utils/ext.dart';
-import 'package:webdav_client/webdav_client.dart' hide File;
 import 'package:venera/utils/translations.dart';
 
+import 'cloud_bootstrap.dart';
+import 'data_sync_storage.dart';
 import 'io.dart';
 
 /// 启动同步拉完云端之后，还要不要把本地那份推上去。
@@ -133,11 +133,13 @@ class DataSync with ChangeNotifier {
       if (!isEnabled) {
         return;
       }
-      unawaited(action().then((res) {
-        if (res.error) {
-          _scheduleRetry(action);
-        }
-      }));
+      unawaited(
+        action().then((res) {
+          if (res.error) {
+            _scheduleRetry(action);
+          }
+        }),
+      );
     });
   }
 
@@ -215,23 +217,8 @@ class DataSync with ChangeNotifier {
   }
 
   bool get isEnabled {
-    var config = appdata.settings['webdav'];
     var autoSync = appdata.implicitData['webdavAutoSync'] ?? false;
-    return autoSync && config is List && config.isNotEmpty;
-  }
-
-  List<String>? _validateConfig() {
-    var config = appdata.settings['webdav'];
-    if (config is! List) {
-      return null;
-    }
-    if (config.isEmpty) {
-      return [];
-    }
-    if (config.length != 3 || config.whereType<String>().length != 3) {
-      return null;
-    }
-    return List.from(config);
+    return autoSync && hasSyncDestination;
   }
 
   Future<Res<bool>> uploadData() async {
@@ -245,49 +232,41 @@ class DataSync with ChangeNotifier {
     _isUploading = true;
     _lastError = null;
     notifyListeners();
+    DataSyncStorage? storage;
     try {
-      var config = _validateConfig();
-      if (config == null) {
-        _lastError = 'Invalid WebDAV configuration';
-        return const Res.error('Invalid WebDAV configuration');
+      if (resolveSyncProvider() == syncProviderQuark) {
+        // 夸克走内置内核，冷启动时同步可能抢在初始化前面。
+        await CloudBootstrap.configure();
       }
-      if (config.isEmpty) {
+      storage = createDataSyncStorage();
+      if (storage == null || !storage.isConfigured) {
         return const Res(true);
       }
-      String url = config[0];
-      String user = config[1];
-      String pass = config[2];
-
-      var client = newClient(
-        normalizeWebdavUrl(url),
-        user: user,
-        password: pass,
-        adapter: RHttpAdapter(),
-      );
 
       try {
         appdata.settings['dataVersion']++;
         await appdata.saveData(false);
         var data = await exportAppData(
-            appdata.settings['disableSyncFields'].toString().isNotEmpty
+          appdata.settings['disableSyncFields'].toString().isNotEmpty,
         );
-        var time =
-            (DateTime.now().millisecondsSinceEpoch ~/ 86400000).toString();
+        var time = (DateTime.now().millisecondsSinceEpoch ~/ 86400000)
+            .toString();
         var filename = time;
         filename += '-';
         filename += appdata.settings['dataVersion'].toString();
         filename += '.venera';
-        var files = await client.readDir('/');
-        files = files.where((e) => e.name!.endsWith('.venera')).toList();
-        var old = files.firstWhereOrNull((e) => e.name!.startsWith("$time-"));
+        var files = (await storage.list())
+            .where((name) => name.endsWith('.venera'))
+            .toList();
+        var old = files.firstWhereOrNull((name) => name.startsWith("$time-"));
         if (old != null) {
-          await client.remove(old.name!);
+          await storage.delete(old);
         }
         if (files.length >= 10) {
-          files.sort((a, b) => a.name!.compareTo(b.name!));
-          await client.remove(files.first.name!);
+          files.sort((a, b) => a.compareTo(b));
+          await storage.delete(files.first);
         }
-        await client.write(filename, await data.readAsBytes());
+        await storage.write(filename, data);
         data.deleteIgnoreError();
         Log.info("Upload Data", "Data uploaded successfully");
         _resetRetry();
@@ -301,6 +280,7 @@ class DataSync with ChangeNotifier {
         return Res.error(_lastError!);
       }
     } finally {
+      await storage?.close();
       _isUploading = false;
       notifyListeners();
     }
@@ -317,35 +297,28 @@ class DataSync with ChangeNotifier {
     _lastError = null;
     _importedRemote = false;
     notifyListeners();
+    DataSyncStorage? storage;
     try {
-      var config = _validateConfig();
-      if (config == null) {
-        _lastError = 'Invalid WebDAV configuration';
-        return const Res.error('Invalid WebDAV configuration');
+      if (resolveSyncProvider() == syncProviderQuark) {
+        // 夸克走内置内核，冷启动时同步可能抢在初始化前面。
+        await CloudBootstrap.configure();
       }
-      if (config.isEmpty) {
+      storage = createDataSyncStorage();
+      if (storage == null || !storage.isConfigured) {
         return const Res(true);
       }
-      String url = config[0];
-      String user = config[1];
-      String pass = config[2];
-
-      var client = newClient(
-        normalizeWebdavUrl(url),
-        user: user,
-        password: pass,
-        adapter: RHttpAdapter(),
-      );
 
       try {
-        var files = await client.readDir('/');
-        files.sort((a, b) => b.name!.compareTo(a.name!));
-        var file = files.firstWhereOrNull((e) => e.name!.endsWith('.venera'));
+        var files =
+            (await storage.list())
+                .where((name) => name.endsWith('.venera'))
+                .toList()
+              ..sort((a, b) => b.compareTo(a));
+        var file = files.isEmpty ? null : files.first;
         if (file == null) {
           throw 'No data file found';
         }
-        var version =
-            file.name!.split('-').elementAtOrNull(1)?.split('.').first;
+        var version = file.split('-').elementAtOrNull(1)?.split('.').first;
         if (version != null && int.tryParse(version) != null) {
           var currentVersion = appdata.settings['dataVersion'];
           if (currentVersion != null && int.parse(version) <= currentVersion) {
@@ -356,9 +329,9 @@ class DataSync with ChangeNotifier {
             return const Res(true);
           }
         }
-        Log.info("Data Sync", "Downloading data from WebDAV server");
-        var localFile = File(FilePath.join(App.cachePath, file.name!));
-        await client.read2File(file.name!, localFile.path);
+        Log.info("Data Sync", "Downloading data from sync destination");
+        var localFile = File(FilePath.join(App.cachePath, file));
+        await storage.read(file, localFile.path);
         await importAppData(localFile, true);
         await localFile.delete();
         _importedRemote = true;
@@ -376,6 +349,7 @@ class DataSync with ChangeNotifier {
         return Res.error(_lastError!);
       }
     } finally {
+      await storage?.close();
       _isDownloading = false;
       notifyListeners();
     }
@@ -388,6 +362,9 @@ class DataSync with ChangeNotifier {
   /// hyper_util::client::legacy::Error(Connect, ConnectError("dns error"...))`。
   /// 既看不懂，也看不出该怎么办。原始字符串仍然完整写进日志。
   static String _friendlyError(Object e) {
+    // 网盘（夸克）的报错本身已经是「登录失效 / 连接超时」这类可读中文，
+    // 再套一层 WebDAV 的话术只会误导。
+    if (e is RemoteStorageException) return e.message;
     var text = e.toString();
     var lower = text.toLowerCase();
     if (lower.contains('dns') ||

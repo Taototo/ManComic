@@ -5,6 +5,7 @@ import 'package:venera/foundation/app_page_route.dart';
 import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
+import 'package:venera/utils/data_sync_storage.dart';
 
 import 'token_import.dart';
 import 'openlist_login.dart';
@@ -139,10 +140,14 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     final activeBackup =
         appdata.settings['backupRemoteLocation'] is Map &&
         appdata.settings['backupRemoteLocation']['accountId'] == account.id;
+    final quarkSyncAccount = appdata.implicitData[quarkSyncAccountKey];
     final uses = <String>[
       if (libraries > 0) '$libraries 个漫画库',
       if (appdata.settings['syncRemoteLocation'] is Map &&
           appdata.settings['syncRemoteLocation']['accountId'] == account.id)
+        '应用数据同步',
+      if (resolveSyncProvider() == syncProviderQuark &&
+          quarkSyncAccount == account.id)
         '应用数据同步',
       if (savedBackups > 0)
         activeBackup ? '漫画备份（当前）' : '漫画备份（$savedBackups 个位置）'

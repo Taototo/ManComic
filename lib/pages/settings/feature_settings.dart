@@ -134,6 +134,21 @@ class _DataSettingsState extends State<DataSettings> {
     }
   }
 
+  /// 「数据与备份」那行直接显示当前同步到哪，省得点进去才知道。
+  String _syncDestinationLabel() {
+    switch (resolveSyncProvider()) {
+      case syncProviderQuark:
+        final accountId = appdata.implicitData[quarkSyncAccountKey];
+        final account = accountId is String
+            ? RemoteStorageAccounts.instance.account(accountId)
+            : null;
+        return '${"Quark Drive".tl} · ${account?.name ?? "account unavailable".tl}';
+      case syncProviderWebdav:
+        return "Nutstore WebDAV".tl;
+    }
+    return "Off".tl;
+  }
+
   @override
   Widget build(BuildContext context) {
     return SmoothCustomScrollView(
@@ -214,12 +229,24 @@ class _DataSettingsState extends State<DataSettings> {
           actionTitle: 'Import'.tl,
         ).toSliver(),
         _CallbackSetting(
-          title: "Nutstore Sync".tl,
-          subtitle: "Sync favorites, history and settings to Nutstore".tl,
+          title: "Cloud Sync".tl,
+          subtitle: _syncDestinationLabel(),
           callback: () async {
-            showPopUpWidget(context, const _WebdavSetting());
+            showPopUpWidget(context, const _CloudSyncSetting());
           },
           actionTitle: 'Set'.tl,
+        ).toSliver(),
+        _SettingPartTitle(
+          title: "Resources upload".tl,
+          icon: Icons.cloud_upload_outlined,
+        ),
+        // 漫画备份属于「把本机资源送到网盘」，和同步（双向覆盖）不是一回事，
+        // 单独归到「资源上载」，入口也从网盘页搬到了这里。
+        _CallbackSetting(
+          title: "Comic backup".tl,
+          subtitle: "Pack local comics as CBZ and upload them to the cloud".tl,
+          callback: () => context.to(() => const ComicBackupPage()),
+          actionTitle: "Manage".tl,
         ).toSliver(),
         _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
         _SliderSetting(
@@ -246,8 +273,7 @@ class _DataSettingsState extends State<DataSettings> {
         if (App.isAndroid)
           _SwitchSetting(
             title: "Background downloads".tl,
-            subtitle:
-                "Keep downloading when the app goes to the background".tl,
+            subtitle: "Keep downloading when the app goes to the background".tl,
             settingKey: "backgroundDownload",
             onChanged: () {
               // 立刻生效：开着就重新探一次前台服务，关掉就摘通知
@@ -264,7 +290,8 @@ class _DataSettingsState extends State<DataSettings> {
                 "Exempt from battery optimization so downloads survive in the background"
                     .tl,
             callback: () async {
-              if (await DownloadBackground.instance
+              if (await DownloadBackground
+                  .instance
                   .ignoringBatteryOptimizations) {
                 context.showMessage(message: "Already allowed".tl);
                 return;
@@ -508,21 +535,29 @@ class _LogsPageState extends State<LogsPage> {
   }
 }
 
-class _WebdavSetting extends StatefulWidget {
-  const _WebdavSetting();
+class _CloudSyncSetting extends StatefulWidget {
+  const _CloudSyncSetting();
 
   @override
-  State<_WebdavSetting> createState() => _WebdavSettingState();
+  State<_CloudSyncSetting> createState() => _CloudSyncSettingState();
 }
 
-class _WebdavSettingState extends State<_WebdavSetting> {
+/// 数据同步设置：坚果云（WebDAV）与夸克网盘共用一套。
+///
+/// 同步文件（`.venera`）放在所选的网盘里，两者只有存储位置不同，版本比较、
+/// 清理旧包、导入流程完全一致。夸克失效时把「同步方式」切回坚果云即可继续，
+/// 不是二选一的单程票。
+class _CloudSyncSettingState extends State<_CloudSyncSetting> {
   /// 坚果云官方的 WebDAV 入口，填错地址是这类同步最常见的失败原因。
   static const nutstoreUrl = "https://dav.jianguoyun.com/dav/";
 
+  String provider = syncProviderOff;
   String url = "";
   String user = "";
   String pass = "";
   String disableSync = "";
+  String quarkAccountId = "";
+  String quarkDirectory = "/venera_sync/";
 
   bool autoSync = true;
 
@@ -537,6 +572,12 @@ class _WebdavSettingState extends State<_WebdavSetting> {
   @override
   void initState() {
     super.initState();
+    final storedProvider = appdata.implicitData[syncProviderKey];
+    provider =
+        resolveSyncProvider() ??
+        (storedProvider == syncProviderOff
+            ? syncProviderOff
+            : (_quarkAccounts.isEmpty ? syncProviderOff : syncProviderQuark));
     if (appdata.settings['webdav'] is! List) {
       appdata.settings['webdav'] = [];
     }
@@ -544,12 +585,15 @@ class _WebdavSettingState extends State<_WebdavSetting> {
       disableSync = appdata.settings['disableSyncFields'];
     }
     var configs = appdata.settings['webdav'] as List;
-    if (configs.whereType<String>().length != 3) {
-      return;
+    if (configs.whereType<String>().length == 3) {
+      url = configs[0];
+      user = configs[1];
+      pass = configs[2];
     }
-    url = configs[0];
-    user = configs[1];
-    pass = configs[2];
+    quarkAccountId = appdata.implicitData[quarkSyncAccountKey] as String? ?? '';
+    quarkDirectory =
+        appdata.implicitData[quarkSyncDirectoryKey] as String? ??
+        "/venera_sync/";
     autoSync = appdata.implicitData['webdavAutoSync'] ?? true;
     urlController.text = url;
     userController.text = user;
@@ -566,20 +610,60 @@ class _WebdavSettingState extends State<_WebdavSetting> {
     super.dispose();
   }
 
+  List<StorageAccount> get _quarkAccounts {
+    final values = RemoteStorageAccounts.instance.accounts
+        .where(
+          (account) =>
+              account.backend == StorageBackend.openlist &&
+              (account.driver == 'Quark' || account.driver == 'QuarkOpen'),
+        )
+        .toList();
+    values.sort((a, b) => a.name.compareTo(b.name));
+    return values;
+  }
+
+  String? get _selectedQuarkAccountId {
+    final ids = _quarkAccounts.map((account) => account.id).toSet();
+    if (ids.contains(quarkAccountId)) return quarkAccountId;
+    return ids.isEmpty ? null : ids.first;
+  }
+
   void onAutoSyncChanged(bool value) {
     setState(() {
       autoSync = value;
-      appdata.implicitData['webdavAutoSync'] = value;
-      appdata.writeImplicitData();
     });
+  }
+
+  Future<void> _openAccounts() async {
+    await context.to(() => StorageAccountsPage());
+    if (mounted) setState(() {});
+  }
+
+  Future<void> _pickQuarkDirectory() async {
+    final accountId = _selectedQuarkAccountId;
+    if (accountId == null) return;
+    final storage = RemoteStorageAccounts.instance;
+    final store = storage.storeFor(accountId);
+    final selected = await context.to<List<String>>(
+      () => RemoteDirectoryPicker(
+        store: store,
+        initialDirectories: [quarkDirectory],
+        multiSelect: false,
+        disposeStore: true,
+        onDisposeStore: storage.release,
+      ),
+    );
+    if (!mounted || selected == null || selected.isEmpty) return;
+    setState(() => quarkDirectory = selected.first);
   }
 
   @override
   Widget build(BuildContext context) {
     return PopUpWidgetScaffold(
-      title: "Nutstore Sync".tl,
+      title: "Cloud Sync".tl,
       body: SingleChildScrollView(
         child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
             const SizedBox(height: 12),
             Container(
@@ -591,12 +675,12 @@ class _WebdavSettingState extends State<_WebdavSetting> {
               child: Row(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  const Icon(Icons.cloud_outlined, size: 20),
+                  const Icon(Icons.sync_rounded, size: 20),
                   const SizedBox(width: 8),
                   Expanded(
                     child: Text(
-                      "Nutstore → Account info → Security → Add app password. "
-                              "Use it here, not your login password."
+                      "Sync favorites, history and settings to Nutstore or Quark Drive. "
+                              "Two destinations, one switch away from each other."
                           .tl,
                       style: ts.s12,
                     ),
@@ -605,204 +689,363 @@ class _WebdavSettingState extends State<_WebdavSetting> {
               ),
             ),
             const SizedBox(height: 12),
-            TextField(
-              decoration: InputDecoration(
-                labelText: "URL",
-                hintText: nutstoreUrl,
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.auto_fix_high),
-                  tooltip: "Fill in Nutstore address".tl,
-                  onPressed: () {
-                    urlController.text = nutstoreUrl;
-                    url = nutstoreUrl;
-                  },
-                ),
-              ),
-              controller: urlController,
-              onChanged: (value) => url = value,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: InputDecoration(
-                labelText: "Username".tl,
-                border: const OutlineInputBorder(),
-              ),
-              controller: userController,
-              onChanged: (value) => user = value,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: InputDecoration(
-                labelText: "App password".tl,
-                border: const OutlineInputBorder(),
-              ),
-              controller: passController,
-              onChanged: (value) => pass = value,
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              decoration: InputDecoration(
-                labelText: "Skip Setting Fields (Optional)".tl,
-                hintText: "field0, field1, field2, ...",
-                hintStyle: TextStyle(color: Theme.of(context).hintColor),
-                border: const OutlineInputBorder(),
-                suffixIcon: IconButton(
-                  icon: const Icon(Icons.help_outline),
-                  onPressed: () {
-                    showDialog(
-                      context: context,
-                      builder: (_) => AlertDialog(
-                        title: Text("Skip Setting Fields".tl),
-                        content: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              "When sync data, skip certain setting fields, which means these won't be uploaded / override."
-                                  .tl,
-                            ),
-                            const SizedBox(height: 12),
-                            Row(
-                              children: [
-                                Expanded(
-                                  child: Text(
-                                    "See source code for available fields.".tl,
-                                  ),
-                                ),
-                                Align(
-                                  alignment: Alignment.centerRight,
-                                  child: IconButton(
-                                    icon: const Icon(Icons.open_in_new),
-                                    onPressed: () {
-                                      launchUrlString(
-                                        "https://github.com/venera-app/venera/blob/b08f11f6ac49bd07d34b4fcde233ed07e86efbc9/lib/foundation/appdata.dart#L138",
-                                      );
-                                    },
-                                  ),
-                                ),
-                              ],
-                            ),
-                          ],
-                        ),
-                      ),
-                    );
-                  },
-                ),
-              ),
-              controller: disableSyncController,
-              onChanged: (value) => disableSync = value,
-            ),
-            const SizedBox(height: 12),
-            ListTile(
-              leading: Icon(Icons.sync),
-              title: Text("Auto Sync Data".tl),
-              contentPadding: EdgeInsets.zero,
-              trailing: Switch(value: autoSync, onChanged: onAutoSyncChanged),
-            ),
-            const SizedBox(height: 12),
-            RadioGroup<bool>(
-              groupValue: upload,
+            Text("Sync method".tl, style: ts.s14),
+            RadioGroup<String>(
+              groupValue: provider,
               onChanged: (value) {
                 setState(() {
-                  upload = value ?? upload;
+                  provider = value ?? provider;
                 });
               },
-              child: Row(
+              child: Column(
                 children: [
-                  Text("Operation".tl),
-                  Radio<bool>(value: true),
-                  Text("Upload".tl),
-                  Radio<bool>(value: false),
-                  Text("Download".tl),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Radio<String>(value: syncProviderOff),
+                    title: Text("Off".tl),
+                    onTap: () => setState(() => provider = syncProviderOff),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Radio<String>(value: syncProviderWebdav),
+                    title: Text("Nutstore WebDAV".tl),
+                    subtitle: Text("Nutstore · WebDAV".tl),
+                    onTap: () => setState(() => provider = syncProviderWebdav),
+                  ),
+                  ListTile(
+                    contentPadding: EdgeInsets.zero,
+                    leading: const Radio<String>(value: syncProviderQuark),
+                    title: Text("Quark Drive".tl),
+                    subtitle: Text(
+                      "Uses the Quark account from cloud accounts".tl,
+                    ),
+                    onTap: () => setState(() => provider = syncProviderQuark),
+                  ),
                 ],
               ),
             ),
-            const SizedBox(height: 16),
-            AnimatedSize(
-              duration: const Duration(milliseconds: 200),
-              child: autoSync
-                  ? Container(
-                      padding: const EdgeInsets.all(8),
-                      decoration: BoxDecoration(
-                        color: Theme.of(context).colorScheme.primaryContainer,
-                        borderRadius: BorderRadius.circular(8),
+            if (provider == syncProviderWebdav) ...[
+              const Divider(height: 24),
+              Container(
+                padding: const EdgeInsets.all(10),
+                decoration: BoxDecoration(
+                  color: context.colorScheme.secondaryContainer,
+                  borderRadius: BorderRadius.circular(10),
+                ),
+                child: Row(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    const Icon(Icons.cloud_outlined, size: 20),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: Text(
+                        "Nutstore → Account info → Security → Add app password. "
+                                "Use it here, not your login password."
+                            .tl,
+                        style: ts.s12,
                       ),
-                      child: Row(
-                        children: [
-                          const Icon(Icons.info_outline, size: 20),
-                          const SizedBox(width: 8),
-                          Expanded(
+                    ),
+                  ],
+                ),
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: "URL",
+                  hintText: nutstoreUrl,
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.auto_fix_high),
+                    tooltip: "Fill in Nutstore address".tl,
+                    onPressed: () {
+                      urlController.text = nutstoreUrl;
+                      url = nutstoreUrl;
+                    },
+                  ),
+                ),
+                controller: urlController,
+                onChanged: (value) => url = value,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: "Username".tl,
+                  border: const OutlineInputBorder(),
+                ),
+                controller: userController,
+                onChanged: (value) => user = value,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: "App password".tl,
+                  border: const OutlineInputBorder(),
+                ),
+                controller: passController,
+                onChanged: (value) => pass = value,
+              ),
+              const SizedBox(height: 12),
+              TextField(
+                decoration: InputDecoration(
+                  labelText: "Skip Setting Fields (Optional)".tl,
+                  hintText: "field0, field1, field2, ...",
+                  hintStyle: TextStyle(color: Theme.of(context).hintColor),
+                  border: const OutlineInputBorder(),
+                  suffixIcon: IconButton(
+                    icon: const Icon(Icons.help_outline),
+                    onPressed: () {
+                      showDialog(
+                        context: context,
+                        builder: (_) => AlertDialog(
+                          title: Text("Skip Setting Fields".tl),
+                          content: Column(
+                            mainAxisSize: MainAxisSize.min,
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                "When sync data, skip certain setting fields, which means these won't be uploaded / override."
+                                    .tl,
+                              ),
+                              const SizedBox(height: 12),
+                              Row(
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      "See source code for available fields."
+                                          .tl,
+                                    ),
+                                  ),
+                                  Align(
+                                    alignment: Alignment.centerRight,
+                                    child: IconButton(
+                                      icon: const Icon(Icons.open_in_new),
+                                      onPressed: () {
+                                        launchUrlString(
+                                          "https://github.com/venera-app/venera/blob/b08f11f6ac49bd07d34b4fcde233ed07e86efbc9/lib/foundation/appdata.dart#L138",
+                                        );
+                                      },
+                                    ),
+                                  ),
+                                ],
+                              ),
+                            ],
+                          ),
+                        ),
+                      );
+                    },
+                  ),
+                ),
+                controller: disableSyncController,
+                onChanged: (value) => disableSync = value,
+              ),
+            ],
+            if (provider == syncProviderQuark) ...[
+              const Divider(height: 24),
+              if (_quarkAccounts.isEmpty)
+                Container(
+                  padding: const EdgeInsets.all(10),
+                  decoration: BoxDecoration(
+                    color: context.colorScheme.secondaryContainer,
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text("No Quark account yet".tl),
+                      const SizedBox(height: 4),
+                      Text(
+                        "Add a Quark account first, then come back to pick a sync folder."
+                            .tl,
+                        style: ts.s12,
+                      ),
+                      const SizedBox(height: 8),
+                      Align(
+                        alignment: Alignment.centerLeft,
+                        child: TextButton(
+                          onPressed: _openAccounts,
+                          child: Text("Add Quark account".tl),
+                        ),
+                      ),
+                    ],
+                  ),
+                )
+              else ...[
+                InputDecorator(
+                  decoration: InputDecoration(
+                    labelText: "Quark account".tl,
+                    border: const OutlineInputBorder(),
+                  ),
+                  child: DropdownButtonHideUnderline(
+                    child: DropdownButton<String>(
+                      isExpanded: true,
+                      value: _selectedQuarkAccountId,
+                      hint: Text("Select account".tl),
+                      items: [
+                        for (final account in _quarkAccounts)
+                          DropdownMenuItem(
+                            value: account.id,
                             child: Text(
-                              "Once the operation is successful, app will automatically sync data with the server."
-                                  .tl,
+                              account.authorizationIsKnownInvalid
+                                  ? "${account.name} (${"authorization expired".tl})"
+                                  : account.name,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
                             ),
                           ),
-                        ],
-                      ),
-                    )
-                  : const SizedBox.shrink(),
-            ),
-            const SizedBox(height: 16),
+                      ],
+                      onChanged: (value) {
+                        if (value == null) return;
+                        setState(() => quarkAccountId = value);
+                      },
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 4),
+                ListTile(
+                  contentPadding: EdgeInsets.zero,
+                  leading: const Icon(Icons.folder_outlined),
+                  title: Text("Sync folder".tl),
+                  subtitle: Text(quarkDirectory),
+                  trailing: const Icon(Icons.arrow_right),
+                  onTap: _pickQuarkDirectory,
+                ),
+                Text(
+                  "Sync files are stored in this folder. If Quark stops working, switch back to Nutstore and continue."
+                      .tl,
+                  style: ts.s12,
+                ),
+                Align(
+                  alignment: Alignment.centerLeft,
+                  child: TextButton(
+                    onPressed: _openAccounts,
+                    child: Text("Manage cloud accounts".tl),
+                  ),
+                ),
+              ],
+            ],
+            if (provider != syncProviderOff) ...[
+              const SizedBox(height: 12),
+              ListTile(
+                leading: const Icon(Icons.sync),
+                title: Text("Auto Sync Data".tl),
+                contentPadding: EdgeInsets.zero,
+                trailing: Switch(value: autoSync, onChanged: onAutoSyncChanged),
+              ),
+              const SizedBox(height: 4),
+              RadioGroup<bool>(
+                groupValue: upload,
+                onChanged: (value) {
+                  setState(() {
+                    upload = value ?? upload;
+                  });
+                },
+                child: Row(
+                  children: [
+                    Text("Operation".tl),
+                    Radio<bool>(value: true),
+                    Text("Upload".tl),
+                    Radio<bool>(value: false),
+                    Text("Download".tl),
+                  ],
+                ),
+              ),
+              AnimatedSize(
+                duration: const Duration(milliseconds: 200),
+                child: autoSync
+                    ? Container(
+                        padding: const EdgeInsets.all(8),
+                        decoration: BoxDecoration(
+                          color: Theme.of(context).colorScheme.primaryContainer,
+                          borderRadius: BorderRadius.circular(8),
+                        ),
+                        child: Row(
+                          children: [
+                            const Icon(Icons.info_outline, size: 20),
+                            const SizedBox(width: 8),
+                            Expanded(
+                              child: Text(
+                                "Once the operation is successful, app will automatically sync data with the server."
+                                    .tl,
+                              ),
+                            ),
+                          ],
+                        ),
+                      )
+                    : const SizedBox.shrink(),
+              ),
+              const SizedBox(height: 16),
+            ],
             Center(
               child: Button.filled(
                 isLoading: isTesting,
-                onPressed: () async {
-                  var oldConfig = appdata.settings['webdav'];
-                  var oldAutoSync = appdata.implicitData['webdavAutoSync'];
-
-                  if (url.trim().isEmpty &&
-                      user.trim().isEmpty &&
-                      pass.trim().isEmpty) {
-                    appdata.settings['webdav'] = [];
-                    appdata.implicitData['webdavAutoSync'] = false;
-                    appdata.writeImplicitData();
-                    appdata.saveData();
-                    context.showMessage(message: "Saved".tl);
-                    App.rootPop();
-                    return;
-                  }
-
-                  appdata.settings['webdav'] = [url, user, pass];
-                  appdata.settings['disableSyncFields'] = disableSync;
-                  appdata.implicitData['webdavAutoSync'] = autoSync;
-                  appdata.writeImplicitData();
-
-                  if (!autoSync) {
-                    appdata.saveData();
-                    context.showMessage(message: "Saved".tl);
-                    App.rootPop();
-                    return;
-                  }
-
-                  setState(() {
-                    isTesting = true;
-                  });
-                  var testResult = upload
-                      ? await DataSync().uploadData()
-                      : await DataSync().downloadData();
-                  if (testResult.error) {
-                    setState(() {
-                      isTesting = false;
-                    });
-                    appdata.settings['webdav'] = oldConfig;
-                    appdata.implicitData['webdavAutoSync'] = oldAutoSync;
-                    appdata.writeImplicitData();
-                    appdata.saveData();
-                    context.showMessage(message: testResult.errorMessage!);
-                    context.showMessage(message: "Saved Failed".tl);
-                  } else {
-                    appdata.saveData();
-                    context.showMessage(message: "Saved".tl);
-                    App.rootPop();
-                  }
-                },
+                onPressed: _save,
                 child: Text("Continue".tl),
               ),
             ),
+            const SizedBox(height: 16),
           ],
         ).paddingHorizontal(16),
       ),
     );
+  }
+
+  Future<void> _save() async {
+    if (provider == syncProviderWebdav &&
+        (url.trim().isEmpty || user.trim().isEmpty || pass.trim().isEmpty)) {
+      context.showMessage(message: "Fill in URL, username and app password".tl);
+      return;
+    }
+    if (provider == syncProviderQuark && _selectedQuarkAccountId == null) {
+      context.showMessage(message: "Select a Quark account".tl);
+      return;
+    }
+
+    final effectiveQuarkAccount = _selectedQuarkAccountId;
+    if (provider == syncProviderWebdav) {
+      appdata.settings['webdav'] = [url, user, pass];
+      appdata.settings['disableSyncFields'] = disableSync;
+    } else if (provider == syncProviderQuark) {
+      appdata.implicitData[quarkSyncAccountKey] = effectiveQuarkAccount;
+      appdata.implicitData[quarkSyncDirectoryKey] = quarkDirectory;
+    }
+    appdata.implicitData[syncProviderKey] = provider;
+    appdata.implicitData['webdavAutoSync'] = provider == syncProviderOff
+        ? false
+        : autoSync;
+    await appdata.writeImplicitData();
+
+    if (provider == syncProviderOff || !autoSync) {
+      await appdata.saveData();
+      context.showMessage(message: "Saved".tl);
+      App.rootPop();
+      return;
+    }
+
+    setState(() {
+      isTesting = true;
+    });
+    var testResult = upload
+        ? await DataSync().uploadData()
+        : await DataSync().downloadData();
+    if (!mounted) return;
+    if (testResult.error) {
+      // 选择本身保留，只把自动同步关掉：网络抖动不该把用户刚选的网盘
+      // 悄悄改回去，但也不能让每次启动都对着一个连不上的目标重试。
+      setState(() {
+        isTesting = false;
+        autoSync = false;
+      });
+      appdata.implicitData['webdavAutoSync'] = false;
+      await appdata.writeImplicitData();
+      await appdata.saveData();
+      context.showMessage(message: testResult.errorMessage!);
+      context.showMessage(
+        message: "Saved, but auto sync is off because the test failed".tl,
+      );
+    } else {
+      await appdata.saveData();
+      context.showMessage(message: "Saved".tl);
+      App.rootPop();
+    }
   }
 }

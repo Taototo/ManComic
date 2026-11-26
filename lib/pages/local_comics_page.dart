@@ -13,6 +13,7 @@ import 'package:venera/network/download.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/favorites/favorites_page.dart';
 import 'package:venera/pages/local_comic_page.dart';
+import 'package:venera/pages/cloud/archive_transfer_dialog.dart';
 import 'package:venera/pages/missing_chapters_page.dart';
 import 'package:venera/utils/cbz.dart';
 import 'package:venera/utils/epub.dart';
@@ -678,6 +679,13 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
   List<MenuEntry> exportActions(List<LocalComic> comics) {
     return [
       MenuEntry(
+        icon: Icons.cloud_upload_outlined,
+        text: "Upload to cloud".tl,
+        onClick: () {
+          uploadLocalComicsToCloud(context, comics);
+        },
+      ),
+      MenuEntry(
         icon: Icons.outbox_outlined,
         text: "Export as cbz".tl,
         onClick: () {
@@ -1210,11 +1218,7 @@ class _LocalComicGridTileState extends State<_LocalComicGridTile> {
           color: kCoverOverlayScrim,
           shape: BoxShape.circle,
         ),
-        child: const Icon(
-          Icons.more_horiz,
-          size: 14,
-          color: kCoverOverlayInk,
-        ),
+        child: const Icon(Icons.more_horiz, size: 14, color: kCoverOverlayInk),
       ),
     );
   }

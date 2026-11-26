@@ -6,6 +6,7 @@ import 'package:venera/features/cloud_backup/cloud_backup.dart';
 import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
+import 'package:venera/pages/cloud/archive_transfer_dialog.dart';
 import 'package:venera/pages/cloud/remote_location_fields.dart';
 import 'package:venera/pages/cloud/storage_accounts_page.dart';
 
@@ -537,10 +538,10 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
     if (!mounted || picked == null || picked.isEmpty) return;
     try {
       final batch = ComicBackupManager.createBackupBatch(picked);
-      final result = await showDialog<BackupResult>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => _ArchiveTransferDialog(batch: batch, title: '备份进度'),
+      final result = await showArchiveTransferDialog(
+        context,
+        batch: batch,
+        title: '备份进度',
       );
       if (!mounted || result == null) return;
       if (result.authorizationFailed) {
@@ -561,10 +562,10 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
   Future<void> _startRestore(BackupFile file) async {
     try {
       final batch = ComicBackupManager.createRestoreBatch(<BackupFile>[file]);
-      final result = await showDialog<BackupResult>(
-        context: context,
-        barrierDismissible: false,
-        builder: (_) => _ArchiveTransferDialog(batch: batch, title: '恢复进度'),
+      final result = await showArchiveTransferDialog(
+        context,
+        batch: batch,
+        title: '恢复进度',
       );
       if (!mounted || result == null) return;
       if (result.authorizationFailed) await _handleTargetFailure();
@@ -787,151 +788,6 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],
       ),
-    );
-  }
-}
-
-/// 备份 / 恢复任务的传输进度对话框。
-class _ArchiveTransferDialog extends StatefulWidget {
-  const _ArchiveTransferDialog({required this.batch, required this.title});
-
-  final ComicArchiveBatch batch;
-  final String title;
-
-  @override
-  State<_ArchiveTransferDialog> createState() => _ArchiveTransferDialogState();
-}
-
-class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
-  @override
-  void initState() {
-    super.initState();
-    unawaited(widget.batch.run());
-  }
-
-  @override
-  void dispose() {
-    widget.batch.dispose();
-    super.dispose();
-  }
-
-  Widget _stateIcon(ArchiveItemState state) {
-    switch (state) {
-      case ArchiveItemState.success:
-        return const Icon(Icons.check_circle, color: Colors.green);
-      case ArchiveItemState.skipped:
-        return const Icon(Icons.remove_circle_outline, color: Colors.grey);
-      case ArchiveItemState.failed:
-        return const Icon(Icons.error, color: Colors.red);
-      case ArchiveItemState.cancelled:
-        return const Icon(Icons.cancel, color: Colors.grey);
-      case ArchiveItemState.working:
-        return const SizedBox(
-          width: 18,
-          height: 18,
-          child: CircularProgressIndicator(strokeWidth: 2),
-        );
-      case ArchiveItemState.pending:
-        return const Icon(Icons.schedule, color: Colors.grey);
-    }
-  }
-
-  String _stateLabel(ArchiveItemState state) => switch (state) {
-    ArchiveItemState.success => '成功',
-    ArchiveItemState.skipped => '已跳过',
-    ArchiveItemState.failed => '失败',
-    ArchiveItemState.cancelled => '已取消',
-    ArchiveItemState.working => '进行中',
-    ArchiveItemState.pending => '等待中',
-  };
-
-  @override
-  Widget build(BuildContext context) {
-    return AnimatedBuilder(
-      animation: widget.batch,
-      builder: (context, _) {
-        final batch = widget.batch;
-        final total = batch.items.length;
-        final done =
-            batch.count(ArchiveItemState.success) +
-            batch.count(ArchiveItemState.skipped) +
-            batch.count(ArchiveItemState.failed);
-        final progress = total == 0
-            ? 0.0
-            : (done / total).clamp(0.0, 1.0).toDouble();
-        final working = batch.items
-            .where((item) => item.state == ArchiveItemState.working)
-            .map((item) => item.title)
-            .toList();
-        final current = working.isNotEmpty
-            ? working.join('、')
-            : (batch.running ? '准备中…' : '—');
-
-        return ContentDialog(
-          title: widget.title,
-          dismissible: !batch.running,
-          content: Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 16),
-            child: Column(
-              mainAxisSize: MainAxisSize.min,
-              crossAxisAlignment: CrossAxisAlignment.stretch,
-              children: [
-                LinearProgressIndicator(value: progress),
-                const SizedBox(height: 8),
-                Text('进度：$done / $total'),
-                Text(
-                  '当前：$current',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
-                ),
-                const SizedBox(height: 12),
-                SizedBox(
-                  height: 300,
-                  child: ListView.builder(
-                    itemCount: batch.items.length,
-                    itemBuilder: (context, index) {
-                      final item = batch.items[index];
-                      return ListTile(
-                        contentPadding: EdgeInsets.zero,
-                        leading: _stateIcon(item.state),
-                        title: Text(
-                          item.title,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                        ),
-                        subtitle:
-                            item.state == ArchiveItemState.failed &&
-                                item.error != null
-                            ? Text(
-                                '失败：${batch.errorText(item.error!)}',
-                                maxLines: 2,
-                              )
-                            : Text(_stateLabel(item.state)),
-                      );
-                    },
-                  ),
-                ),
-              ],
-            ),
-          ),
-          actions: [
-            if (batch.hasRetryableFailures && !batch.running)
-              TextButton(
-                onPressed: () => unawaited(batch.run(retryFailed: true)),
-                child: const Text('重试失败项'),
-              ),
-            if (batch.running)
-              TextButton(onPressed: batch.cancel, child: const Text('取消')),
-            if (!batch.running)
-              FilledButton(
-                style: actionButtonStyle,
-                onPressed: () =>
-                    Navigator.of(context).pop(BackupResult.fromBatch(batch)),
-                child: const Text('关闭'),
-              ),
-          ],
-        );
-      },
     );
   }
 }

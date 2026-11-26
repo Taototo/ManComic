@@ -18,12 +18,15 @@ class CloudBootstrap {
 
   static final _engines = <String, RemoteLibraryEngine>{};
   static String _signature = '';
-  static bool _configured = false;
+  static Future<void>? _configuration;
 
   /// 配置原生内核。首帧之后调用，不占冷启动时间。
-  static Future<void> configure() async {
-    if (_configured) return;
-    _configured = true;
+  ///
+  /// 返回同一个 Future：夸克同步可能比首帧后的初始化更早发起，它 await 这里
+  /// 就能等到内核真正就绪，而不是拿到一个「已经开始、还没完成」的假信号。
+  static Future<void> configure() => _configuration ??= _configure();
+
+  static Future<void> _configure() async {
     try {
       final available = await EmbeddedOpenListRpc.available();
       final accounts = RemoteStorageAccounts.instance;
@@ -69,7 +72,12 @@ class CloudBootstrap {
           () {
             final account = accounts.account(lib.accountId);
             if (account == null) return null;
-            return [account.id, account.backend.name, account.driver, account.authorization];
+            return [
+              account.id,
+              account.backend.name,
+              account.driver,
+              account.authorization,
+            ];
           }(),
         ],
     ]);
