@@ -69,6 +69,11 @@ class ComicArchiveBatch extends ChangeNotifier {
   /// 把错误对象转成展示给用户的文本。
   final String Function(Object error) errorText;
 
+  /// 当前文件的字节级进度回调（标题、已传、总字节）。
+  ///
+  /// 由任务队列在接管批次时挂上，用来更新通知栏；不挂就不汇报。
+  void Function(String title, int completed, int? total)? onFileProgress;
+
   bool _running = false;
   bool _cancelRequested = false;
   bool _disposed = false;

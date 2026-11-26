@@ -1,5 +1,7 @@
+import 'package:venera/features/cloud_library/library_tabs.dart';
 import 'package:venera/foundation/appdata.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
+import 'package:venera/utils/cloud_bootstrap.dart';
 
 import 'comic_backup.dart';
 
@@ -49,7 +51,7 @@ Future<RemoteLibrary?> ensureBackupLibrary(BackupConfig config) async {
     (item) => item.id == location.accountId,
   );
   final name = account.isNotEmpty ? '${account.first.name}备份' : '夸克备份';
-  return accounts.saveLibrary(
+  final library = await accounts.saveLibrary(
     RemoteLibrary(
       id: '',
       sourceKey: '',
@@ -60,6 +62,12 @@ Future<RemoteLibrary?> ensureBackupLibrary(BackupConfig config) async {
       refreshIntervalMinutes: 360,
     ),
   );
+  // 立即装配源，用户从备份页点「浏览」时索引已经在跑了。
+  await CloudBootstrap.refresh();
+  // 库存在但发现页没有页签等于没有入口：这里必须补上，否则备份完的漫画
+  // 只能在网盘 App 里看到。放在 refresh 之后，源已注册，页签不会被过滤掉。
+  await enableLibraryTab(library.name);
+  return library;
 }
 
 /// 清除备份配置时是否要一并移除自动创建的库。

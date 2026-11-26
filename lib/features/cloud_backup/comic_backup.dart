@@ -211,11 +211,15 @@ abstract class ComicBackupOps {
   Future<void> ensureDirectory(BackupConfig config);
 
   /// 上传本地文件。
+  ///
+  /// [onProgress] 汇报单个文件的字节进度：一部大 CBZ 可能几十分钟，只有
+  /// 「第几部」的话通知栏会一直停在 0%，看起来像卡死。
   Future<void> uploadFile(
     BackupConfig config,
     String localPath,
-    String remotePath,
-  );
+    String remotePath, {
+    void Function(int completed, int? total)? onProgress,
+  });
 
   /// 下载远端文件到本地。
   Future<void> downloadFile(
@@ -285,8 +289,18 @@ class _RemoteComicBackupOps implements ComicBackupOps {
   Future<void> uploadFile(
     BackupConfig config,
     String localPath,
-    String remotePath,
-  ) => _run(config, (store) => store.upload(localPath, remotePath));
+    String remotePath, {
+    void Function(int completed, int? total)? onProgress,
+  }) => _run(
+    config,
+    (store) => store.upload(
+      localPath,
+      remotePath,
+      onProgress: onProgress == null
+          ? null
+          : (progress) => onProgress(progress.completed, progress.total),
+    ),
+  );
 
   @override
   Future<void> downloadFile(
@@ -471,7 +485,8 @@ class ComicBackupManager {
       }
     }
 
-    return ComicArchiveBatch(
+    late final ComicArchiveBatch batch;
+    batch = ComicArchiveBatch(
       items: items,
       errorText: (error) => _safeError(error, config),
       action: (index, retry, cancelled) async {
@@ -512,7 +527,16 @@ class ComicBackupManager {
           if (stopped()) return ArchiveItemState.cancelled;
           uploadedDigests[index] = await sha256.bind(file.openRead()).first;
           if (stopped()) return ArchiveItemState.cancelled;
-          await operations.uploadFile(config, file.path, remote);
+          await operations.uploadFile(
+            config,
+            file.path,
+            remote,
+            onProgress: (completed, total) => batch.onFileProgress?.call(
+              items[index].title,
+              completed,
+              total,
+            ),
+          );
           if (epoch != _taskEpoch) return ArchiveItemState.cancelled;
           remoteNames?.add(items[index].fileName);
           return ArchiveItemState.success;
@@ -521,6 +545,7 @@ class ComicBackupManager {
         }
       },
     );
+    return batch;
   }
 
   /// 创建恢复批次，可用于逐项展示进度与重试。

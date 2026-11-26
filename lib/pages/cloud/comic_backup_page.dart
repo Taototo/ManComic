@@ -2,11 +2,13 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
+import 'package:venera/features/cloud_backup/backup_task_queue.dart';
 import 'package:venera/features/cloud_backup/cloud_backup.dart';
 import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
 import 'package:venera/pages/cloud/archive_transfer_dialog.dart';
+import 'package:venera/pages/cloud/cloud_comics_page.dart';
 import 'package:venera/pages/cloud/remote_location_fields.dart';
 import 'package:venera/pages/cloud/storage_accounts_page.dart';
 
@@ -27,11 +29,30 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
   bool _loading = false;
   String? _loadError;
 
+  bool _queueWasBusy = false;
+
   @override
   void initState() {
     super.initState();
     _config = BackupConfig.fromSettings();
+    ArchiveTaskQueue.instance.addListener(_onQueueChanged);
+    _queueWasBusy = ArchiveTaskQueue.instance.isBusy;
     unawaited(_loadBackups());
+  }
+
+  /// 后台上传结束时刷新一下列表：用户可能切走很久，回来要看到新文件。
+  void _onQueueChanged() {
+    final busy = ArchiveTaskQueue.instance.isBusy;
+    if (_queueWasBusy && !busy) {
+      unawaited(_loadBackups());
+    }
+    _queueWasBusy = busy;
+  }
+
+  @override
+  void dispose() {
+    ArchiveTaskQueue.instance.removeListener(_onQueueChanged);
+    super.dispose();
   }
 
   String _formatSize(int bytes) {
@@ -361,8 +382,26 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
     }
   }
 
-  Widget _buildLocationSection() {
-    final location = _config.location;
+  /// 直接打开当前备份目录对应的网盘漫画库。
+  ///
+  /// 备份目录在设置时会自动登记成在线漫画库，这里只是把入口放到手边——
+  /// 用户备份完想立刻翻一下，不用回发现页找页签。
+  Future<void> _browseCloudComics() async {
+    if (!_config.isValid) {
+      context.showMessage(message: '请先设置备份位置');
+      return;
+    }
+    try {
+      final library = await ensureBackupLibrary(_config);
+      if (library == null) return;
+      if (!mounted) return;
+      await context.to(() => CloudComicsPage(library: library));
+    } catch (_) {
+      if (mounted) context.showMessage(message: '打开网盘漫画库失败');
+    }
+  }
+
+  Widget _buildLocationSection() {    final location = _config.location;
     if (location == null) {
       final quark = _preferredQuarkAccount();
       return Padding(
@@ -445,6 +484,10 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
                           ? '切换网盘'
                           : '切换网盘（${alternatives.length}）',
                     ),
+                  ),
+                  Button.outlined(
+                    onPressed: _browseCloudComics,
+                    child: const Text('浏览网盘漫画'),
                   ),
                   Button.text(
                     onPressed: _showLocationDialog,
@@ -684,6 +727,7 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
               ),
             ),
           ),
+          const SliverToBoxAdapter(child: ArchiveTransferBanner()),
           SliverToBoxAdapter(child: _sectionTitle('备份位置')),
           SliverToBoxAdapter(child: _buildLocationSection()),
           SliverToBoxAdapter(child: _sectionTitle('备份操作')),

@@ -539,6 +539,7 @@ class _LocalComicsPageState extends State<LocalComicsPage> {
               SliverToBoxAdapter(
                 child: SizedBox(height: context.padding.top + _kTopBarHeight),
               ),
+              const SliverToBoxAdapter(child: ArchiveTransferBanner()),
               if (!searchMode && LocalManager().downloadingTasks.isNotEmpty)
                 // 不能加 const：任务数变化时父级 setState 会重建这棵树，但如果
                 // widget 实例相同（const），Flutter 会跳过子树更新，横条就会

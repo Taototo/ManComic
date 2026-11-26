@@ -1020,7 +1020,18 @@
     "Pack local comics as CBZ and upload them to the cloud": "把本地漫画打包成 CBZ 上传到网盘",
     "Upload to cloud": "上传至网盘",
     "Saved, but auto sync is off because the test failed": "已保存，但验证失败，自动同步已关闭",
-    "account unavailable": "账号不可用"
+    "account unavailable": "账号不可用",
+    "Cloud comics": "网盘漫画",
+    "Browse comics stored on your cloud drive": "浏览网盘里的漫画",
+    "Browse": "浏览",
+    "Search comics": "搜索漫画",
+    "Title keyword": "标题关键词",
+    "Leave empty to show all": "留空显示全部",
+    "No matching comics": "没有匹配的漫画",
+    "This folder has no readable comics yet": "这个目录里还没有可阅读的漫画",
+    "Check cloud account": "检查网盘账号",
+    "Comic library is not ready yet": "漫画库还没准备好",
+    "Upload in background": "后台继续"
   },
   "zh_TW": {
     "Invalid": "失效",
@@ -2043,6 +2054,17 @@
     "Pack local comics as CBZ and upload them to the cloud": "把本地漫畫打包成 CBZ 上傳到網盤",
     "Upload to cloud": "上傳至網盤",
     "Saved, but auto sync is off because the test failed": "已儲存，但驗證失敗，自動同步已關閉",
-    "account unavailable": "帳號不可用"
+    "account unavailable": "帳號不可用",
+    "Cloud comics": "網盤漫畫",
+    "Browse comics stored on your cloud drive": "瀏覽網盤裡的漫畫",
+    "Browse": "瀏覽",
+    "Search comics": "搜尋漫畫",
+    "Title keyword": "標題關鍵詞",
+    "Leave empty to show all": "留空顯示全部",
+    "No matching comics": "沒有符合的漫畫",
+    "This folder has no readable comics yet": "這個目錄裡還沒有可閱讀的漫畫",
+    "Check cloud account": "檢查網盤帳號",
+    "Comic library is not ready yet": "漫畫庫還沒準備好",
+    "Upload in background": "後台繼續"
   }
 }

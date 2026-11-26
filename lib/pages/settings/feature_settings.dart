@@ -248,6 +248,12 @@ class _DataSettingsState extends State<DataSettings> {
           callback: () => context.to(() => const ComicBackupPage()),
           actionTitle: "Manage".tl,
         ).toSliver(),
+        _CallbackSetting(
+          title: "Cloud comics".tl,
+          subtitle: "Browse comics stored on your cloud drive".tl,
+          callback: () => context.to(() => const CloudLibraryPage()),
+          actionTitle: "Browse".tl,
+        ).toSliver(),
         _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
         _SliderSetting(
           title: "Download Threads".tl,

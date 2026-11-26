@@ -1,10 +1,12 @@
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
-import 'package:venera/foundation/comic_source/comic_source.dart';
-import 'package:venera/pages/cloud/storage.dart';
 import 'package:venera/features/cloud_library/remote_library_engine.dart';
+import 'package:venera/foundation/app.dart';
 import 'package:venera/foundation/appdata.dart';
+import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
+import 'package:venera/pages/cloud/cloud_comics_page.dart';
+import 'package:venera/pages/cloud/storage.dart';
 
 final _storage = RemoteStorageAccounts.instance;
 
@@ -225,7 +227,7 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
               ),
               isThreeLine:
                   library.directories.length > 1 || failures.isNotEmpty,
-              onTap: () => showRemoteLibraryEditor(context, initial: library),
+              onTap: () => context.to(() => CloudComicsPage(library: library)),
               trailing: Row(
                 mainAxisSize: MainAxisSize.min,
                 children: [
@@ -238,6 +240,12 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
                             await engine.synchronize(force: true);
                             if (mounted) setState(() {});
                           },
+                  ),
+                  IconButton(
+                    tooltip: '设置',
+                    icon: const Icon(Icons.tune),
+                    onPressed: () =>
+                        showRemoteLibraryEditor(context, initial: library),
                   ),
                   IconButton(
                     tooltip: '删除',

@@ -2,6 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/material.dart';
 import 'package:venera/components/components.dart';
+import 'package:venera/features/cloud_backup/backup_task_queue.dart';
 import 'package:venera/features/cloud_backup/cloud_backup.dart';
 import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/local.dart';
@@ -10,11 +11,20 @@ import 'package:venera/network/cloud_storage/remote_storage.dart';
 import 'comic_backup_page.dart';
 
 /// 展示备份 / 恢复进度；关闭时返回统计结果。
+///
+/// 任务本身归 [ArchiveTaskQueue] 所有——关掉这个对话框只是关掉视图，上传会
+/// 在后台继续，可以从页面横幅重新打开。因此关闭时可能返回 null（表示「还在
+/// 跑，我只是先关掉」）。
 Future<BackupResult?> showArchiveTransferDialog(
   BuildContext context, {
   required ComicArchiveBatch batch,
   required String title,
+  bool upload = true,
 }) {
+  final queue = ArchiveTaskQueue.instance;
+  if (!queue.owns(batch)) {
+    unawaited(queue.submit(batch, title: title, upload: upload));
+  }
   return showDialog<BackupResult>(
     context: context,
     barrierDismissible: false,
@@ -22,10 +32,86 @@ Future<BackupResult?> showArchiveTransferDialog(
   );
 }
 
+/// 页面上的「正在上传」横幅；有任务在跑时显示，点开回到进度详情。
+class ArchiveTransferBanner extends StatelessWidget {
+  const ArchiveTransferBanner({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    final queue = ArchiveTaskQueue.instance;
+    return ListenableBuilder(
+      listenable: queue,
+      builder: (context, _) {
+        final batch = queue.activeBatch;
+        if (!queue.isBusy || batch == null) return const SizedBox.shrink();
+        final total = queue.total;
+        final done = queue.done;
+        final progress = total <= 0 ? null : queue.fraction;
+        return Padding(
+          padding: const EdgeInsets.fromLTRB(16, 8, 16, 0),
+          child: Card(
+            margin: EdgeInsets.zero,
+            child: InkWell(
+              borderRadius: BorderRadius.circular(12),
+              onTap: () => showArchiveTransferDialog(
+                context,
+                batch: batch,
+                title: queue.activeTitle,
+              ),
+              child: Padding(
+                padding: const EdgeInsets.fromLTRB(12, 10, 12, 12),
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        const Icon(Icons.cloud_upload_outlined, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            total > 0
+                                ? '${queue.activeTitle}：$done / $total'
+                                      '（${(queue.fraction * 100).floor()}%）'
+                                : '${queue.activeTitle}：准备中…',
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
+                        ),
+                        TextButton(
+                          onPressed: queue.cancelAll,
+                          child: const Text('取消'),
+                        ),
+                      ],
+                    ),
+                    if (queue.current.isNotEmpty)
+                      Padding(
+                        padding: const EdgeInsets.only(left: 26, bottom: 6),
+                        child: Text(
+                          '当前：${queue.current}',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style: const TextStyle(fontSize: 12),
+                        ),
+                      ),
+                    Padding(
+                      padding: const EdgeInsets.only(left: 26),
+                      child: LinearProgressIndicator(value: progress),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          ),
+        );
+      },
+    );
+  }
+}
+
 /// 从本地漫画列表直接上传到网盘。
 ///
 /// 入口在本地漫画的多选/长按菜单里：不经过备份页，选中就传；目标位置沿用
-/// 「资源上载 → 漫画备份」里配置的那一个。
+/// 「资源上载 → 漫画备份」里配置的那一个。上传在后台队列里跑，切走不影响。
 Future<void> uploadLocalComicsToCloud(
   BuildContext context,
   List<LocalComic> comics,
@@ -69,6 +155,7 @@ Future<void> uploadLocalComicsToCloud(
     batch: batch,
     title: '上传至网盘',
   );
+  // null = 用户选择「后台继续」，进度和结果交给横幅与通知，不再弹窗打扰。
   if (!context.mounted || result == null) return;
 
   if (result.authorizationFailed) {
@@ -121,15 +208,21 @@ class _ArchiveTransferDialog extends StatefulWidget {
 }
 
 class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
+  ArchiveTaskQueue get _queue => ArchiveTaskQueue.instance;
+
   @override
   void initState() {
     super.initState();
-    unawaited(widget.batch.run());
+    _queue.addListener(_onQueueChanged);
+  }
+
+  void _onQueueChanged() {
+    if (mounted) setState(() {});
   }
 
   @override
   void dispose() {
-    widget.batch.dispose();
+    _queue.removeListener(_onQueueChanged);
     super.dispose();
   }
 
@@ -169,6 +262,7 @@ class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
       animation: widget.batch,
       builder: (context, _) {
         final batch = widget.batch;
+        final running = _queue.isBusy && _queue.activeBatch == batch;
         final total = batch.items.length;
         final done =
             batch.count(ArchiveItemState.success) +
@@ -183,11 +277,11 @@ class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
             .toList();
         final current = working.isNotEmpty
             ? working.join('、')
-            : (batch.running ? '准备中…' : '—');
+            : (running ? '准备中…' : '—');
 
         return ContentDialog(
           title: widget.title,
-          dismissible: !batch.running,
+          dismissible: !running,
           content: Padding(
             padding: const EdgeInsets.symmetric(horizontal: 16),
             child: Column(
@@ -202,6 +296,14 @@ class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
                 ),
+                if (running)
+                  const Padding(
+                    padding: EdgeInsets.only(top: 6),
+                    child: Text(
+                      '上传在后台进行，可以关掉这个窗口继续用应用。',
+                      style: TextStyle(fontSize: 12),
+                    ),
+                  ),
                 const SizedBox(height: 12),
                 SizedBox(
                   height: 300,
@@ -233,14 +335,22 @@ class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
             ),
           ),
           actions: [
-            if (batch.hasRetryableFailures && !batch.running)
+            if (_queue.canRetry && _queue.activeBatch == batch)
               TextButton(
-                onPressed: () => unawaited(batch.run(retryFailed: true)),
+                onPressed: () => unawaited(_queue.retryActive()),
                 child: const Text('重试失败项'),
               ),
-            if (batch.running)
-              TextButton(onPressed: batch.cancel, child: const Text('取消')),
-            if (!batch.running)
+            if (running) ...[
+              TextButton(
+                onPressed: _queue.cancelAll,
+                child: const Text('取消'),
+              ),
+              TextButton(
+                onPressed: () => Navigator.of(context).pop(),
+                child: const Text('后台继续'),
+              ),
+            ],
+            if (!running)
               FilledButton(
                 style: actionButtonStyle,
                 onPressed: () =>

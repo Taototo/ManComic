@@ -75,6 +75,15 @@ class _CloudLibraryPageState extends State<CloudLibraryPage> {
               ),
             ),
           ),
+          const SliverToBoxAdapter(
+            child: Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 4),
+              child: Text(
+                '点任意漫画库即可浏览网盘里的漫画；同名目录也会出现在发现页。',
+                style: TextStyle(fontSize: 12),
+              ),
+            ),
+          ),
           const RemoteLibrariesSliver(),
           const SliverToBoxAdapter(child: SizedBox(height: 24)),
         ],

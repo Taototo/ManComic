@@ -2,8 +2,10 @@ import 'dart:async';
 import 'dart:convert';
 
 import 'package:venera/foundation/app.dart';
+import 'package:venera/foundation/appdata.dart';
 import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/log.dart';
+import 'package:venera/features/cloud_library/library_tabs.dart';
 import 'package:venera/features/cloud_library/remote_library_engine.dart';
 import 'package:venera/network/cloud_storage/accounts.dart';
 import 'package:venera/network/cloud_storage/openlist_bridge.dart';
@@ -42,8 +44,12 @@ class CloudBootstrap {
       if (available) {
         await accounts.ensureInitialized();
       }
+      // 历史版本里自动创建的备份库没写进发现页，升级后补一次页签。
       _watch();
       await refresh();
+      // 源注册完之后再补页签：先写页签、后注册源的话，发现页会在过滤
+      // 「只保留真实存在的 explore page」时把它丢掉。
+      await migrateLibraryTabsOnce();
     } catch (e, s) {
       // 内核不可用不能拖垮整个 app：网盘功能入口会自己隐藏。
       Log.error('CloudBootstrap.configure', '$e\n$s');
@@ -112,6 +118,15 @@ class CloudBootstrap {
       _engines.remove(key)?.cancel();
       RemoteLibraryEngines.remove(key);
       ComicSourceManager().remove(key);
+    }
+    // 发现页只在 settings 变化时重算页签列表。库名可能先写进 explore_pages、
+    // 源后注册（新建库、自动创建的备份库都是这个顺序），不重新发一次通知
+    // 的话页签会被过滤掉，用户看到的就是「库建好了但找不到入口」。
+    final pages = appdata.settings['explore_pages'];
+    if (pages is List) {
+      appdata.settings['explore_pages'] = List<String>.from(
+        pages.whereType<String>(),
+      );
     }
   }
 
