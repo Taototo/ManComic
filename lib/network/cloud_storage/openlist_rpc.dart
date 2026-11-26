@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'models.dart';
+import 'quark_uploader.dart';
 import 'remote_file_store.dart';
 
 abstract class OpenListRpcClient {
@@ -107,10 +108,26 @@ class OpenListFileStore implements RemoteFileStore {
     String localPath,
     String remotePath, {
     void Function(RemoteTransferProgress progress)? onProgress,
-  }) => _transfer('upload', {
-    'localPath': localPath,
-    'path': remotePath,
-  }, onProgress);
+  }) async {
+    try {
+      await _transfer('upload', {
+        'localPath': localPath,
+        'path': remotePath,
+      }, onProgress);
+    } catch (error) {
+      // 内核构造的上传流没有 MIME，夸克会以 format_type is null 拒绝
+      // (.cbz 之类不在 Go 的 MIME 表里)。这种情况下改走应用侧的原生分片上传。
+      final uploader = QuarkUploader.forAccount(account);
+      if (uploader == null || !QuarkUploader.isMissingFormatType(error)) {
+        rethrow;
+      }
+      try {
+        await uploader.upload(localPath, remotePath, onProgress: onProgress);
+      } finally {
+        uploader.close();
+      }
+    }
+  }
 
   @override
   Future<void> download(
