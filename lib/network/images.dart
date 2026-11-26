@@ -10,7 +10,35 @@ import 'package:venera/utils/file_type.dart';
 
 import 'app_dio.dart';
 
+/// 源直接吐字节的图片（`loadBytes`）。
+///
+/// 网盘漫画库里的图在压缩包/PDF 里，没有可请求的地址，只能由源把字节读出来。
+/// 以前这里只认 `configs['url']`，于是 `remote-zip:` / `remote-work-image:` 这种
+/// key 被当成 URL 丢给 dio，rhttp 直接 `builder error for url (...)`：网盘漫画
+/// 封面一片空白，阅读页整屏都是「重试」。
+typedef _ByteLoader = Future<Uint8List> Function(CancelToken token);
+
 abstract class ImageDownloader {
+  static bool _hasByteLoader(Map<String, dynamic> configs) =>
+      configs['loadBytes'] is _ByteLoader;
+
+  /// 走 `loadBytes` 取字节。远程读压缩包要过一层限流 scheduler，瞬时失败
+  /// （限流、连接被掐）很常见，重试一次比直接把整页判失败好。
+  static Future<Uint8List> _loadFromSource(_ByteLoader loader) async {
+    Object? lastError;
+    for (var attempt = 0; attempt < 2; attempt++) {
+      try {
+        return await loader(CancelToken());
+      } catch (e) {
+        lastError = e;
+        if (attempt == 0) {
+          await Future.delayed(const Duration(milliseconds: 300));
+        }
+      }
+    }
+    throw lastError ?? "Error: Failed to load image from source.";
+  }
+
   static Stream<ImageDownloadProgress> loadThumbnail(
       String url, String? sourceKey,
       [String? cid]) async* {
@@ -49,6 +77,19 @@ abstract class ImageDownloader {
         yield* loadThumbnail(comicInfo.data.cover, sourceKey);
         return;
       }
+    }
+
+    if (_hasByteLoader(configs)) {
+      final data = await _loadFromSource(configs['loadBytes'] as _ByteLoader);
+      if (isCompleteImageBytes(data)) {
+        await CacheManager().writeCache(cacheKey, data);
+      }
+      yield ImageDownloadProgress(
+        currentBytes: data.length,
+        totalBytes: data.length,
+        imageBytes: data,
+      );
+      return;
     }
 
     var dio = AppDio(BaseOptions(
@@ -166,6 +207,18 @@ abstract class ImageDownloader {
       configs = (await comicSource!.getImageLoadingConfig
               ?.call(imageKey, cid, eid)) ??
           {};
+    }
+    if (_hasByteLoader(configs)) {
+      final data = await _loadFromSource(configs['loadBytes'] as _ByteLoader);
+      if (useCache) {
+        await CacheManager().writeCache(cacheKey, data);
+      }
+      yield ImageDownloadProgress(
+        currentBytes: data.length,
+        totalBytes: data.length,
+        imageBytes: data,
+      );
+      return;
     }
     var retryLimit = 5;
     while (true) {

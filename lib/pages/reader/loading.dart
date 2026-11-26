@@ -66,6 +66,12 @@ class _ReaderWithLoadingState
       );
     }
     var comicSource = ComicSource.find(widget.sourceKey);
+    if (comicSource == null && CloudBootstrap.isCloudSourceKey(widget.sourceKey)) {
+      // 网盘库的源是首帧之后才装配的。冷启动直接点「继续阅读」可能比装配更早，
+      // 这里等一次再找，别把它当成「源不存在」。
+      await CloudBootstrap.ensureReady();
+      comicSource = ComicSource.find(widget.sourceKey);
+    }
     if (comicSource == null) {
       return Res.error("comic not found");
     }

@@ -27,7 +27,10 @@ class HistoryImageProvider
   Future<Uint8List> load(chunkEvents, checkStop) async {
     var url = history.cover;
 
-    if (!url.contains('/')) {
+    // 网盘漫画的封面不是地址，而是压缩包里的图（`remote-zip:` / `remote-work-image:`）。
+    // 这种 key 不带 `/`，会被下面的「占位符」判据误判，白跑一次 loadComicInfo。
+    final isInlineKey = _isInlineKey(url);
+    if (!isInlineKey && !url.contains('/')) {
       // 历史记录里存的是占位符（旧数据），只能现取。
       var localComic = LocalManager().find(history.id, history.type);
       if (localComic != null) {
@@ -78,6 +81,10 @@ class HistoryImageProvider
     }
     throw "Error: Empty response body.";
   }
+
+  /// 是否为「不是 URL、由源直接解码」的图片 key（网盘漫画封面）。
+  static bool _isInlineKey(String key) =>
+      key.startsWith('remote-zip:') || key.startsWith('remote-work-image:');
 
   /// 向漫画源重新取一次封面地址，并写回历史记录。
   ///

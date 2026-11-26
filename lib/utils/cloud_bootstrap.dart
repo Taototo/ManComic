@@ -62,6 +62,26 @@ class CloudBootstrap {
     });
   }
 
+  /// 这个 sourceKey 是不是网盘漫画库的源。
+  static bool isCloudSourceKey(String key) =>
+      key == RemoteLibrarySource.sourceKey || key.startsWith('remote_library_');
+
+  /// 等网盘库装配完成。
+  ///
+  /// 网盘库的源是首帧之后才注册的（绑定内核要走一次 channel）。冷启动后直接点
+  /// 「继续阅读 / 历史里的网盘漫画」，很可能比注册更早，`ComicSource.find`
+  /// 拿到 null，阅读器就报「comic not found」——看起来像是没指向网盘。
+  static Future<void> ensureReady() async {
+    await configure();
+    await refresh();
+  }
+
+  /// 按历史记录里的封面判断这本是不是网盘漫画。
+  ///
+  /// 库被删掉之后 `sourceKey` 会退化成 `Unknown:<type>`，只能靠图片 key 认。
+  static bool looksLikeCloudComic(String cover) =>
+      cover.startsWith('remote-zip:') || cover.startsWith('remote-work-image:');
+
   /// 生成当前配置的签名。签名没变就不动源——避免 notifyListeners 递归。
   static String _computeSignature() {
     final accounts = RemoteStorageAccounts.instance;
