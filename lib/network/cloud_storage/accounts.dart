@@ -426,6 +426,13 @@ class RemoteStorageAccounts with ChangeNotifier {
         appdata.settings[key] = null;
       }
     }
+    // 已保存的备份目标也要跟着清掉，否则切换列表里会留下无法使用的死条目。
+    final destinations = appdata.settings[backupDestinationsSetting];
+    if (destinations is List) {
+      appdata.settings[backupDestinationsSetting] = destinations
+          .where((item) => item is! Map || item['accountId'] != id)
+          .toList();
+    }
     await appdata.saveData();
     notifyListeners();
   }

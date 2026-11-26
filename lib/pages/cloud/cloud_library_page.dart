@@ -45,9 +45,7 @@ class _CloudLibraryPageState extends State<CloudLibraryPage> {
                     color: Theme.of(context).colorScheme.errorContainer,
                     borderRadius: BorderRadius.circular(8),
                   ),
-                  child: const Text(
-                    '当前平台不支持内置网盘内核（仅 Android / iOS）。',
-                  ),
+                  child: const Text('当前平台不支持内置网盘内核（仅 Android / iOS）。'),
                 ),
               ),
             ),
@@ -64,7 +62,7 @@ class _CloudLibraryPageState extends State<CloudLibraryPage> {
             child: ListTile(
               leading: const Icon(Icons.account_circle_outlined),
               title: const Text('网盘账号'),
-              subtitle: const Text('夸克网盘'),
+              subtitle: const Text('夸克网盘 / WebDAV'),
               trailing: const Icon(Icons.arrow_right),
               onTap: () => context.to(() => StorageAccountsPage()),
             ),
@@ -91,8 +89,8 @@ class _CloudLibraryPageState extends State<CloudLibraryPage> {
           SliverToBoxAdapter(
             child: ListTile(
               leading: const Icon(Icons.backup_outlined),
-              title: const Text('备份到夸克网盘'),
-              subtitle: const Text('上传本地漫画，之后可在夸克在线阅读'),
+              title: const Text('漫画备份'),
+              subtitle: const Text('夸克 / WebDAV 共用，可随时切换'),
               trailing: const Icon(Icons.arrow_right),
               onTap: () => context.to(() => ComicBackupPage()),
             ),

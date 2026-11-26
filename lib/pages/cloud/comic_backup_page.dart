@@ -7,8 +7,12 @@ import 'package:venera/foundation/context.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/network/cloud_storage/remote_storage.dart';
 import 'package:venera/pages/cloud/remote_location_fields.dart';
+import 'package:venera/pages/cloud/storage_accounts_page.dart';
 
 /// 把本地漫画打包成 CBZ 备份到网盘，并从云端恢复的管理页面。
+///
+/// 夸克与 WebDAV 共用这一套备份：当前目标存在 [BackupConfig.location]，
+/// 历次用过的目标都会被记住，网盘失效时可以一键切过去继续备份。
 class ComicBackupPage extends StatefulWidget {
   const ComicBackupPage({super.key});
 
@@ -20,6 +24,7 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
   late BackupConfig _config;
   List<BackupFile> _backups = <BackupFile>[];
   bool _loading = false;
+  String? _loadError;
 
   @override
   void initState() {
@@ -51,33 +56,180 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
         setState(() {
           _backups = <BackupFile>[];
           _loading = false;
+          _loadError = null;
         });
       }
       return;
     }
-    if (mounted) setState(() => _loading = true);
+    if (mounted) {
+      setState(() {
+        _loading = true;
+        _loadError = null;
+      });
+    }
     try {
       final res = await ComicBackupManager.listBackups();
       if (!mounted) return;
       setState(() {
-        _backups = res.error ? <BackupFile>[] : (res.dataOrNull ?? <BackupFile>[]);
+        _backups = res.error
+            ? <BackupFile>[]
+            : (res.dataOrNull ?? <BackupFile>[]);
         _loading = false;
+        _loadError = res.error ? '读取云端备份失败，请检查网盘连接' : null;
       });
-      if (res.error) {
-        context.showMessage(message: '获取云端备份失败，请检查网盘连接');
-      }
-    } catch (_) {
+    } catch (error) {
       if (!mounted) return;
-      setState(() => _loading = false);
-      context.showMessage(message: '获取云端备份失败');
+      setState(() {
+        _loading = false;
+        _loadError = '读取云端备份失败：${describeCloudError(error)}';
+      });
+    }
+  }
+
+  StorageAccount? _accountOf(RemoteLocation location) =>
+      RemoteStorageAccounts.instance.account(location.accountId);
+
+  String _targetTitle(RemoteLocation location) {
+    final account = _accountOf(location);
+    return '${account?.name ?? '账号不可用'} · ${storageProviderLabel(account)}';
+  }
+
+  /// 优先用可用的夸克账号：夸克是国内场景下最常用的备份目标。
+  StorageAccount? _preferredQuarkAccount() {
+    for (final account in RemoteStorageAccounts.instance.accounts) {
+      if (account.backend == StorageBackend.openlist &&
+          (account.driver == 'Quark' || account.driver == 'QuarkOpen') &&
+          !account.authorizationIsKnownInvalid) {
+        return account;
+      }
+    }
+    return null;
+  }
+
+  Future<void> _switchTarget(
+    RemoteLocation location, {
+    bool offerRebackup = true,
+  }) async {
+    try {
+      final next = await switchBackupTarget(location);
+      if (!mounted) return;
+      setState(() {
+        _config = next;
+        _loadError = null;
+      });
+      context.showMessage(message: '已切换备份网盘');
+      unawaited(_loadBackups());
+    } catch (error) {
+      if (mounted) {
+        context.showMessage(message: '切换备份网盘失败：${describeCloudError(error)}');
+      }
+      return;
+    }
+    if (offerRebackup && mounted) await _offerRebackup();
+  }
+
+  Future<void> _offerRebackup() async {
+    final confirmed = await showDialog<bool>(
+      context: context,
+      builder: (dialogContext) => ContentDialog(
+        title: '已切换备份网盘',
+        content: const Padding(
+          padding: EdgeInsets.symmetric(horizontal: 16),
+          child: Text('现在把本地漫画备份到新网盘吗？新网盘上已有的同名备份会自动跳过。'),
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop(false),
+            child: const Text('稍后'),
+          ),
+          FilledButton(
+            style: actionButtonStyle,
+            onPressed: () => Navigator.of(dialogContext).pop(true),
+            child: const Text('选择漫画并备份'),
+          ),
+        ],
+      ),
+    );
+    if (confirmed == true && mounted) await _startBackup();
+  }
+
+  Future<void> _showTargetSheet() async {
+    final destinations = _config.destinations;
+    final choice = await showModalBottomSheet<Object>(
+      context: context,
+      showDragHandle: true,
+      builder: (sheetContext) => SafeArea(
+        child: ListView(
+          shrinkWrap: true,
+          children: [
+            const Padding(
+              padding: EdgeInsets.fromLTRB(16, 0, 16, 8),
+              child: Text(
+                '选择备份网盘',
+                style: TextStyle(fontSize: 16, fontWeight: FontWeight.w500),
+              ),
+            ),
+            if (destinations.isEmpty) const ListTile(title: Text('还没有保存过备份位置')),
+            for (final destination in destinations)
+              ListTile(
+                leading: Icon(
+                  _config.location != null &&
+                          destination.accountId ==
+                              _config.location!.accountId &&
+                          destination.directory == _config.location!.directory
+                      ? Icons.radio_button_checked
+                      : Icons.radio_button_unchecked,
+                ),
+                title: Text(_targetTitle(destination)),
+                subtitle: Text('目录：${destination.directory}'),
+                trailing:
+                    destination.accountId == _config.location?.accountId &&
+                        destination.directory == _config.location?.directory
+                    ? const Text('当前')
+                    : null,
+                onTap: () => Navigator.of(sheetContext).pop(destination),
+              ),
+            const Divider(height: 1),
+            ListTile(
+              leading: const Icon(Icons.create_new_folder_outlined),
+              title: const Text('选择其他网盘或目录…'),
+              onTap: () => Navigator.of(sheetContext).pop('other'),
+            ),
+            ListTile(
+              leading: const Icon(Icons.manage_accounts_outlined),
+              title: const Text('管理网盘账号'),
+              onTap: () => Navigator.of(sheetContext).pop('manage'),
+            ),
+          ],
+        ),
+      ),
+    );
+    if (!mounted || choice == null) return;
+    if (choice is RemoteLocation) {
+      if (choice.accountId == _config.location?.accountId &&
+          choice.directory == _config.location?.directory) {
+        return;
+      }
+      await _switchTarget(choice);
+      return;
+    }
+    if (choice == 'other') {
+      await _showLocationDialog();
+      return;
+    }
+    if (choice == 'manage') {
+      await context.to(() => StorageAccountsPage());
+      if (!mounted) return;
+      setState(() => _config = BackupConfig.fromSettings());
+      unawaited(_loadBackups());
     }
   }
 
   Future<void> _showLocationDialog() async {
     final current = _config.location;
     StorageAccount? chosenAccount = current == null
-        ? null
-        : RemoteStorageAccounts.instance.account(current.accountId);
+        ? _preferredQuarkAccount()
+        : _accountOf(current);
     List<String> directories = current == null
         ? <String>[]
         : <String>[current.directory];
@@ -125,84 +277,187 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
       showCenterHint(context, '请选择网盘账号和目录');
       return;
     }
-    try {
-      final location = RemoteLocation(
+    await _switchTarget(
+      RemoteLocation(
         accountId: chosenAccount!.id,
         directory: directories.first,
-      );
-      final config = BackupConfig(
-        location: location,
-        remotePath: location.directory,
-      );
-      await BackupConfig.saveToSettings(config);
-      // 备份目录同时登记成在线漫画库：上传完的 CBZ 立刻能在发现页读到。
-      await ensureBackupLibrary(config);
-      if (!mounted) return;
-      setState(() => _config = BackupConfig.fromSettings());
-      context.showMessage(message: '备份位置已保存，并已加入在线漫画库');
-      unawaited(_loadBackups());
-    } catch (_) {
-      if (mounted) context.showMessage(message: '保存备份位置失败');
-    }
+      ),
+    );
   }
 
   Future<void> _clearConfig() async {
     try {
-      await removeBackupLibraryIfOwned(_config);
-      await BackupConfig.clearSettings();
+      await clearBackupTarget();
       if (!mounted) return;
-      setState(() => _config = BackupConfig.fromSettings());
+      setState(() {
+        _config = BackupConfig.fromSettings();
+        _backups = <BackupFile>[];
+        _loadError = null;
+      });
       context.showMessage(message: '已清除备份位置');
-      unawaited(_loadBackups());
     } catch (_) {
       if (mounted) context.showMessage(message: '清除备份配置失败');
+    }
+  }
+
+  Future<void> _reauthorize(StorageAccount account) async {
+    try {
+      final saved = await showStorageAccountEditor(context, initial: account);
+      if (!mounted) return;
+      setState(() => _config = BackupConfig.fromSettings());
+      if (saved == null) return;
+      if (saved.statusMessage != null) {
+        context.showMessage(message: '重新授权未通过：${saved.statusMessage}');
+      } else {
+        context.showMessage(message: '授权已更新');
+        unawaited(_loadBackups());
+      }
+    } catch (error) {
+      if (mounted) {
+        context.showMessage(message: '重新授权失败：${describeCloudError(error)}');
+      }
+    }
+  }
+
+  /// 备份/恢复失败且原因指向登录失效时，给出「重新授权 / 切换网盘」的出口。
+  Future<void> _handleTargetFailure() async {
+    final location = _config.location;
+    final account = location == null ? null : _accountOf(location);
+    final action = await showDialog<String>(
+      context: context,
+      builder: (dialogContext) => ContentDialog(
+        title: '网盘拒绝访问',
+        content: Padding(
+          padding: const EdgeInsets.symmetric(horizontal: 16),
+          child: Text(
+            '「${account?.name ?? '当前网盘'}」返回了登录/授权失效，继续重试也不会成功。'
+            '可以先重新授权；如果一时修不好，就切换到另一个网盘继续备份。',
+          ),
+        ),
+        actions: [
+          if (account != null)
+            TextButton(
+              onPressed: () => Navigator.of(dialogContext).pop('relogin'),
+              child: const Text('重新授权'),
+            ),
+          TextButton(
+            onPressed: () => Navigator.of(dialogContext).pop('switch'),
+            child: const Text('切换网盘'),
+          ),
+          FilledButton(
+            style: actionButtonStyle,
+            onPressed: () => Navigator.of(dialogContext).pop('close'),
+            child: const Text('关闭'),
+          ),
+        ],
+      ),
+    );
+    if (!mounted) return;
+    if (action == 'relogin' && account != null) {
+      await _reauthorize(account);
+    } else if (action == 'switch') {
+      await _showTargetSheet();
     }
   }
 
   Widget _buildLocationSection() {
     final location = _config.location;
     if (location == null) {
+      final quark = _preferredQuarkAccount();
       return Padding(
         padding: const EdgeInsets.symmetric(horizontal: 16),
-        child: Row(
+        child: Column(
+          crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
-            const Expanded(child: Text('尚未设置备份位置')),
-            Button.filled(
+            const Text('尚未设置备份位置。夸克和 WebDAV 共用这一套备份，之后随时可以切换。'),
+            const SizedBox(height: 12),
+            if (quark != null) ...[
+              Button.filled(
+                onPressed: () => _switchTarget(
+                  RemoteLocation(
+                    accountId: quark.id,
+                    directory: '/venera_backup/',
+                  ),
+                  offerRebackup: false,
+                ),
+                child: Text('使用夸克网盘「${quark.name}」'),
+              ),
+              const SizedBox(height: 8),
+            ],
+            Button.outlined(
               onPressed: _showLocationDialog,
-              child: const Text('设置备份位置'),
+              child: const Text('选择网盘和目录'),
             ),
           ],
         ),
       );
     }
-    final accountName =
-        RemoteStorageAccounts.instance.account(location.accountId)?.name ??
-        '账号不可用';
+    final account = _accountOf(location);
+    final invalid = account?.authorizationIsKnownInvalid == true;
+    final alternatives = _config.alternatives;
+    final errorColor = Theme.of(context).colorScheme.error;
     return Padding(
       padding: const EdgeInsets.symmetric(horizontal: 16),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          ListTile(
-            contentPadding: EdgeInsets.zero,
-            leading: const Icon(Icons.cloud_done_outlined),
-            title: Text('账号：$accountName'),
-            subtitle: Text('目录：${location.directory}'),
-          ),
-          Row(
+      child: Card(
+        margin: EdgeInsets.zero,
+        child: Padding(
+          padding: const EdgeInsets.fromLTRB(12, 8, 12, 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              Button.outlined(
-                onPressed: _showLocationDialog,
-                child: const Text('更改'),
+              ListTile(
+                contentPadding: EdgeInsets.zero,
+                leading: Icon(
+                  invalid
+                      ? Icons.cloud_off_outlined
+                      : Icons.cloud_done_outlined,
+                  color: invalid ? errorColor : null,
+                ),
+                title: Text(_targetTitle(location)),
+                subtitle: Text('目录：${location.directory}'),
+                trailing: invalid
+                    ? Text('授权失效', style: TextStyle(color: errorColor))
+                    : null,
               ),
-              const SizedBox(width: 12),
-              Button.text(
-                onPressed: _clearConfig,
-                child: const Text('清除配置'),
+              if (invalid) ...[
+                Text(
+                  account?.statusMessage ?? '当前网盘授权已失效，备份会失败。',
+                  maxLines: 3,
+                  overflow: TextOverflow.ellipsis,
+                  style: TextStyle(fontSize: 12, color: errorColor),
+                ),
+                const SizedBox(height: 8),
+              ],
+              Wrap(
+                spacing: 8,
+                runSpacing: 8,
+                children: [
+                  if (invalid && account != null)
+                    Button.filled(
+                      onPressed: () => _reauthorize(account),
+                      child: const Text('重新授权'),
+                    ),
+                  Button.outlined(
+                    onPressed: _showTargetSheet,
+                    child: Text(
+                      alternatives.isEmpty
+                          ? '切换网盘'
+                          : '切换网盘（${alternatives.length}）',
+                    ),
+                  ),
+                  Button.text(
+                    onPressed: _showLocationDialog,
+                    child: const Text('更改目录'),
+                  ),
+                  Button.text(
+                    onPressed: _clearConfig,
+                    child: const Text('清除配置'),
+                  ),
+                ],
               ),
             ],
           ),
-        ],
+        ),
       ),
     );
   }
@@ -282,12 +537,22 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
     if (!mounted || picked == null || picked.isEmpty) return;
     try {
       final batch = ComicBackupManager.createBackupBatch(picked);
-      await showDialog<void>(
+      final result = await showDialog<BackupResult>(
         context: context,
         barrierDismissible: false,
-        builder: (_) =>
-            _ArchiveTransferDialog(batch: batch, title: '备份进度'),
+        builder: (_) => _ArchiveTransferDialog(batch: batch, title: '备份进度'),
       );
+      if (!mounted || result == null) return;
+      if (result.authorizationFailed) {
+        await _handleTargetFailure();
+      } else if (result.hasFailures) {
+        context.showMessage(message: '${result.failed} 部漫画备份失败，可重试或更换网盘');
+      } else if (result.success > 0 || result.skipped > 0) {
+        context.showMessage(
+          message: '备份完成：成功 ${result.success}，跳过 ${result.skipped}',
+        );
+      }
+      await _loadBackups();
     } catch (_) {
       if (mounted) context.showMessage(message: '创建备份任务失败');
     }
@@ -296,12 +561,13 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
   Future<void> _startRestore(BackupFile file) async {
     try {
       final batch = ComicBackupManager.createRestoreBatch(<BackupFile>[file]);
-      await showDialog<void>(
+      final result = await showDialog<BackupResult>(
         context: context,
         barrierDismissible: false,
-        builder: (_) =>
-            _ArchiveTransferDialog(batch: batch, title: '恢复进度'),
+        builder: (_) => _ArchiveTransferDialog(batch: batch, title: '恢复进度'),
       );
+      if (!mounted || result == null) return;
+      if (result.authorizationFailed) await _handleTargetFailure();
     } catch (_) {
       if (mounted) context.showMessage(message: '创建恢复任务失败');
     }
@@ -409,8 +675,9 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
                 child: Padding(
                   padding: EdgeInsets.all(16),
                   child: Text(
-                    '把本地漫画打包成 CBZ 备份到夸克网盘。备份目录会自动加入在线漫画库，'
-                    '上传完成后即可在发现页直接阅读；也可在下方恢复到本地。已有同名备份不会被覆盖。',
+                    '把本地漫画打包成 CBZ 备份到网盘。夸克和 WebDAV 共用这一套备份，'
+                    '哪个可用就往哪个传；备份目录会自动加入在线漫画库，上传完成后即可在发现页直接阅读。'
+                    '已有同名备份不会被覆盖。',
                   ),
                 ),
               ),
@@ -422,13 +689,60 @@ class _ComicBackupPageState extends State<ComicBackupPage> {
           SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.symmetric(horizontal: 16),
-              child: Button.filled(
-                onPressed: _startBackup,
-                child: const Text('上传本地漫画到夸克'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.stretch,
+                children: [
+                  Button.filled(
+                    onPressed: _startBackup,
+                    child: const Text('上传本地漫画到网盘'),
+                  ),
+                  const SizedBox(height: 8),
+                  Text(
+                    _config.isValid
+                        ? '当前目标：${_targetTitle(_config.location!)}'
+                        : '未设置备份位置',
+                    style: Theme.of(context).textTheme.bodySmall,
+                  ),
+                ],
               ),
             ),
           ),
           SliverToBoxAdapter(child: _sectionTitle('云端备份')),
+          if (_loadError != null)
+            SliverToBoxAdapter(
+              child: Padding(
+                padding: const EdgeInsets.symmetric(
+                  horizontal: 16,
+                  vertical: 4,
+                ),
+                child: Container(
+                  padding: const EdgeInsets.all(12),
+                  decoration: BoxDecoration(
+                    color: Theme.of(context).colorScheme.errorContainer,
+                    borderRadius: BorderRadius.circular(8),
+                  ),
+                  child: Column(
+                    crossAxisAlignment: CrossAxisAlignment.start,
+                    children: [
+                      Text(_loadError!),
+                      const SizedBox(height: 8),
+                      Row(
+                        children: [
+                          TextButton(
+                            onPressed: _loadBackups,
+                            child: const Text('重试'),
+                          ),
+                          TextButton(
+                            onPressed: _showTargetSheet,
+                            child: const Text('切换网盘'),
+                          ),
+                        ],
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
           if (_loading)
             const SliverToBoxAdapter(
               child: Padding(
@@ -607,14 +921,12 @@ class _ArchiveTransferDialogState extends State<_ArchiveTransferDialog> {
                 child: const Text('重试失败项'),
               ),
             if (batch.running)
-              TextButton(
-                onPressed: batch.cancel,
-                child: const Text('取消'),
-              ),
+              TextButton(onPressed: batch.cancel, child: const Text('取消')),
             if (!batch.running)
               FilledButton(
                 style: actionButtonStyle,
-                onPressed: () => Navigator.of(context).pop(),
+                onPressed: () =>
+                    Navigator.of(context).pop(BackupResult.fromBatch(batch)),
                 child: const Text('关闭'),
               ),
           ],

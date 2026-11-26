@@ -35,6 +35,24 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
       widget.accounts ?? RemoteStorageAccounts.instance;
   var _adding = false;
 
+  /// 夸克排在前面：它是默认备份目标，WebDAV 作为备选。
+  List<StorageAccount> get _accounts {
+    final values = List<StorageAccount>.of(_storage.accounts);
+    int rank(StorageAccount account) =>
+        account.backend == StorageBackend.openlist ? 0 : 1;
+    values.sort((a, b) {
+      final byBackend = rank(a).compareTo(rank(b));
+      return byBackend != 0 ? byBackend : a.name.compareTo(b.name);
+    });
+    return values;
+  }
+
+  String _label(StorageAccount account) {
+    final suffix = storageProviderLabel(account);
+    final invalid = account.authorizationIsKnownInvalid ? '（授权失效）' : '';
+    return '${account.name} · $suffix$invalid';
+  }
+
   Future<void> _addAccount() async {
     setState(() => _adding = true);
     try {
@@ -67,14 +85,15 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
                     hint: Text('选择账号'),
                     items: [
                       if (widget.allowNone)
-                        DropdownMenuItem(
-                          value: '',
-                          child: Text('未配置'),
-                        ),
-                      for (final value in _storage.accounts)
+                        DropdownMenuItem(value: '', child: Text('未配置')),
+                      for (final value in _accounts)
                         DropdownMenuItem(
                           value: value.id,
-                          child: Text(value.name),
+                          child: Text(
+                            _label(value),
+                            maxLines: 1,
+                            overflow: TextOverflow.ellipsis,
+                          ),
                         ),
                       DropdownMenuItem(
                         value: '__add_account__',
@@ -106,15 +125,9 @@ class _RemoteLocationFieldsState extends State<RemoteLocationFields> {
         ListTile(
           contentPadding: EdgeInsets.zero,
           leading: const Icon(Icons.folder_outlined),
-          title: Text(
-            widget.multiSelect
-                ? '可识别目录'
-                : '网盘目录',
-          ),
+          title: Text(widget.multiSelect ? '可识别目录' : '网盘目录'),
           subtitle: Text(
-            widget.directories.isEmpty
-                ? '未选择'
-                : widget.directories.join('\n'),
+            widget.directories.isEmpty ? '未选择' : widget.directories.join('\n'),
           ),
           trailing: const Icon(Icons.arrow_right),
           onTap: account == null || _adding

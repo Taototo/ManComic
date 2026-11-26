@@ -2,6 +2,12 @@ import 'dart:convert';
 
 enum StorageBackend { webdav, openlist }
 
+/// 已保存的备份目标列表，存在 `appdata.settings` 里。
+///
+/// 夸克失效时用户可以直接切到另一个网盘，不必重新配置账号和目录；
+/// 列表里同时包含夸克与 WebDAV，两者在备份链路上完全等价。
+const backupDestinationsSetting = 'backupDestinations';
+
 enum StorageAuthorizationStatus { unknown, valid, invalid }
 
 class StorageAccount {

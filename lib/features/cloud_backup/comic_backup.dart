@@ -9,36 +9,48 @@ import 'package:venera/utils/io.dart';
 
 import 'comic_archive_batch.dart';
 
-/// 漫画归档备份的目标配置，仅支持已登录的网盘账号。
+/// 漫画归档备份的目标配置。
 ///
-/// 配置持久化在 `appdata.settings['backupRemoteLocation']`。
+/// 当前目标存在 `appdata.settings['backupRemoteLocation']`；历次用过的目标
+/// （夸克、WebDAV 都在同一个列表里）存在 [backupDestinationsSetting]，
+/// 这样网盘失效时可以直接切换，不必重新挑账号和目录。
 class BackupConfig {
-  BackupConfig({this.location, required this.remotePath});
+  BackupConfig({
+    this.location,
+    required this.remotePath,
+    Iterable<RemoteLocation> destinations = const [],
+  }) : destinations = _mergeDestinations(destinations, location);
 
-  /// 目标网盘位置；为 null 表示未配置。
+  /// 当前目标网盘位置；为 null 表示未配置。
   final RemoteLocation? location;
 
   /// 备份根目录（通常由 [location] 派生）。
   final String remotePath;
 
+  /// 已保存的备份目标，包含当前目标，按最近使用排序（当前目标在最后）。
+  final List<RemoteLocation> destinations;
+
   /// 是否配置了可用的网盘账号。
   bool get isValid => location != null;
 
   /// 目标身份标识，用于判断备份文件是否来自当前账号与目录。
-  String get targetIdentity =>
-      '${location!.accountId}|${location!.directory}';
+  String get targetIdentity => '${location!.accountId}|${location!.directory}';
+
+  /// 可切换的其他目标（不含当前目标）。
+  List<RemoteLocation> get alternatives => [
+    for (final item in destinations)
+      if (!_sameDestination(item, location)) item,
+  ];
 
   /// 从设置中读取备份配置。
   static BackupConfig fromSettings() {
-    final raw = appdata.settings['backupRemoteLocation'];
-    RemoteLocation? location;
-    if (raw is Map) {
-      final parsed = RemoteLocation.fromJson(raw);
-      if (parsed.accountId.isNotEmpty) location = parsed;
-    }
+    final location = _readLocation(appdata.settings['backupRemoteLocation']);
     return BackupConfig(
       location: location,
       remotePath: location?.directory ?? '/',
+      destinations: _readDestinations(
+        appdata.settings[backupDestinationsSetting],
+      ),
     );
   }
 
@@ -53,14 +65,101 @@ class BackupConfig {
     } else {
       appdata.settings['backupRemoteLocation'] = null;
     }
+    if (config.destinations.isEmpty) {
+      appdata.settings[backupDestinationsSetting] = null;
+    } else {
+      appdata.settings[backupDestinationsSetting] = config.destinations
+          .map((item) => item.toJson())
+          .toList();
+    }
     await appdata.saveData(false);
   }
 
   /// 清除备份配置并落盘。
   static Future<void> clearSettings() async {
     appdata.settings['backupRemoteLocation'] = null;
+    appdata.settings[backupDestinationsSetting] = null;
     await appdata.saveData(false);
   }
+
+  /// 把 [location] 设为当前目标并加入已保存列表。
+  static BackupConfig withActiveTarget(
+    BackupConfig base,
+    RemoteLocation location,
+  ) {
+    final active = location.normalized();
+    return BackupConfig(
+      location: active,
+      remotePath: active.directory,
+      destinations: [
+        for (final item in base.destinations)
+          if (!_sameDestination(item, active)) item,
+        active,
+      ],
+    );
+  }
+
+  /// 移除一个已保存的目标；移除的是当前目标时自动切到剩下的第一个。
+  static BackupConfig withoutDestination(
+    BackupConfig base,
+    RemoteLocation location,
+  ) {
+    final remaining = [
+      for (final item in base.destinations)
+        if (!_sameDestination(item, location)) item,
+    ];
+    final active = _sameDestination(base.location, location)
+        ? (remaining.isEmpty ? null : remaining.first)
+        : base.location;
+    return BackupConfig(
+      location: active,
+      remotePath: active?.directory ?? '/',
+      destinations: remaining,
+    );
+  }
+
+  static RemoteLocation? _readLocation(Object? raw) {
+    if (raw is! Map) return null;
+    try {
+      final parsed = RemoteLocation.fromJson(raw);
+      return parsed.accountId.isEmpty ? null : parsed;
+    } catch (_) {
+      // 路径非法（例如包含 `..`）时按未配置处理，不能让它阻塞启动。
+      return null;
+    }
+  }
+
+  static List<RemoteLocation> _readDestinations(Object? raw) {
+    if (raw is! List) return const [];
+    final result = <RemoteLocation>[];
+    for (final item in raw) {
+      final parsed = _readLocation(item);
+      if (parsed != null) result.add(parsed);
+    }
+    return result;
+  }
+}
+
+bool _sameDestination(RemoteLocation? a, RemoteLocation? b) {
+  if (a == null || b == null) return false;
+  return a.accountId == b.accountId &&
+      normalizeRemoteDirectory(a.directory) ==
+          normalizeRemoteDirectory(b.directory);
+}
+
+/// 去重并按「最近使用」排序：先历史顺序，当前目标排最后。
+List<RemoteLocation> _mergeDestinations(
+  Iterable<RemoteLocation> saved,
+  RemoteLocation? active,
+) {
+  final result = <RemoteLocation>[];
+  for (final item in [...saved, if (active != null) active]) {
+    final normalized = item.normalized();
+    if (normalized.accountId.isEmpty) continue;
+    if (result.any((value) => _sameDestination(value, normalized))) continue;
+    result.add(normalized);
+  }
+  return List.unmodifiable(result);
 }
 
 /// 网盘上的一个 CBZ 备份文件。
@@ -208,6 +307,7 @@ class BackupResult {
     required this.skipped,
     required this.failed,
     this.errors = const [],
+    this.authorizationFailed = false,
   });
 
   /// 成功数。
@@ -222,6 +322,15 @@ class BackupResult {
   /// 错误描述列表。
   final List<String> errors;
 
+  /// 失败是否由登录/授权失效引起。
+  ///
+  /// 这种情况换目录、重试都没用，得重新授权或换网盘，所以单独标出来，
+  /// 让界面能直接给出「重新授权 / 切换网盘」的出口。
+  final bool authorizationFailed;
+
+  /// 是否有失败项。
+  bool get hasFailures => failed > 0;
+
   /// 由批次统计生成结果。
   factory BackupResult.fromBatch(ComicArchiveBatch batch) => BackupResult(
     success: batch.count(ArchiveItemState.success),
@@ -232,7 +341,29 @@ class BackupResult {
         if (item.error != null)
           '${item.title}: ${batch.errorText(item.error!)}',
     ],
+    authorizationFailed: batch.items.any(
+      (item) =>
+          item.state == ArchiveItemState.failed &&
+          isStorageAuthorizationError(item.error),
+    ),
   );
+}
+
+/// 判断错误是否表示「登录/授权失效」，而不是网络或参数问题。
+bool isStorageAuthorizationError(Object? error) {
+  if (error is RemoteStorageException) {
+    if (error.isAuthorizationFailure) return true;
+    if (error.code == 'unauthorized' || error.code == 'invalid_token') {
+      return true;
+    }
+  }
+  final text = '$error';
+  return RegExp(
+    r'unauthorized|invalid[_ -]?(?:token|grant|client)|token[^\n]{0,8}(?:过期|失效)|'
+    r'登录(?:已)?(?:失效|过期)|未登录|请重新(?:登录|授权)|授权(?:已)?失效|'
+    r'cookie[^\n]{0,8}(?:失效|过期|无效)|(?:http|status|code)[^\n]{0,10}\b401\b',
+    caseSensitive: false,
+  ).hasMatch(text);
 }
 
 /// 本地漫画的网盘归档备份与恢复管理器。
@@ -248,7 +379,8 @@ class ComicBackupManager {
   }
 
   /// 可注入的导出实现，默认调用 [CBZ.export]。
-  static Future<void> Function(LocalComic comic, String outputPath)? exportComic;
+  static Future<void> Function(LocalComic comic, String outputPath)?
+  exportComic;
 
   /// 可注入的导入实现，默认调用 [CBZ.import]。
   static Future<LocalComic> Function(String filePath)? importComic;

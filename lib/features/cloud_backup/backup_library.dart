@@ -3,6 +3,32 @@ import 'package:venera/network/cloud_storage/remote_storage.dart';
 
 import 'comic_backup.dart';
 
+/// 切换备份目标：写入新位置，并把「自动创建的备份库」跟着搬过去。
+///
+/// 旧目标上自动创建的在线漫画库会被移除——如果那个网盘已经失效，留着它
+/// 只会在发现页反复报错。用户自己建的库不受影响。
+Future<BackupConfig> switchBackupTarget(RemoteLocation location) async {
+  final previous = BackupConfig.fromSettings();
+  final next = BackupConfig.withActiveTarget(previous, location);
+  await BackupConfig.saveToSettings(next);
+  if (previous.isValid && previous.targetIdentity != next.targetIdentity) {
+    await removeBackupLibraryIfOwned(previous);
+  }
+  try {
+    await ensureBackupLibrary(next);
+  } catch (_) {
+    // 库登记失败不影响备份本身，下次刷新时还会再试。
+  }
+  return next;
+}
+
+/// 清除备份配置，并移除自动创建的备份库。
+Future<void> clearBackupTarget() async {
+  final previous = BackupConfig.fromSettings();
+  await removeBackupLibraryIfOwned(previous);
+  await BackupConfig.clearSettings();
+}
+
 /// 把备份目录登记成一个在线漫画库，这样上传到夸克的 CBZ 会立刻出现在
 /// 发现页，用户不必再去「在线漫画库」里手动添加同一个目录。
 ///
@@ -43,13 +69,15 @@ Future<void> removeBackupLibraryIfOwned(BackupConfig config) async {
   if (!config.isValid) return;
   final accounts = RemoteStorageAccounts.instance;
   final location = config.location!;
-  final owned = accounts.libraries.where(
-    (library) =>
-        library.accountId == location.accountId &&
-        library.directories.length == 1 &&
-        library.directories.first == location.directory &&
-        library.name.endsWith('备份'),
-  ).toList();
+  final owned = accounts.libraries
+      .where(
+        (library) =>
+            library.accountId == location.accountId &&
+            library.directories.length == 1 &&
+            library.directories.first == location.directory &&
+            library.name.endsWith('备份'),
+      )
+      .toList();
   for (final library in owned) {
     await accounts.removeLibrary(library.id);
   }

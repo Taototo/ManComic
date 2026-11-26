@@ -14,10 +14,20 @@ enum StorageAccountPurpose { library, sync, archive }
 
 /// 把内部驱动名转成中文显示名。
 String _providerLabel(String driver) => switch (driver) {
-      'Quark' => '夸克网盘',
-      'WebDAV' => 'WebDAV',
-      _ => driver,
-    };
+  'Quark' => '夸克网盘',
+  'WebDAV' => 'WebDAV',
+  _ => driver,
+};
+
+/// 账号对应的显示名（夸克 / WebDAV），供备份、库列表等页面复用。
+String storageProviderLabel(StorageAccount? account) {
+  if (account == null) return '账号不可用';
+  if (account.backend == StorageBackend.webdav) return 'WebDAV';
+  return switch (account.driver) {
+    'Quark' || 'QuarkOpen' => '夸克网盘',
+    final driver => driver.isEmpty ? '网盘' : driver,
+  };
+}
 
 Future<StorageAccount?> showStorageAccountEditor(
   BuildContext context, {
@@ -52,7 +62,9 @@ Future<StorageAccount?> showStorageAccountEditor(
     // 重名、驱动冲突或原生写入异常都在这里转成可展示的提示，
     // 避免异常一路冒泡导致界面静默无反应。
     throw FormatException(
-      error is ArgumentError ? '保存账号失败：${error.message}' : '保存账号失败：${describeCloudError(error)}',
+      error is ArgumentError
+          ? '保存账号失败：${error.message}'
+          : '保存账号失败：${describeCloudError(error)}',
     );
   }
   if (saved.statusMessage != null) return saved;
@@ -71,7 +83,10 @@ Future<StorageAccount?> showStorageAccountEditor(
       status: error.isAuthorizationFailure
           ? StorageAuthorizationStatus.invalid
           : StorageAuthorizationStatus.unknown,
-      statusMessage: await _withKernelLog(storage, _cleanCoreMessage(error.message)),
+      statusMessage: await _withKernelLog(
+        storage,
+        _cleanCoreMessage(error.message),
+      ),
     );
   } catch (error) {
     // 原生初始化/网络探测可能抛出非 RemoteStorageException 的异常。
@@ -114,16 +129,25 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     final libraries = widget.accounts.libraries
         .where((library) => library.accountId == account.id)
         .length;
+    final savedBackups = switch (appdata.settings[backupDestinationsSetting]) {
+      final List items =>
+        items
+            .where((item) => item is Map && item['accountId'] == account.id)
+            .length,
+      _ => 0,
+    };
+    final activeBackup =
+        appdata.settings['backupRemoteLocation'] is Map &&
+        appdata.settings['backupRemoteLocation']['accountId'] == account.id;
     final uses = <String>[
-      if (libraries > 0)
-        '$libraries 个漫画库',
-      for (final (key, title) in [
-        ('syncRemoteLocation', '应用数据同步'),
-        ('backupRemoteLocation', '漫画备份'),
-      ])
-        if (appdata.settings[key] is Map &&
-            appdata.settings[key]['accountId'] == account.id)
-          title,
+      if (libraries > 0) '$libraries 个漫画库',
+      if (appdata.settings['syncRemoteLocation'] is Map &&
+          appdata.settings['syncRemoteLocation']['accountId'] == account.id)
+        '应用数据同步',
+      if (savedBackups > 0)
+        activeBackup ? '漫画备份（当前）' : '漫画备份（$savedBackups 个位置）'
+      else if (activeBackup)
+        '漫画备份',
     ];
     return uses.isEmpty ? '未使用' : uses.join(' · ');
   }
@@ -203,9 +227,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
     }
     if (!mounted) return;
     if (error != null) {
-      _notify(
-        error is FormatException ? error.message : '添加账号失败：$error',
-      );
+      _notify(error is FormatException ? error.message : '添加账号失败：$error');
       return;
     }
     if (saved == null) return;
@@ -260,7 +282,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
                     children: [
                       Text(
                         account.statusMessage ??
-                            '${_providerLabel(account.driver)} · ${switch (account.status) {
+                            '${storageProviderLabel(account)} · ${switch (account.status) {
                               StorageAuthorizationStatus.valid => '已连接',
                               StorageAuthorizationStatus.invalid => '授权失效',
                               StorageAuthorizationStatus.unknown => '连接未验证',
@@ -489,9 +511,7 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
                       TextField(
                         controller: _refreshToken,
                         onChanged: (_) => _accessToken.clear(),
-                        decoration: InputDecoration(
-                          labelText: '刷新令牌',
-                        ),
+                        decoration: InputDecoration(labelText: '刷新令牌'),
                       ),
                     ],
                   ],
@@ -638,7 +658,9 @@ class _StorageAccountPageState extends State<_StorageAccountPage> {
 String describeCloudError(Object error) {
   if (error is PlatformException) {
     final message = error.message?.trim();
-    if (message != null && message.isNotEmpty) return _cleanCoreMessage(message);
+    if (message != null && message.isNotEmpty) {
+      return _cleanCoreMessage(message);
+    }
     return error.code;
   }
   if (error is FormatException) return _cleanCoreMessage(error.message);
@@ -678,10 +700,8 @@ bool _isTransientNetworkError(Object error) {
 Future<void> _testWithRetry(RemoteFileStore store) async {
   Future<void> attempt() => store.test().timeout(
     const Duration(seconds: 45),
-    onTimeout: () => throw const RemoteStorageException(
-      '连接测试超时，请检查网络',
-      code: 'timeout',
-    ),
+    onTimeout: () =>
+        throw const RemoteStorageException('连接测试超时，请检查网络', code: 'timeout'),
   );
   try {
     await attempt();
@@ -696,7 +716,10 @@ Future<void> _testWithRetry(RemoteFileStore store) async {
 ///
 /// RPC 只回一句 `Get "…": EOF`，真正的原因（有没有走代理、停在哪一步）在内核
 /// 自己的日志里。附上最后几行，用户截图就能定位，不用再来回猜。
-Future<String> _withKernelLog(RemoteStorageAccounts storage, String message) async {
+Future<String> _withKernelLog(
+  RemoteStorageAccounts storage,
+  String message,
+) async {
   final tail = await storage.kernelLogTail();
   if (tail == null || tail.trim().isEmpty) return message;
   return '$message\n内核日志：$tail';
