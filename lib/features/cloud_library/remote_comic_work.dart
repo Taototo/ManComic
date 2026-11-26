@@ -175,9 +175,14 @@ class RemoteComicVolumeName {
     '([卷巻册冊话話章回]|vol(?:ume)?|ch(?:apter)?)\\.?\\s*($_number)(?:\\s*[-~～–—]\\s*($_number))?',
     caseSensitive: false,
   );
-  static final _serial = RegExp(r'^(.*?)[\s_.-]+(\d+)(?:\s*[-~～–—]\s*(\d+))?$');
+  static final _serial = RegExp(
+    r'^(.*?)[\s_.#+\-–—]+(\d+)(?:\s*[-~～–—]\s*(\d+))?$',
+  );
+  /// 合集里也有「终极蜘蛛侠1.pdf」这种紧贴正文的期号。
+  /// 只认 1～3 位，避免把「蜘蛛侠1602」这类年份/型号当成期号。
+  static final _trailingNumber = RegExp(r'^(.*\D)(\d{1,3})$');
   static final _fullWidthDigits = RegExp(r'[０-９]');
-  static final _seriesSuffix = RegExp(r'[\s_—–-]+$');
+  static final _seriesSuffix = RegExp(r'[\s_—–#+\-]+$');
   static final _singleBracket = RegExp(r'^\[([^\[\]]+)\]$|^【([^【】]+)】$');
 
   static RemoteComicVolumeName parse(String fileName) {
@@ -215,13 +220,21 @@ class RemoteComicVolumeName {
         );
       }
     }
-    final serial = _serial.firstMatch(stem);
+    final serial = _serial.firstMatch(stem) ?? _trailingNumber.firstMatch(stem);
+    final first = serial == null ? null : int.tryParse(serial.group(2)!);
+    final last = serial == null
+        ? null
+        : int.tryParse(
+            serial.groupCount >= 3
+                ? (serial.group(3) ?? serial.group(2)!)
+                : serial.group(2)!,
+          );
     return RemoteComicVolumeName(
-      series: serial == null ? '' : _series(serial[1]!),
+      series: serial == null ? '' : _series(serial.group(1)!),
       title: stem,
       unit: '',
-      first: serial == null ? null : int.tryParse(serial[2]!),
-      last: serial == null ? null : int.tryParse(serial[3] ?? serial[2]!),
+      first: first,
+      last: last,
     );
   }
 

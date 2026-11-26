@@ -323,7 +323,7 @@ class _CloudComicsPageState extends State<CloudComicsPage> {
             const SizedBox(height: 12),
             Text(
               _keyword.isEmpty
-                  ? '这个目录里还没有可阅读的漫画。\n把 CBZ 传到这个目录，或在「资源上载 → 漫画备份」里上传本地漫画。'
+                  ? '这个目录里还没有可阅读的漫画。\n支持 PDF / CBZ / ZIP / 7Z / EPUB；每部漫画一个文件夹，文件名带编号（如「漫画名 001.pdf」「漫画名_第01卷.pdf」）即可自动合并成卷。'
                   : '没有匹配「$_keyword」的漫画',
               textAlign: TextAlign.center,
             ),
