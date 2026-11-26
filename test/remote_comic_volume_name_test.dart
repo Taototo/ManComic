@@ -1,5 +1,11 @@
 import 'package:flutter_test/flutter_test.dart';
+import 'package:venera/features/cloud_library/remote_archive_comic.dart';
 import 'package:venera/features/cloud_library/remote_comic_work.dart';
+
+RemoteComicVolume _volume(String path) => RemoteComicVolume(
+  archive: RemoteArchiveComic(path: path, size: 1, eTag: 'etag'),
+  title: path,
+);
 
 void main() {
   group('网盘漫画卷名解析（按夸克分享里的真实命名）', () {
@@ -53,7 +59,33 @@ void main() {
         RemoteComicVolumeName.parse('1963神奇蜘蛛侠81未（PDF）.pdf').numbered,
         isFalse,
       );
-      expect(RemoteComicVolumeName.parse('001.pdf').numbered, isFalse);
+    });
+
+    test('文件夹即书名时，纯数字章节归到同一系列', () {
+      final first = RemoteComicVolumeName.parse('001.pdf');
+      expect(first.numbered, isTrue);
+      expect(first.series, isEmpty);
+      expect(first.first, 1);
+
+      final tenth = RemoteComicVolumeName.parse('10.pdf');
+      expect(tenth.series, isEmpty);
+      expect(tenth.first, 10);
+
+      // 4 位以上可能是年份，不按章节数字处理。
+      expect(RemoteComicVolumeName.parse('1602.pdf').numbered, isFalse);
+    });
+
+    test('纯数字章节按数值而非字符串排序', () {
+      final volumes = [
+        _volume('10.pdf'),
+        _volume('2.pdf'),
+        _volume('001.pdf'),
+      ];
+      sortRemoteComicVolumes(volumes);
+      expect(
+        volumes.map((volume) => volume.archive.path).toList(),
+        ['001.pdf', '2.pdf', '10.pdf'],
+      );
     });
 
     test('区间期号仍按 unit + first + last 去重', () {

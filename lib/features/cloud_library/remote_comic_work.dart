@@ -92,8 +92,18 @@ class RemoteComicWork {
       if (volume.archive.pageCount case final int count) volume.id: count,
   };
 
+  /// [entry] 为 null 时生成封面 key。
+  ///
+  /// 封面 key 只编码作品与卷的稳定身份，不能带 `archive.version`：
+  /// version 由压缩包索引/PDF 读取状态算出，库重新扫描或打开一次阅读后
+  /// 就会变化，封面缓存键跟着变，每次刷新都要重新渲染第一页。
+  /// 阅读页图片仍传 [entry]，保留精确的版本校验。
   String imageKey(RemoteComicVolume volume, [String? entry]) =>
-      '$remoteComicWorkImagePrefix${base64Url.encode(utf8.encode(jsonEncode([id, volume.id, volume.archive.isInspected ? volume.archive.imageKey(entry) : null])))}';
+      '$remoteComicWorkImagePrefix${base64Url.encode(utf8.encode(jsonEncode([
+        id,
+        volume.id,
+        entry == null ? null : volume.archive.imageKey(entry),
+      ])))}';
 
   static ({String work, String volume, String? image}) parseImageKey(
     String key,
@@ -181,6 +191,9 @@ class RemoteComicVolumeName {
   /// 合集里也有「终极蜘蛛侠1.pdf」这种紧贴正文的期号。
   /// 只认 1～3 位，避免把「蜘蛛侠1602」这类年份/型号当成期号。
   static final _trailingNumber = RegExp(r'^(.*\D)(\d{1,3})$');
+  /// 文件夹本身就是漫画名时，章节文件常直接叫 001.pdf / 12.pdf。
+  /// 归到同一个空系列，扫描器就能按文件夹把它们合成一部作品。
+  static final _bareNumber = RegExp(r'^(\d{1,3})$');
   static final _fullWidthDigits = RegExp(r'[０-９]');
   static final _seriesSuffix = RegExp(r'[\s_—–#+\-]+$');
   static final _singleBracket = RegExp(r'^\[([^\[\]]+)\]$|^【([^【】]+)】$');
@@ -195,6 +208,19 @@ class RemoteComicVolumeName {
       _fullWidthDigits,
       (match) => String.fromCharCode(match[0]!.codeUnitAt(0) - 0xfee0),
     );
+    final bare = _bareNumber.firstMatch(stem);
+    if (bare != null) {
+      final number = int.tryParse(bare[1]!);
+      if (number != null) {
+        return RemoteComicVolumeName(
+          series: '',
+          title: stem,
+          unit: '',
+          first: number,
+          last: number,
+        );
+      }
+    }
     final match = _unitNumber.firstMatch(stem);
     if (match != null) {
       final rawUnit = (match[3] ?? match[4]!).toLowerCase();

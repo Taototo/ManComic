@@ -1660,7 +1660,7 @@ class RemoteLibraryEngine {
       author: meta?.author ?? '',
       description: meta?.description ?? '',
       tags: meta?.tags ?? const [],
-      cover: archive.imageKey(),
+      cover: archive.coverImageKey(),
       chapters: archive.chapters,
       chaptersInspected: archive.isInspected,
       chapterImages: archive.chapterImages,

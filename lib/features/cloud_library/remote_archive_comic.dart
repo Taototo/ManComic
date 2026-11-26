@@ -140,6 +140,11 @@ class RemoteArchiveComic {
   String imageKey([String? entry]) =>
       '$remoteArchiveImagePrefix${base64Url.encode(utf8.encode(jsonEncode([path, version, entry ?? coverEntry])))}';
 
+  /// 封面专用 key：只认文件路径，不带会随索引/PDF 检查变化的 [version]。
+  /// 缓存因此能在重新扫描后继续命中；加载时由引擎按当前卷解析实际封面页。
+  String coverImageKey() =>
+      '$remoteArchiveImagePrefix${base64Url.encode(utf8.encode(jsonEncode([path, 'cover', null])))}';
+
   static ({String path, String version, String? entry})? parseImageKey(
     String key,
   ) {

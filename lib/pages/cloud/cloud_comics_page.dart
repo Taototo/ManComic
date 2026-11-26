@@ -323,7 +323,10 @@ class _CloudComicsPageState extends State<CloudComicsPage> {
             const SizedBox(height: 12),
             Text(
               _keyword.isEmpty
-                  ? '这个目录里还没有可阅读的漫画。\n支持 PDF / CBZ / ZIP / 7Z / EPUB；每部漫画一个文件夹，文件名带编号（如「漫画名 001.pdf」「漫画名_第01卷.pdf」）即可自动合并成卷。'
+                  ? '这个目录里还没有可阅读的漫画。\n'
+                      '推荐结构：漫画库目录 / 漫画名 / 001.pdf、002.pdf、003.pdf…\n'
+                      '同一文件夹里的编号文件会自动合成一部漫画；也可用「漫画名 001.pdf」「第01卷.pdf」。\n'
+                      '支持 PDF / CBZ / ZIP / 7Z / EPUB，文件不能加密。'
                   : '没有匹配「$_keyword」的漫画',
               textAlign: TextAlign.center,
             ),

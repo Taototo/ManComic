@@ -55,6 +55,10 @@ abstract class ImageDownloader {
           totalBytes: data.length,
           imageBytes: data,
         );
+        // 命中完整缓存就直接结束。以前这里会继续往下走，即使调用方拿到
+        // 图后取消了流，生成器仍会发起一次网络请求，刷新/回到顶部时
+        // 每次都重新读一遍压缩包封面。
+        return;
       }
     }
 
