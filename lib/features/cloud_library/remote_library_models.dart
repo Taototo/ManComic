@@ -1,5 +1,29 @@
 part of 'remote_library_engine.dart';
 
+/// 网盘（OpenList/夸克）漫画库固定只读取的根目录。
+/// 配置成网盘根目录或其它位置时，一律收敛到此处。
+const String openListComicRoot = '/ManComic/';
+
+/// 把网盘漫画库的扫描目录收敛到 [openListComicRoot] 内。
+///
+/// - 已位于该目录内（含其本身）的路径原样保留；
+/// - 该目录的祖先（含网盘根 `/`）收敛为该目录；
+/// - 与该目录无关的路径直接跳过（不再读取网盘其它位置）。
+/// 结果为空时回退为 [openListComicRoot]，保证只扫 ManComic。
+List<String> constrainCloudLibraryDirectories(List<String> configured) {
+  final result = <String>[];
+  for (final dir in configured) {
+    final path = normalizeWebDavDirectoryPath(dir, fallback: '/');
+    if (path == openListComicRoot || path.startsWith(openListComicRoot)) {
+      if (!result.contains(path)) result.add(path);
+    } else if (openListComicRoot.startsWith(path)) {
+      if (!result.contains(openListComicRoot)) result.add(openListComicRoot);
+    }
+    // 其余与 ManComic 无关的目录：忽略。
+  }
+  return result.isEmpty ? [openListComicRoot] : result;
+}
+
 class RemoteLibraryMetadataInput {
   const RemoteLibraryMetadataInput({
     required this.title,
@@ -360,7 +384,16 @@ class RemoteLibraryConfig {
 
   bool get isValid => endpoint.isValid || remoteStore != null;
 
-  List<String> get directories => remoteLibrary?.directories ?? [remotePath];
+  /// 实际用于扫描的目录。网盘（OpenList）库强制只读取 ManComic 目录内的漫画，
+  /// 网盘其它位置的配置会被收敛或忽略；WebDAV 库保持原样。
+  List<String> get directories {
+    final configured = remoteLibrary?.directories ?? [remotePath];
+    final account = remoteStore?.account;
+    if (account != null && account.backend == StorageBackend.openlist) {
+      return constrainCloudLibraryDirectories(configured);
+    }
+    return configured;
+  }
 
   Map<String, String> get authHeaders => endpoint.authHeaders;
 

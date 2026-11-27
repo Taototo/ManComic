@@ -206,7 +206,17 @@ class _RemoteLibrariesSliverState extends State<RemoteLibrariesSliver> {
           return SliverToBoxAdapter(
             child: Padding(
               padding: const EdgeInsets.all(24),
-              child: Text('暂无在线漫画库'),
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: const [
+                  Text('暂无在线漫画库'),
+                  SizedBox(height: 12),
+                  Text(
+                    '网盘（夸克）漫画库只读取网盘中的 ManComic 文件夹，'
+                    '其它位置的漫画不会被扫描。',
+                  ),
+                ],
+              ),
             ),
           );
         }

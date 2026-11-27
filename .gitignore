@@ -60,3 +60,6 @@ android/key.properties
 .runs.txt
 .release_*.json
 .asset_resp.json
+
+# 网盘整理任务记录（撤回用，不入库）
+organize-*/
