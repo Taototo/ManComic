@@ -481,50 +481,6 @@ class MainActivity : FlutterFragmentActivity() {
                     res.success(true)
                 }
 
-                // 漫画备份上传：和下载同一套前台服务思路，独立一个 Service，
-                // 两边同时跑的时候通知不会互相顶掉。
-                "startUploadService" -> {
-                    res.success(
-                        ComicUploadService.start(
-                            this,
-                            call.argument<String>("title") ?: "Uploading",
-                            call.argument<String>("text") ?: "",
-                            call.argument<Int>("progress") ?: -1
-                        )
-                    )
-                }
-
-                "updateUploadService" -> {
-                    ComicUploadService.update(
-                        this,
-                        call.argument<String>("title") ?: "Uploading",
-                        call.argument<String>("text") ?: "",
-                        call.argument<Int>("progress") ?: -1
-                    )
-                    res.success(true)
-                }
-
-                "stopUploadService" -> {
-                    ComicUploadService.stop(this)
-                    res.success(true)
-                }
-
-                "setUploadWakeLock" -> {
-                    ComicUploadService.setWakeLock(
-                        call.argument<Boolean>("hold") ?: true
-                    )
-                    res.success(true)
-                }
-
-                "notifyUploadDone" -> {
-                    ComicUploadService.notifyDone(
-                        this,
-                        call.argument<String>("title") ?: "Upload finished",
-                        call.argument<String>("text") ?: ""
-                    )
-                    res.success(true)
-                }
-
                 "getDirectoryPath" -> {
                     val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
                     intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION or Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)

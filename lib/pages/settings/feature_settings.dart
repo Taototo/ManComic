@@ -29,17 +29,6 @@ class _ExploreSettingsState extends State<ExploreSettings> {
             context.to(() => const ComicSourcePage());
           },
         ).toSliver(),
-        // 网盘账号与在线漫画库：独立于 JS 源的一套存储后端。
-        ListTile(
-          contentPadding: kSettingTilePadding,
-          leading: const Icon(Icons.cloud_outlined),
-          title: const Text("网盘与在线漫画库"),
-          subtitle: const Text("添加网盘账号、管理在线漫画库"),
-          trailing: const Icon(Icons.arrow_right),
-          onTap: () {
-            context.to(() => const CloudLibraryPage());
-          },
-        ).toSliver(),
         _SettingPartTitle(
           title: "Content sources".tl,
           icon: Icons.tune_rounded,
@@ -235,24 +224,6 @@ class _DataSettingsState extends State<DataSettings> {
             showPopUpWidget(context, const _CloudSyncSetting());
           },
           actionTitle: 'Set'.tl,
-        ).toSliver(),
-        _SettingPartTitle(
-          title: "Resources upload".tl,
-          icon: Icons.cloud_upload_outlined,
-        ),
-        // 漫画备份属于「把本机资源送到网盘」，和同步（双向覆盖）不是一回事，
-        // 单独归到「资源上载」，入口也从网盘页搬到了这里。
-        _CallbackSetting(
-          title: "Comic backup".tl,
-          subtitle: "Pack local comics as CBZ and upload them to the cloud".tl,
-          callback: () => context.to(() => const ComicBackupPage()),
-          actionTitle: "Manage".tl,
-        ).toSliver(),
-        _CallbackSetting(
-          title: "Cloud comics".tl,
-          subtitle: "Browse comics stored on your cloud drive".tl,
-          callback: () => context.to(() => const CloudLibraryPage()),
-          actionTitle: "Browse".tl,
         ).toSliver(),
         _SettingPartTitle(title: "Downloads".tl, icon: Icons.download_rounded),
         _SliderSetting(

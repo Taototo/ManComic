@@ -14,7 +14,7 @@ import 'package:venera/utils/data.dart';
 import 'package:venera/utils/ext.dart';
 import 'package:venera/utils/translations.dart';
 
-import 'cloud_bootstrap.dart';
+import 'cloud_kernel.dart';
 import 'data_sync_storage.dart';
 import 'io.dart';
 
@@ -236,7 +236,7 @@ class DataSync with ChangeNotifier {
     try {
       if (resolveSyncProvider() == syncProviderQuark) {
         // 夸克走内置内核，冷启动时同步可能抢在初始化前面。
-        await CloudBootstrap.configure();
+        await CloudKernel.configure();
       }
       storage = createDataSyncStorage();
       if (storage == null || !storage.isConfigured) {
@@ -301,7 +301,7 @@ class DataSync with ChangeNotifier {
     try {
       if (resolveSyncProvider() == syncProviderQuark) {
         // 夸克走内置内核，冷启动时同步可能抢在初始化前面。
-        await CloudBootstrap.configure();
+        await CloudKernel.configure();
       }
       storage = createDataSyncStorage();
       if (storage == null || !storage.isConfigured) {

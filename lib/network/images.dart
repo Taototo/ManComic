@@ -12,10 +12,9 @@ import 'app_dio.dart';
 
 /// 源直接吐字节的图片（`loadBytes`）。
 ///
-/// 网盘漫画库里的图在压缩包/PDF 里，没有可请求的地址，只能由源把字节读出来。
-/// 以前这里只认 `configs['url']`，于是 `remote-zip:` / `remote-work-image:` 这种
-/// key 被当成 URL 丢给 dio，rhttp 直接 `builder error for url (...)`：网盘漫画
-/// 封面一片空白，阅读页整屏都是「重试」。
+/// 有些源的图片没有可请求的地址（例如从归档里现读），只能由源把字节读出来。
+/// 以前这里只认 `configs['url']`，这类 key 被当成 URL 丢给 dio，rhttp 直接
+/// `builder error for url (...)`：封面一片空白，阅读页整屏都是「重试」。
 typedef _ByteLoader = Future<Uint8List> Function(CancelToken token);
 
 abstract class ImageDownloader {

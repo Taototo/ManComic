@@ -5,16 +5,13 @@ import 'package:sliver_tools/sliver_tools.dart';
 import 'package:url_launcher/url_launcher_string.dart';
 import 'package:venera/components/components.dart';
 import 'package:venera/components/image_favorites_card.dart';
-import 'package:venera/features/cloud_library/remote_library_engine.dart';
 import 'package:venera/foundation/app.dart';
-import 'package:venera/foundation/comic_source/comic_source.dart';
 import 'package:venera/foundation/consts.dart';
 import 'package:venera/foundation/favorites.dart';
 import 'package:venera/foundation/history.dart';
 import 'package:venera/foundation/home_modules.dart';
 import 'package:venera/foundation/local.dart';
 import 'package:venera/foundation/log.dart';
-import 'package:venera/pages/cloud/cloud_comics_page.dart';
 import 'package:venera/pages/comic_details_page/comic_page.dart';
 import 'package:venera/pages/downloading_page.dart';
 import 'package:venera/pages/follow_updates_page.dart';
@@ -23,7 +20,6 @@ import 'package:venera/pages/history_page.dart';
 import 'package:venera/pages/reader/reader.dart';
 import 'package:venera/pages/image_favorites_page/image_favorites_page.dart';
 import 'package:venera/pages/search_page.dart';
-import 'package:venera/utils/cloud_bootstrap.dart';
 import 'package:venera/utils/data_sync.dart';
 import 'package:venera/utils/import_comic.dart';
 import 'package:venera/utils/translations.dart';
@@ -128,28 +124,6 @@ class _ContinueReadingState extends State<_ContinueReading> {
   void _continueRead() async {
     final item = _item;
     if (item == null) return;
-    final sourceKey = item.type.sourceKey;
-    // 网盘库的源是首帧之后才装配的。冷启动时点得太快，`ComicSource.find`
-    // 会拿到 null，阅读器直接报「comic not found」——用户看到的就是
-    // 「继续阅读打不开网盘里那本」。
-    final cloud =
-        CloudBootstrap.isCloudSourceKey(sourceKey) ||
-        CloudBootstrap.looksLikeCloudComic(item.cover);
-    if (cloud) {
-      await CloudBootstrap.ensureReady();
-    }
-    if (!mounted) return;
-    if (cloud && ComicSource.find(item.type.sourceKey) == null) {
-      // 源还是找不到：多半是库被删了/账号没了。带用户去网盘漫画页重选，
-      // 而不是丢进一个注定失败的阅读器。
-      final library = RemoteComicLibraryRegistry.findBySourceKey(sourceKey);
-      if (library != null) {
-        context.to(() => CloudComicsPage(library: library));
-      } else {
-        App.rootContext.showMessage(message: '这本漫画所在的网盘库已不可用'.tl);
-      }
-      return;
-    }
     context.to(
       () => ReaderWithLoading(
         id: item.id,

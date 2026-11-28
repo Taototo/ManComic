@@ -2,7 +2,7 @@ name: venera
 description: "A comic app."
 publish_to: 'none'
 
-version: 1.5.21+371
+version: 1.5.22+372
 
 environment:
   sdk: '>=3.8.0 <4.0.0'
@@ -89,12 +89,6 @@ dependencies:
   workmanager: ^0.9.0+3
   http_parser: ^4.1.2
   liquid_glass_widgets: ^1.17.0
-  archive: ^4.6.0
-  image: ^4.12.0
-  ffi: ^2.2.0
-  pdfrx: ^2.4.7
-  pdfium_dart: ^0.2.5
-  xml: ^6.6.1
 
 dev_dependencies:
   flutter_test:
@@ -120,7 +114,3 @@ flutter:
 dependency_overrides:
   liquid_glass_widgets:
     path: third_party/liquid_glass_widgets
-  # pdfrx 2.4.7 钉的 pdfrx_engine 0.4.5 在 Dart 3.13 的提升分析下报空安全
-  # 错误（pdf_file_cache.dart 的 cache 可空却直接取属性）；0.4.7 修了它，
-  # 且仍在 pdfrx 的 ^0.4.5 兼容范围内。
-  pdfrx_engine: 0.4.7

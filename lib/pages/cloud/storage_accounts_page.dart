@@ -20,7 +20,7 @@ String _providerLabel(String driver) => switch (driver) {
   _ => driver,
 };
 
-/// 账号对应的显示名（夸克 / WebDAV），供备份、库列表等页面复用。
+/// 账号对应的显示名（夸克 / WebDAV），供数据同步相关页面复用。
 String storageProviderLabel(StorageAccount? account) {
   if (account == null) return '账号不可用';
   if (account.backend == StorageBackend.webdav) return 'WebDAV';
@@ -127,32 +127,14 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
   bool _busy = false;
 
   String _usage(StorageAccount account) {
-    final libraries = widget.accounts.libraries
-        .where((library) => library.accountId == account.id)
-        .length;
-    final savedBackups = switch (appdata.settings[backupDestinationsSetting]) {
-      final List items =>
-        items
-            .where((item) => item is Map && item['accountId'] == account.id)
-            .length,
-      _ => 0,
-    };
-    final activeBackup =
-        appdata.settings['backupRemoteLocation'] is Map &&
-        appdata.settings['backupRemoteLocation']['accountId'] == account.id;
     final quarkSyncAccount = appdata.implicitData[quarkSyncAccountKey];
     final uses = <String>[
-      if (libraries > 0) '$libraries 个漫画库',
       if (appdata.settings['syncRemoteLocation'] is Map &&
           appdata.settings['syncRemoteLocation']['accountId'] == account.id)
         '应用数据同步',
       if (resolveSyncProvider() == syncProviderQuark &&
           quarkSyncAccount == account.id)
         '应用数据同步',
-      if (savedBackups > 0)
-        activeBackup ? '漫画备份（当前）' : '漫画备份（$savedBackups 个位置）'
-      else if (activeBackup)
-        '漫画备份',
     ];
     return uses.isEmpty ? '未使用' : uses.join(' · ');
   }
@@ -252,9 +234,7 @@ class _StorageAccountsPageState extends State<StorageAccountsPage> {
         title: Text('此账号用于'),
         children: [
           for (final (value, label) in [
-            (StorageAccountPurpose.library, '在线漫画库'),
             (StorageAccountPurpose.sync, '应用数据同步'),
-            (StorageAccountPurpose.archive, '漫画备份'),
           ])
             SimpleDialogOption(
               onPressed: () => Navigator.pop(context, value),
